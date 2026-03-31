@@ -41,16 +41,52 @@ Full code review of Phases 1 and 2 identified 17 issues. All fixed:
 
 **Other fixes:** Dashboard COUNT query, pagination on all list endpoints (limit/offset), LIKE wildcard escaping, broken test assertion, missing timestamps on BackgroundTask/AgentPermission, per-conversation SSE filtering, approval polling timeout (5min default), `datetime.utcnow()` deprecation, asyncio lock per conversation.
 
+## Phase 3: Frontend Foundation — COMPLETE
+
+All 7 tasks done. Full frontend built: design system, app shell, dashboard, space view with kanban, conversation panel with streaming, agent management with permissions.
+
+**Task 3.1:** Design system (3 palettes × 2 themes via CSS variables, Tailwind v4 `@theme inline`), 6 UI components (Button, Input, Badge, Card, Modal, Panel), app shell (collapsible sidebar, Odin bar at bottom, React Router), API client (openapi-fetch + openapi-react-query + generated types), SSE connection manager with auto-reconnect, Zustand stores with localStorage persistence.
+
+**Task 3.2:** Home dashboard — attention items, active agents, space list with create-space modal (4 templates), cross-space todo list with checkbox toggle, conversation list. First-run welcome card.
+
+**Task 3.3:** Space view — 3-column collapsible layout (todos / kanban board / conversations). Kanban drag-drop with @dnd-kit. Board item detail slide-over panel. Create item and new conversation modals.
+
+**Task 3.4:** Conversation panel — block-style messages (Claude.ai style), streaming tokens via SSE, tool call collapsible accordions, inline approval request UI, model selector, conversation close.
+
+**Task 3.5:** Agent management — agent list with CRUD, create/edit modal (name, description, system prompt, model), delete confirmation, permission matrix (resource × operation grid with grant level dropdowns).
+
+**Task 3.6:** Playwright tests — 39/39 pass. App shell, navigation, theme/palette toggle with persistence, dashboard sections, create space modal, agent CRUD modal, Odin bar expand/collapse.
+
+**Task 3.7:** Pending — full frontend↔backend↔SSE integration. Blocked on starting the correct OpenLoop backend (old dispatch app was running on port 8000 during testing).
+
+**Deviations from plan:**
+- User chose all 3 color palettes (Slate+Cyan default, Warm Stone+Amber, Neutral+Indigo) with a Settings toggle instead of picking one.
+- Odin bar moved to bottom of screen (user preference) instead of fixed top.
+- `frontend-design` and `webapp-testing` skills used by subagents as specified in plan.
+- 4 page agents ran in parallel (3.2–3.5), then 3 code review agents ran in parallel to catch issues.
+
+**Code review fixes applied:**
+1. SSE subscribe race condition — switched to Zustand updater pattern
+2. Conversation panel render-phase state update — moved to useEffect
+3. Panel missing focus trap — added matching Modal's implementation
+4. Conversation sidebar — wired to open ConversationPanel on click
+5. API data access — removed incorrect `.data` unwrap in 8 components (API returns arrays/objects directly, not wrapped)
+6. Odin bar — wired to send messages via POST /api/v1/odin/message with SSE streaming
+
+**Known gap from Phase 2:** `PATCH /api/v1/agents/permission-requests/{id}` endpoint doesn't exist. Frontend approval UI is built but the backend endpoint for responding to approval requests needs to be added. The permission enforcer polls the DB — the endpoint just needs to update the row's status field.
+
 ## Current State
 
-- **498 tests passing**, lint clean
-- **90 source files**
+- **498 backend tests passing**, lint clean
+- **39 frontend Playwright tests passing**
+- **~130 source files** (90 backend + ~40 frontend)
 - Backend fully functional: CRUD for all entities, agent session management, SSE streaming, permission enforcement, Odin front door
-- Frontend not started
+- Frontend fully built: dashboard, space view, conversation panel, agent management, design system with 3 palettes
+- Integration check (3.7) pending
 
-## Phases 3–7: Not Started
+## Phases 4–7: Not Started
 
-See IMPLEMENTATION-PLAN.md for full breakdown. Phase 3 (Frontend Foundation) is next.
+See IMPLEMENTATION-PLAN.md for full breakdown. Phase 4 (Records, Table View, Documents, Search) is next. Phases 4, 5, 6 can overlap.
 
 ---
 

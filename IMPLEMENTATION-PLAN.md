@@ -577,6 +577,150 @@ Playwright tests:
 
 ---
 
+## Phase 3b: Memory Architecture + Context Safety
+
+**Goal:** Upgrade memory system to four tiers (semantic, episodic, working, procedural). Add write-time dedup, temporal fact management, scored retrieval, context safety mechanisms. All backend — no frontend changes.
+**Depends on:** Phase 2 (session manager, MCP tools, context assembler) and Phase 3 (complete).
+**Rationale:** Memory infrastructure is foundational. Agents using better memory tools from Phase 4 onward means higher quality from day one. These are all modifications to existing Phase 2 backend code.
+
+### Task 3b.1: Schema Migration
+**Agent:** 1 agent
+**Complexity:** Small
+
+- Add columns to `memory_entries`: `importance` (float, default 0.5), `access_count` (int, default 0), `last_accessed` (datetime, nullable), `valid_from` (datetime, default created_at), `valid_until` (datetime, nullable), `archived_at` (datetime, nullable), `category` (string, nullable)
+- Add columns to `conversation_summaries`: `is_meta_summary` (boolean, default false), `consolidated_into` (FK → conversation_summaries, nullable)
+- Create `behavioral_rules` table: id, agent_id (FK), rule (text), source_conversation_id (FK, nullable), confidence (float, default 0.5), apply_count (int, default 0), last_applied (datetime, nullable), is_active (boolean, default true), created_at, updated_at
+- Add columns to `background_tasks`: `current_step` (int, nullable), `total_steps` (int, nullable), `step_results` (JSON, nullable), `parent_task_id` (FK → background_tasks, nullable)
+- Alembic migration
+- Update ORM models in `models.py`
+- Update affected Pydantic schemas
+
+**Acceptance criteria:** Migration runs cleanly. All new columns/tables exist. Existing data is preserved. ORM models reflect new schema.
+
+**Architecture doc reference:** Data Model (memory_entries, conversation_summaries, behavioral_rules, background_tasks schemas)
+
+### Task 3b.2: Enhanced Memory Service + Write-Time Dedup
+**Agent:** 1 agent
+**Complexity:** Large
+**Depends on:** 3b.1
+
+Rewrite `memory_service.py` to support the new memory architecture:
+
+- `save_fact_with_dedup(db, namespace, content, importance?, category?, source?)` — the core write path:
+  1. Load all active (non-archived, valid_until IS NULL) facts in the namespace
+  2. Call LLM to compare new fact against existing facts → decide ADD/UPDATE/DELETE/NOOP
+  3. ADD: create new entry with valid_from=now
+  4. UPDATE: modify existing entry's value, update updated_at
+  5. DELETE (supersession): set valid_until=now on old fact, create new fact with valid_from=now
+  6. NOOP: return existing entry unchanged
+  7. If namespace is at cap (50 space, 20 agent): archive lowest-scored active entry before adding
+- Scoring function: `score = importance × e^(-λ × days_since_access) × (1 + access_count × 0.2)` where `λ = 0.16 × (1 - importance × 0.8)`
+- `get_scored_entries(db, namespace, limit?)` — returns active entries ranked by score
+- `archive_entry(db, entry_id)` — sets archived_at, excludes from future assembly and dedup
+- Update `list_entries()` to exclude archived by default, add `include_archived` parameter
+- Keep backward-compatible `upsert_entry()` for non-agent callers (seed script, API routes)
+
+New service modules:
+- `behavioral_rule_service.py` — CRUD, confidence update (increase/decrease), apply tracking (increment apply_count, set last_applied), auto-demotion (is_active=false when confidence < 0.3 after 10+ sessions), list active rules ranked by confidence
+**Acceptance criteria:** Write-time dedup correctly identifies ADD/UPDATE/DELETE/NOOP. Temporal supersession preserves old fact with valid_until. Cap enforcement archives lowest-scored entry. Scoring formula returns correct rankings. Behavioral rules track confidence correctly. All existing memory service tests still pass.
+
+**Architecture doc reference:** Context Pruning and Memory Lifecycle Strategy (Tier 1: Semantic Memory), Flow 7 (Write-Time Fact Management)
+
+### Task 3b.3: Enhanced MCP Tools
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 3b.2
+**Can run in parallel with 3b.4**
+
+Replace existing memory MCP tools in `mcp_tools.py`:
+- Remove: `read_memory`, `write_memory`
+- Add: `save_fact(content, importance?, category?)` — calls `save_fact_with_dedup()`, returns the dedup decision and resulting entry
+- Add: `update_fact(fact_id, new_content)` — explicit update of a known fact
+- Add: `recall_facts(query?, namespace?, category?, date_range?)` — scored retrieval, returns facts with scores. Omit namespace for cross-namespace search.
+- Add: `delete_fact(fact_id, reason)` — marks as superseded (sets valid_until=now)
+- Add: `save_rule(rule, source_context?)` — creates behavioral_rule with confidence 0.5
+- Add: `list_rules(agent_id?)` — returns active rules for the agent
+Update agent system prompts (in context assembler or agent configs) with instructions to:
+- Use `save_fact` proactively when learning important information
+- Use `save_rule` when the user corrects behavior and says to remember it
+
+**Acceptance criteria:** All new tools callable and produce correct results. Old read_memory/write_memory removed. Agent system prompts include memory management instructions. Error handling (try/except, db rollback, is_error on failure) follows existing patterns.
+
+**Architecture doc reference:** MCP Tools section (Memory operations, Behavioral rule operations)
+
+### Task 3b.4: Context Assembler Upgrade
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 3b.2
+**Can run in parallel with 3b.3**
+
+Rewrite `context_assembler.py` to implement attention-optimized ordering and scored retrieval:
+
+- **Ordering change** (beginning/middle/end):
+  - BEGINNING (high attention): Agent identity + role prompt (~1500 tokens), procedural rules from behavioral_rules (~500 tokens), tool documentation (~1000 tokens)
+  - MIDDLE (lower attention): Conversation summaries — meta-summary first if exists, then recent unconsolidated (~2000 tokens), space facts via `get_scored_entries()` (~1000 tokens), global facts via `get_scored_entries()` (~500 tokens)
+  - END (high attention): Board/to-do state (~1500 tokens)
+
+- **Scored retrieval**: Use `get_scored_entries()` from memory service instead of `list_entries()`. Update `access_count` and `last_accessed` on every fact retrieved during assembly.
+
+- **Procedural memory injection**: Load active behavioral_rules for the agent, sorted by confidence descending. Format as a "Behavioral Rules" section within the system prompt area. Update `apply_count` and `last_applied` on each rule injected.
+
+- **Meta-summary handling**: If a meta-summary exists for the space (is_meta_summary=true, consolidated_into IS NULL), load it first in the summaries section. Then load unconsolidated individual summaries (consolidated_into IS NULL, is_meta_summary=false) most recent first.
+
+- **Odin mode**: Same changes but cross-space. Load Odin's own behavioral rules. Global facts scored. Cross-space summary.
+
+**Acceptance criteria:** Context output follows beginning/middle/end ordering. Facts are scored and ranked correctly. Behavioral rules appear in system prompt section. Access tracking updates on retrieval. Meta-summaries load correctly. Total budget stays within ~8000 tokens.
+
+**Architecture doc reference:** Layer 6: Context Assembler (Detail), Context Pruning and Memory Lifecycle Strategy (Overall Context Budget)
+
+### Task 3b.5: Session Manager Context Safety
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 3b.3 (needs enhanced memory tools for flush)
+
+Add three safety mechanisms to `session_manager.py`:
+
+1. **`flush_memory(conversation_id)`** — mandatory pre-compaction step:
+   - Inject instruction to the agent: "Review this conversation for any important facts, decisions, or user preferences that haven't been saved to memory yet. Save them now using your memory tools."
+   - Agent processes the instruction, calls save_fact/save_rule as needed
+   - Return — normal flow continues
+   - Wire into `close_session()`: call flush_memory() BEFORE generating the final summary
+   - Wire into `monitor_context_usage()`: call flush_memory() BEFORE creating a checkpoint summary
+
+2. **Proactive budget enforcement in `send_message()`**:
+   - Before each `query()` call, estimate total context size (system prompt + assembled context + conversation history + pending message)
+   - Use `estimate_tokens()` utility (already exists, 4 chars ≈ 1 token)
+   - If >70% of context window (200K × 0.7 = 140K tokens): trigger compression before the LLM call
+   - Compression: call flush_memory() first, then apply observation masking (below)
+
+3. **Observation masking** — compression strategy:
+   - Keep the most recent 2-3 complete exchanges (user message + agent response) verbatim
+   - Summarize older exchanges into a compact block (use the agent or a lightweight summary call)
+   - Cut at turn boundaries only — never split a tool-call sequence
+   - Store the compressed summary as a checkpoint in conversation_summaries
+
+**Acceptance criteria:** flush_memory() runs before every close and every checkpoint. Proactive check triggers compression before LLM call when needed. Observation masking preserves recent turns verbatim. Compression happens at clean turn boundaries. All existing session manager tests still pass.
+
+**Architecture doc reference:** Session Manager operations (flush_memory, send_message proactive check), Flow 5 (updated close flow), Flow 9 (Proactive Budget Enforcement)
+
+### Task 3b.6: Phase 3b Tests
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 3b.3, 3b.4, 3b.5
+
+- **Write-time dedup tests**: save fact → save contradicting fact → verify NOOP/ADD/UPDATE/DELETE decisions. Test temporal supersession (old fact gets valid_until, new fact created).
+- **Cap enforcement tests**: fill namespace to cap → save one more → verify lowest-scored entry archived. Verify archived entries excluded from context assembly but still queryable.
+- **Scoring formula tests**: create facts with varying importance/access/age → verify ranking order matches expected scores.
+- **Context ordering tests**: assemble context → verify identity at top, rules after identity, board state at bottom, facts/summaries in middle.
+- **Procedural memory tests**: save rule → assemble context → verify rule in system prompt section. Test confidence increase/decrease. Test auto-demotion after threshold.
+- **Flush pipeline tests**: start conversation → discuss facts → trigger flush → verify facts saved to memory before summary generated. Test in both close and checkpoint paths.
+- **Proactive budget tests**: create a session with large context → send message → verify compression triggered before LLM call, not after. Verify recent turns kept verbatim.
+- **Backward compatibility**: verify existing API routes for memory still work (they use the service layer, which maintains backward-compatible functions).
+
+**Acceptance criteria:** All tests pass. No regressions in existing Phase 1-2 test suites.
+
+---
+
 ## Phase 4: Records, Table View, Documents, Search
 
 **Goal:** CRM-style capabilities, document management, full-text search.
@@ -624,17 +768,34 @@ Playwright tests:
 - Agent MCP tools: `read_drive_file`, `list_drive_files`, `create_drive_file`
 - Drive document browsing in the space data tab (merged with local documents)
 
-### Task 4.5: FTS5 Search
+### Task 4.5a: FTS5 Search Infrastructure
 **Agent:** 1 agent
 **Complexity:** Medium
 **Can run in parallel with 4.4**
 
-- FTS5 virtual tables for: `conversation_messages`, `conversation_summaries`, `memory_entries`, `documents`
+- FTS5 virtual tables for: `conversation_messages`, `conversation_summaries`, `memory_entries` (active only, exclude archived), `documents`
 - SQLite triggers to keep FTS5 tables in sync on INSERT/UPDATE/DELETE
-- `SearchService` — combined search across all types, results ranked and grouped
+- Memory entries trigger: only index rows where `archived_at IS NULL`; remove from FTS5 index when archived
+- `SearchService` — combined search across all types, results ranked by FTS5 BM25 scoring and grouped by type
 - `GET /api/v1/search?q=...` endpoint
 - Global search UI (search icon in header → search modal with results grouped by type: conversations, documents, memory, items)
-- `search_conversations` MCP tool backed by FTS5
+
+### Task 4.5b: Cross-Space Search Tools
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 4.5a
+**Can run in parallel with 4.4**
+
+Upgrade MCP search tools to use FTS5 and support cross-space search:
+- `search_conversations` — `space_id` becomes optional. Omit for cross-space search. Backed by FTS5 instead of LIKE. Results include BM25 relevance score.
+- `search_summaries(query, space_id?)` — new tool. FTS5 search on conversation_summaries.summary. Cross-space capable.
+- `recall_facts` — upgrade from LIKE to FTS5 on memory_entries.value. Returns scored results.
+- **Permission scoping**: cross-space results filtered by agent's `agent_spaces` join table. Odin sees all spaces.
+- API endpoint: `GET /api/v1/search?q=...&space_id=...` supports optional space_id for cross-space.
+
+**Acceptance criteria:** All search tools return FTS5-ranked results. Cross-space search respects agent permissions. Odin can search all spaces. Archived memory entries excluded from search results.
+
+**Architecture doc reference:** Context Pruning and Memory Lifecycle Strategy (On-Demand Search section), MCP Tools (Context operations)
 
 ### Task 4.6: Phase 4 Tests
 **Agent:** 1 agent
@@ -645,6 +806,9 @@ Playwright tests:
 - Document indexing + search tests
 - Drive integration tests (mock Google API)
 - FTS5 search accuracy tests (search across types, verify ranking)
+- Cross-space search tests (verify permission scoping, verify Odin sees all spaces)
+- search_summaries tool tests (FTS5 on summary content, cross-space)
+- Verify archived memory entries excluded from FTS5 index
 
 ---
 
@@ -663,7 +827,7 @@ Playwright tests:
 - Integration with Odin: Odin detects agent creation requests ("I need an agent for...") and calls `open_conversation` to route to the Agent Builder
 - The Agent Builder registers the new agent in the DB and confirms to the user
 
-### Task 5.2: Sub-agent Delegation
+### Task 5.2a: Sub-agent Delegation + Workflow Tracking
 **Agent:** 1 agent
 **Complexity:** Large
 **Can run in parallel with 5.1**
@@ -673,7 +837,39 @@ Playwright tests:
 - Sub-agent gets context from: space context + parent conversation summary + delegation instruction
 - Results flow back: sub-agent writes to memory/documents/items, background_task record updated
 - Notification sent when sub-agent completes or fails
-- UI: background task visible in active agents panel (Home dashboard), expandable activity log via SSE
+- **Step tracking**: update `delegate_background()` to track `current_step`/`total_steps`/`step_results` on the background_task record. Agent updates step progress via a new `update_task_progress(step, summary)` MCP tool.
+- **Parent-child linking**: when a sub-agent delegates further, link via `parent_task_id`. Query all tasks for a parent to show hierarchy.
+- **Task audit**: detect stale tasks (queued >10min), stuck tasks (running >30min). Surface as notifications. Run check every 60 seconds (can share the automation scheduler's loop).
+
+**Acceptance criteria:** delegate_task creates background task, sub-agent executes, results flow back. Step tracking shows progress. Parent-child hierarchy queryable. Stale/stuck detection creates notifications.
+
+### Task 5.2b: Mid-Task Steering
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 5.2a
+
+- `steer(conversation_id, message)` operation on SessionManager:
+  - Add message to conversation's steering queue (max 10 pending messages)
+  - At next tool-call boundary: current tool completes, remaining queued tools skipped, steering message injected as next user turn
+  - Works for both interactive and background sessions
+- `POST /api/v1/conversations/{id}/steer` API endpoint
+- SSE event: `steering_received` confirms message was queued
+
+**Acceptance criteria:** Steering message queued during tool execution. Agent receives message after current tool completes. Remaining tools in batch skipped. Agent adjusts course based on steering message. Works for both foreground and background sessions.
+
+### Task 5.2c: Delegation UI
+**Agent:** 1 agent using `frontend-design` skill
+**Complexity:** Medium
+**Depends on:** 5.2a, 5.2b
+
+- Background task panel in Home dashboard active agents section:
+  - Step progress display: "Step 3/5: Analyzing competitor C" with step history
+  - Parent-child hierarchy view for tasks with sub-agents
+  - **Steering message input**: text input on active background tasks to send steering messages
+  - Task status indicators: running, completed, failed, stale, stuck
+- Expandable activity log via SSE (existing pattern from Phase 3, enhanced with step markers)
+
+**Acceptance criteria:** Step progress renders correctly. Steering input sends message and agent responds. Parent-child tasks show hierarchy. Stale/stuck tasks show warning indicators.
 
 ### Task 5.3: Phase 5 Tests
 **Agent:** 1 agent
@@ -682,6 +878,10 @@ Playwright tests:
 - Agent Builder end-to-end: create an agent through conversation, verify it appears in agent list and is usable
 - Sub-agent delegation: delegate task from conversation, verify background task created, results written, notification sent
 - Permission isolation: sub-agent respects its own permission matrix, not parent's
+- Step tracking: delegate multi-step task, verify step progress updates, verify step_results recorded
+- Steering: delegate task → send steering message → verify agent receives and adjusts
+- Workflow hierarchy: parent delegates to sub-agent → verify parent-child link → verify hierarchy in UI
+- Stale/stuck detection: create task, don't complete it → verify notification after threshold
 
 ---
 
@@ -737,14 +937,37 @@ Each template includes: the automation config, the agent system prompt, and the 
 
 **Goal:** Tie everything together, polish, handle edge cases.
 
-### Task 7.1: Context Pruning Implementation
+### Task 7.1a: Memory Lifecycle Management
 **Agent:** 1 agent
 **Complexity:** Medium
 
-- Per-namespace memory caps (50 per space, 20 per agent) with oldest eviction on overflow
-- Stale entry detection (flag entries not accessed in 90+ days, surface in Settings)
-- Checkpoint pruning: after conversation closes, archive its mid-conversation checkpoints (keep in DB, exclude from context assembly)
-- Board state summarization in context assembly: active items only, updated in last 30 days, summarize counts instead of enumerating
+Phase 3b built the write-time infrastructure (dedup, caps, scoring). This task adds the long-term maintenance layer:
+
+- **Auto-archival of superseded facts**: weekly check archives facts where `valid_until` was set >90 days ago. Background job (can share the automation scheduler's 60-second loop, run archival check once per day).
+- **Auto-demotion of procedural rules**: rules with confidence < 0.3 after `apply_count >= 10` sessions are set to `is_active = false`. Check runs during context assembly (lazy evaluation — no separate job needed).
+- **Periodic LLM-driven fact consolidation**: monthly job (or manual trigger from space settings):
+  1. Load all active facts for a space
+  2. LLM reviews for: related facts that should merge, contradictions, stale entries worth archiving
+  3. Produce a consolidation report: proposed merges, flagged contradictions, suggested archives
+  4. Surface as notification: "Memory review for [Space]: merged 4 entries, found 2 contradictions, suggest removing 3 stale entries. [Review]"
+  5. User approves, adjusts, or dismisses — system never merges/deletes without confirmation
+- **Memory health UI in space settings**: view all facts (active tab + archived tab), view behavioral rules (active + inactive), filter by category, manual archive/delete/merge actions
+- **Checkpoint pruning**: after conversation closes, exclude its mid-conversation checkpoint summaries from context assembly (keep in DB for search)
+
+### Task 7.1b: Summary Consolidation
+**Agent:** 1 agent
+**Complexity:** Medium
+**Can run in parallel with 7.1a**
+
+- **Threshold-triggered meta-summary generation**: when a space has 20+ unconsolidated summaries (where `consolidated_into IS NULL` and `is_meta_summary = false`), generate a meta-summary
+- **Trigger point**: wired into `close_session()` — after storing the new summary, check unconsolidated count. If >= 20, generate meta-summary.
+- **Generation**: LLM reads all unconsolidated summaries chronologically, produces a condensed overview covering: key decisions, outcomes, trajectory, open threads.
+- **Storage**: meta-summary stored as `conversation_summary` with `is_meta_summary = true`. Individual summaries marked with `consolidated_into` pointing to the meta-summary.
+- **Successive consolidation**: when a second round of 20 accumulates, the new meta-summary covers both the old meta-summary and the new individuals. Old meta-summary gets `consolidated_into` pointing to the new one.
+- **Manual trigger**: `POST /api/v1/spaces/{id}/consolidate` endpoint. UI button in space settings: "Consolidate conversation history."
+- **Context assembly integration**: meta-summary loads first in summaries section. Then unconsolidated individuals most-recent-first. (Context assembler already handles this from Phase 3b.4.)
+
+**Acceptance criteria:** Meta-summary generated at threshold. Individual summaries marked as consolidated. Successive consolidation works. Manual trigger works. Context assembly loads meta-summary first.
 
 ### Task 7.2: Backup System
 **Agent:** 1 agent
@@ -778,6 +1001,8 @@ Each template includes: the automation config, the agent system prompt, and the 
 - Keyboard shortcuts (/ to focus Odin, Escape to close panels, n for new to-do, etc.)
 - Notification sounds / browser tab badge for pending approvals
 - Overall visual consistency pass across all pages
+- Timezone-safe date handling in item-detail-panel (use UTC `T00:00:00Z` suffix for due_date fields, normalize date parsing across components)
+- Accessibility pass: add `aria-invalid` and `aria-describedby` to Input component when error prop is present
 
 ### Task 7.5: End-to-End Integration Tests
 **Agent:** 1 agent using `webapp-testing` skill
@@ -794,6 +1019,12 @@ Full workflow Playwright tests:
 - CRM workflow: create record → add custom fields → link to-do → switch to table view → verify display
 - Search: create content across types → global search → verify results grouped correctly
 - Backup: trigger backup → verify file created
+- **Memory lifecycle**: create facts → exceed namespace cap → verify lowest-scored archived → verify archived facts still searchable via tools
+- **Write-time dedup**: save fact → save contradicting fact → verify temporal supersession (old fact gets valid_until, new fact created)
+- **Procedural memory**: correct agent behavior → verify rule saved → open new conversation → verify rule in context and agent follows it
+- **Mid-task steering**: delegate background task → send steering message → verify agent receives and adjusts course
+- **Summary consolidation**: close 20+ conversations in a space → verify meta-summary auto-generated → verify individual summaries marked as consolidated
+- **Cross-space search**: create content in two spaces → search from one space's agent → verify cross-space results respect permissions
 
 ---
 
@@ -805,12 +1036,13 @@ Full workflow Playwright tests:
 | 1 | Full REST API + type generation + SSE contract | 8 | 3 |
 | 2 | Session Manager, Odin, streaming, permissions, logging | 10 | 4 |
 | 3 | Full frontend — dashboard, board, conversations | 7 | 3-4 |
-| 4 | CRM, table view, documents, Drive, search | 6 | 4 |
-| 5 | Agent Builder, sub-agents | 3 | 2 |
+| 3b | Four-tier memory, write-time dedup, temporal facts, context safety, procedural memory | 6 | 2 |
+| 4 | CRM, table view, documents, Drive, search + cross-space FTS5 search | 7 | 4 |
+| 5 | Agent Builder, sub-agents, mid-task steering, workflow tracking | 5 | 2-3 |
 | 6 | Automations + dashboard + templates | 4 | 2 |
-| 7 | Polish, backup, edge cases, integration tests | 5 | 3-4 |
+| 7 | Lifecycle management, summary consolidation, backup, edge cases, integration tests | 6 | 3-4 |
 
-**Total: 48 tasks across 8 phases**
+**Total: 58 tasks across 9 phases**
 
 ---
 
@@ -849,13 +1081,22 @@ Each task should be given to an agent with:
 | 3.3 | — | Space View, Items (to-dos + board items) |
 | 3.4 | — | Agent Interaction, Agents and Conversations |
 | 3.5 | Data Model: agents, agent_permissions | Permissions and Security, Agent Creation |
+| 3b.1 | Data Model: memory_entries, behavioral_rules, background_tasks, conversation_summaries | Memory and Documents, Resolved Decisions 19-27 |
+| 3b.2 | Context Pruning (Tier 1: Semantic Memory), Flow 7 | Memory and Documents (temporal facts, write-time dedup) |
+| 3b.3 | MCP Tools (Memory, Behavioral rule operations) | Memory and Documents (agent-managed memory) |
+| 3b.4 | Layer 6: Context Assembler, Context Budget | Memory and Documents (context ordering, scored retrieval) |
+| 3b.5 | Layer 4: Session Manager (flush_memory, send_message), Flow 5, Flow 9 | Context management (P0 item 8) |
 | 4.1-4.2 | Data Model: items (custom_fields) | Items (Records), Space Views (Table view) |
 | 4.3-4.4 | Layer 7: Data Layer, Data Model: documents, data_sources | Memory and Documents |
-| 4.5 | Layer 7: FTS5 | — |
+| 4.5a | Layer 7: FTS5, FTS5 Virtual Tables | — |
+| 4.5b | Context Pruning (On-Demand Search), MCP Tools (Context operations) | Cross-space search (P1 item 24) |
 | 5.1 | — | Agent Creation (Agent Builder) |
-| 5.2 | Layer 4: delegate_background | Agent Interaction (Sub-agents) |
+| 5.2a | Layer 4: delegate_background, Flow 8 | Agent Interaction (Sub-agents), Background Monitoring |
+| 5.2b | Layer 4: Session Manager (steer), Flow 8 | Agent Interaction (Steering mode), Resolved Decision 26 |
+| 5.2c | — | Background Agent Monitoring |
 | 6.1-6.3 | Data Model: automations, automation_runs | Automations, Proactive System |
-| 7.1 | Context Pruning Strategy | Memory and Documents |
+| 7.1a | Context Pruning (Tier 1 lifecycle, Tier 4 procedural) | Memory and Documents (lifecycle), Resolved Decision 22 |
+| 7.1b | Context Pruning (Tier 2 consolidation) | Memory and Documents (summary consolidation), Resolved Decision 24 |
 | 7.2 | Backup Strategy | — |
 | 7.3-7.4 | Technology Decisions, Layer 4: crash recovery | — |
 | 7.5 | All key flows | All interaction patterns |
@@ -901,12 +1142,22 @@ Phase 3: 3.1 (design system + shell)
               ↓
          3.6 (tests) → 3.7 (merge check)
               ↓
+Phase 3b: 3b.1 (schema migration)
+              ↓
+         3b.2 (memory service + write-time dedup)
+              ↓
+         3b.3 || 3b.4 (MCP tools || context assembler, parallel)
+              ↓
+         3b.5 (session manager context safety, depends on 3b.3)
+              ↓
+         3b.6 (tests)
+              ↓
 Phases 4, 5, 6 can overlap:
-  Phase 4: 4.1 → 4.2, 4.3 || 4.4 || 4.5 → 4.6
-  Phase 5: 5.1 || 5.2 → 5.3
+  Phase 4: 4.1 → 4.2, 4.3 || 4.4 || 4.5a → 4.5b → 4.6
+  Phase 5: 5.1 || 5.2a → 5.2b → 5.2c → 5.3
   Phase 6: 6.1 → 6.2 || 6.3 → 6.4
               ↓
-Phase 7: 7.1 || 7.2 || 7.3 (parallel) → 7.4 → 7.5
+Phase 7: 7.1a || 7.1b || 7.2 || 7.3 (parallel) → 7.4 → 7.5
 ```
 
 With 6 agents, max parallelism per phase:
@@ -914,4 +1165,6 @@ With 6 agents, max parallelism per phase:
 - Phase 1: 3 agents (1.1 || 1.2 || 1.3), then 2 (1.4a || 1.4b)
 - Phase 2: 3 agents (2.1 || 2.2 || 2.7), then 4 (2.3b || 2.4 || 2.5 || 2.6)
 - Phase 3: 4 agents (3.2 || 3.3 || 3.4 || 3.5)
+- Phase 3b: 2 agents (3b.3 || 3b.4), rest sequential
 - Phases 4+5+6 overlap: up to 6 agents across all three phases
+- Phase 7: 4 agents (7.1a || 7.1b || 7.2 || 7.3)

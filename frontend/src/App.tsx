@@ -1,16 +1,21 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { AppShell } from './components/layout/app-shell';
+import Home from './pages/Home';
+import Space from './pages/Space';
+import Settings from './pages/Settings';
+import Agents from './pages/Agents';
 
-const queryClient = new QueryClient()
-
-function App() {
+export default function App() {
   return (
-    <QueryClientProvider client={queryClient}>
-      <div>
-        <h1>OpenLoop</h1>
-        <p>App shell placeholder</p>
-      </div>
-    </QueryClientProvider>
-  )
+    <BrowserRouter>
+      <Routes>
+        <Route element={<AppShell />}>
+          <Route index element={<Home />} />
+          <Route path="/space/:spaceId" element={<Space />} />
+          <Route path="/settings" element={<Settings />} />
+          <Route path="/agents" element={<Agents />} />
+        </Route>
+      </Routes>
+    </BrowserRouter>
+  );
 }
-
-export default App

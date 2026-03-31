@@ -1,0 +1,91 @@
+import { NavLink } from 'react-router-dom';
+import { useUIStore } from '../../stores/ui-store';
+import { $api } from '../../api/hooks';
+
+export function Sidebar() {
+  const collapsed = useUIStore((s) => s.sidebarCollapsed);
+  const toggle = useUIStore((s) => s.toggleSidebar);
+  const { data } = $api.useQuery('get', '/api/v1/spaces', { params: { query: { limit: 50 } } });
+
+  if (collapsed) {
+    return (
+      <aside className="w-12 h-full bg-surface border-r border-border flex flex-col items-center py-3 shrink-0">
+        <button
+          onClick={toggle}
+          className="p-2 rounded-md text-muted hover:text-foreground hover:bg-raised transition-colors cursor-pointer"
+          aria-label="Open sidebar"
+        >
+          &#9776;
+        </button>
+      </aside>
+    );
+  }
+
+  const spaces = data ?? [];
+
+  return (
+    <aside className="w-60 h-full bg-surface border-r border-border flex flex-col shrink-0">
+      <div className="px-4 py-3 flex items-center justify-between border-b border-border">
+        <span className="text-sm font-bold text-foreground tracking-wide">OpenLoop</span>
+        <button
+          onClick={toggle}
+          className="text-muted hover:text-foreground transition-colors p-1 rounded-md hover:bg-raised cursor-pointer"
+          aria-label="Collapse sidebar"
+        >
+          &#x2190;
+        </button>
+      </div>
+
+      <nav className="flex-1 overflow-auto py-2 px-2">
+        <NavLink
+          to="/"
+          end
+          className={({ isActive }) =>
+            `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-foreground hover:bg-raised'}`
+          }
+        >
+          Home
+        </NavLink>
+
+        <div className="mt-4 mb-1 px-3 text-[11px] font-semibold text-muted uppercase tracking-wider">
+          Spaces
+        </div>
+
+        {spaces.length === 0 && (
+          <div className="px-3 py-2 text-sm text-muted italic">No spaces yet</div>
+        )}
+
+        {spaces.map((space) => (
+          <NavLink
+            key={space.id}
+            to={`/space/${space.id}`}
+            className={({ isActive }) =>
+              `flex items-center justify-between px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-foreground hover:bg-raised'}`
+            }
+          >
+            <span className="truncate">{space.name}</span>
+          </NavLink>
+        ))}
+      </nav>
+
+      <div className="border-t border-border p-2">
+        <NavLink
+          to="/agents"
+          className={({ isActive }) =>
+            `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-muted hover:bg-raised hover:text-foreground'}`
+          }
+        >
+          Agents
+        </NavLink>
+        <NavLink
+          to="/settings"
+          className={({ isActive }) =>
+            `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-muted hover:bg-raised hover:text-foreground'}`
+          }
+        >
+          Settings
+        </NavLink>
+      </div>
+    </aside>
+  );
+}

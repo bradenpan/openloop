@@ -45,8 +45,9 @@ OpenLoop is a coordination layer between a human, a web UI, and multiple Claude 
 │                       │                                 │
 │  ┌────────────────────▼──────────────────────────────┐  │
 │  │           Context Assembler                        │  │
-│  │  Builds prompt context from memory tiers,          │  │
-│  │  manages token budget, ranks relevance             │  │
+│  │  Builds prompt context from four memory tiers,     │  │
+│  │  scores by importance/recency/access, manages     │  │
+│  │  token budget, orders for attention optimization   │  │
 │  └───────────────────────────────────────────────────┘  │
 │                                                         │
 │  ┌───────────────────────────────────────────────────┐  │
@@ -258,37 +259,82 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 │  │                                              │
 │  ├── send_message()                             │
 │  │   1. Look up active session                  │
-│  │   2. Call SDK query(resume=session_id)        │
-│  │   3. Stream response chunks to SSE           │
-│  │   4. Process tool calls through Permission   │
+│  │   2. PROACTIVE BUDGET CHECK: estimate total  │
+│  │      context (system prompt + memory +        │
+│  │      history + pending message). If >70%:    │
+│  │      a. Run flush_memory() first             │
+│  │      b. Compress older turns (observation    │
+│  │         masking: keep recent 2-3 exchanges   │
+│  │         verbatim, summarize the rest)         │
+│  │      c. Compress at turn boundaries only —   │
+│  │         never split tool-call sequences      │
+│  │   3. Call SDK query(resume=session_id)        │
+│  │   4. Stream response chunks to SSE           │
+│  │   5. Process tool calls through Permission   │
 │  │      Enforcer                                │
-│  │   5. Store message + response in DB          │
+│  │   6. Check steering queue — if messages       │
+│  │      pending, process after current turn      │
+│  │   7. Store message + response in DB          │
 │  │                                              │
 │  ├── close_session()                            │
-│  │   1. Send "summarize this conversation" msg  │
-│  │   2. Store summary as conversation summary   │
-│  │   3. Terminate SDK session                   │
-│  │   4. Clean up session state                  │
+│  │   1. Run flush_memory() — agent saves any    │
+│  │      unsaved facts to persistent memory      │
+│  │   2. Send "summarize this conversation" msg  │
+│  │   3. Store summary as conversation summary   │
+│  │   4. Check summary consolidation threshold   │
+│  │      (if space has 20+ unconsolidated         │
+│  │      summaries, generate meta-summary)        │
+│  │   5. Terminate SDK session                   │
+│  │   6. Clean up session state                  │
+│  │                                              │
+│  ├── flush_memory()                             │
+│  │   Mandatory pre-compaction safety step.       │
+│  │   1. Inject instruction: "Review this convo  │
+│  │      for important facts, decisions, or       │
+│  │      preferences not yet saved to memory.     │
+│  │      Save them now using your memory tools."  │
+│  │   2. Agent calls save_fact() as needed        │
+│  │   3. Return — normal flow continues           │
+│  │   Called by: close_session() and              │
+│  │   send_message() before compression.          │
+│  │                                              │
+│  ├── steer(conversation_id, message)            │
+│  │   Mid-task course correction.                │
+│  │   1. Add message to conversation's steering  │
+│  │      queue (max 10 pending messages)          │
+│  │   2. At next tool-call boundary:              │
+│  │      a. Current tool completes normally       │
+│  │      b. Remaining queued tools are skipped    │
+│  │      c. Steering message injected as next     │
+│  │         user message                          │
+│  │      d. Agent processes and adjusts course    │
+│  │   Works for both interactive and background   │
+│  │   sessions. Background steering via SSE       │
+│  │   message input on task monitoring panel.     │
 │  │                                              │
 │  ├── delegate_background()                      │
 │  │   1. Start session without SSE streaming     │
 │  │   2. Agent works autonomously                │
 │  │   3. Log activity to DB for monitoring       │
-│  │   4. On completion: write results to task,   │
+│  │   4. Track step progress (current_step,       │
+│  │      total_steps, step_results on task)       │
+│  │   5. On completion: write results to task,   │
 │  │      notify via SSE event                    │
 │  │                                              │
 │  └── monitor_context_usage()                    │
-│      Runs after each agent response.            │
+│      Runs after each agent response as backup.  │
+│      (Primary budget enforcement is proactive   │
+│      in send_message(), this is the safety net.)│
 │      1. Check context window usage from SDK     │
 │         session metadata                        │
 │      2. If usage > 70% of window:               │
-│         a. Ask agent to write a mid-convo       │
-│            summary checkpoint to memory         │
-│         b. Store as conversation_summary with   │
+│         a. Run flush_memory() first              │
+│         b. Create checkpoint summary             │
+│         c. Store as conversation_summary with   │
 │            is_checkpoint=true                   │
-│         c. Conversation continues normally —    │
+│         d. Conversation continues normally —    │
 │            the CLI handles its own compression  │
-│         d. But the checkpoint ensures state is  │
+│         e. But the checkpoint ensures state is  │
 │            captured in the DB before any CLI    │
 │            compression degrades quality         │
 │      3. If usage > 90%: surface a notification  │
@@ -336,8 +382,14 @@ get_item(item_id)
 list_items(space_id?, stage?, type?, limit?)
 
 # Memory operations
-read_memory(namespace?, key?, search?)
-write_memory(namespace, key, value, tags?)
+save_fact(content, importance?, category?)             # write-time dedup: compares against existing, decides ADD/UPDATE/DELETE/NOOP
+update_fact(fact_id, new_content)                      # explicit update of existing fact
+recall_facts(query?, namespace?, category?, date_range?) # scored retrieval (importance x decay x access)
+delete_fact(fact_id, reason)                            # marks as superseded with valid_until timestamp
+
+# Behavioral rule operations
+save_rule(rule, source_context?)                       # creates procedural memory entry with confidence 0.5
+list_rules(agent_id?)                                  # returns active rules for the agent
 
 # Document operations
 read_document(document_id)
@@ -348,7 +400,8 @@ create_document(title, content, space_id, tags?)
 get_board_state(space_id)
 get_todo_state(space_id?)
 get_conversation_summaries(space_id, limit?)
-search_conversations(space_id, query?, date_range?, agent_id?)
+search_conversations(query?, space_id?, date_range?, agent_id?)  # space_id optional — omit for cross-space search
+search_summaries(query, space_id?)                               # FTS5 search on summary content, cross-space capable
 get_conversation_messages(conversation_id, limit?)
 
 # Agent operations (for sub-agent delegation, P1)
@@ -516,7 +569,7 @@ Odin is a system-level agent that runs on Haiku. It is always visible in the UI 
 
 ### Layer 6: Context Assembler (Detail)
 
-Builds the system prompt context injected into new sessions. Manages token budgets so context doesn't overwhelm the conversation.
+Builds the system prompt context injected into new sessions. Manages token budgets so context doesn't overwhelm the conversation. **Content is ordered to exploit the U-shaped attention curve** — models attend strongly to the beginning and end of context, poorly to the middle (Liu et al., "Lost in the Middle", confirmed architecturally by MIT/Google). High-priority content (identity, rules, tools) goes at the beginning; immediately relevant content (board state) goes at the end closest to the user's message; reference material (facts, summaries) goes in the middle.
 
 ```
 ┌───────────────────────────────────────────────┐
@@ -525,41 +578,76 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │  Input: space_id, agent_id, conversation_id   │
 │  Output: assembled context string             │
 │                                               │
-│  Assembly order (by priority):                │
+│  Assembly order (attention-optimized):        │
 │                                               │
-│  1. Agent identity + role prompt (always)     │
-│     "You are the Recruiting Agent for the     │
-│      Recruiting space. Your role is..."       │
-│     Budget: up to 2000 tokens                 │
+│  ┌─ BEGINNING (high model attention) ────────┐│
+│  │                                           ││
+│  │  1. Agent identity + role prompt (always)  ││
+│  │     "You are the Recruiting Agent..."      ││
+│  │     Budget: up to 1500 tokens              ││
+│  │                                           ││
+│  │  2. Procedural memory (behavioral rules)   ││
+│  │     Active rules for this agent, ranked    ││
+│  │     by confidence score. Injected as part  ││
+│  │     of the system prompt — highest priority.││
+│  │     "Always check CRM before drafting      ││
+│  │     follow-up emails." (confidence: 0.9)   ││
+│  │     Budget: up to 500 tokens               ││
+│  │                                           ││
+│  │  3. Available tools documentation          ││
+│  │     MCP tools the agent can use            ││
+│  │     Budget: up to 1000 tokens              ││
+│  │                                           ││
+│  └───────────────────────────────────────────┘│
 │                                               │
-│  2. To-do + board state (fresh from DB)       │
-│     Open to-dos, current board items, stages, │
-│     upcoming deadlines, recent changes        │
-│     Budget: up to 1500 tokens                 │
+│  ┌─ MIDDLE (lower model attention) ──────────┐│
+│  │                                           ││
+│  │  4. Conversation summaries                 ││
+│  │     Meta-summary first (if exists), then   ││
+│  │     most recent unconsolidated summaries.  ││
+│  │     Budget: up to 2000 tokens              ││
+│  │                                           ││
+│  │  5. Space facts (scored retrieval)         ││
+│  │     Active facts in space namespace,       ││
+│  │     ranked by:                             ││
+│  │       score = importance                   ││
+│  │             × e^(-λ × days_since_access)   ││
+│  │             × (1 + access_count × 0.2)     ││
+│  │     where λ = 0.16 × (1 - importance×0.8) ││
+│  │     Higher importance = slower decay.       ││
+│  │     Budget: up to 1000 tokens              ││
+│  │                                           ││
+│  │  6. Global facts (scored retrieval)        ││
+│  │     System-wide knowledge entries,         ││
+│  │     same scoring formula.                  ││
+│  │     Budget: up to 500 tokens               ││
+│  │                                           ││
+│  └───────────────────────────────────────────┘│
 │                                               │
-│  3. Conversation summaries (recent first)     │
-│     Summaries from closed conversations in    │
-│     this space, most recent first             │
-│     Budget: up to 2000 tokens                 │
-│                                               │
-│  4. Space facts (from memory)                 │
-│     Key-value entries in space namespace      │
-│     Budget: up to 1000 tokens                 │
-│                                               │
-│  5. Global facts (from memory)                │
-│     System-wide knowledge entries             │
-│     Budget: up to 500 tokens                  │
-│                                               │
-│  6. Available tools documentation             │
-│     MCP tools the agent can use               │
-│     Budget: up to 1000 tokens                 │
+│  ┌─ END (high model attention) ──────────────┐│
+│  │                                           ││
+│  │  7. To-do + board state (fresh from DB)    ││
+│  │     Open to-dos, current board items,      ││
+│  │     stages, upcoming deadlines, recent     ││
+│  │     changes. Closest to user's message     ││
+│  │     for maximum relevance.                 ││
+│  │     Budget: up to 1500 tokens              ││
+│  │                                           ││
+│  └───────────────────────────────────────────┘│
 │                                               │
 │  Total budget: ~8000 tokens                   │
 │  (leaves room for user message + response)    │
 │                                               │
-│  Overflow handling: truncate oldest entries    │
-│  within each tier. Never truncate agent       │
-│  identity or tool documentation.              │
+│  Scoring fields on memory_entries:            │
+│  - importance (float, 0.0-1.0, default 0.5)  │
+│  - access_count (int, incremented on retrieval)│
+│  - last_accessed (datetime, updated on use)   │
+│  Updated automatically during assembly.       │
+│                                               │
+│  Overflow handling: within each tier, lowest- │
+│  scored entries are dropped first. Never      │
+│  truncate agent identity, procedural rules,   │
+│  or tool documentation.                       │
 └───────────────────────────────────────────────┘
 ```
 
@@ -699,6 +787,8 @@ conversation_summaries
 ├── decisions (JSON array)
 ├── open_questions (JSON array)
 ├── is_checkpoint (boolean, default false)
+├── is_meta_summary (boolean, default false — true for consolidated meta-summaries)
+├── consolidated_into (FK → conversation_summaries, nullable — points to meta-summary that absorbed this entry)
 ├── created_at
 
 memory_entries
@@ -707,6 +797,13 @@ memory_entries
 ├── key (string)
 ├── value (text)
 ├── tags (JSON array)
+├── category (string, nullable — for filtering, e.g., "architecture", "preference", "contact")
+├── importance (float, default 0.5 — 0.0 to 1.0, set by agent on save)
+├── access_count (integer, default 0 — incremented each time retrieved during context assembly)
+├── last_accessed (datetime, nullable — updated each time retrieved during context assembly)
+├── valid_from (datetime, default created_at — when this fact became true)
+├── valid_until (datetime, nullable — null means "still true"; set when superseded)
+├── archived_at (datetime, nullable — null means active; set when evicted by cap or auto-archival)
 ├── source (string — "user" | "agent:{name}" | "odin" | "system")
 ├── created_at
 └── updated_at
@@ -788,12 +885,40 @@ background_tasks
 ├── agent_id (FK → agents)
 ├── space_id (FK → spaces, nullable — null for cross-space automations)
 ├── item_id (FK → items, nullable)
+├── parent_task_id (FK → background_tasks, nullable — for sub-task hierarchies)
 ├── instruction (text)
 ├── status ("running" | "completed" | "failed" | "cancelled")
+├── current_step (integer, nullable — for multi-step tracking)
+├── total_steps (integer, nullable)
+├── step_results (JSON array, nullable — [{step, status, summary}] for completed steps)
 ├── result_summary (text, nullable)
 ├── started_at
 ├── completed_at (nullable)
 └── error (text, nullable)
+
+behavioral_rules (procedural memory — learned from user corrections)
+├── id (UUID, PK)
+├── agent_id (FK → agents, indexed)
+├── rule (text — the behavioral instruction, e.g., "Always check CRM before drafting follow-ups")
+├── source_conversation_id (FK → conversations, nullable — where this rule was learned)
+├── confidence (float, default 0.5 — increases on confirmation, decreases on override)
+├── apply_count (integer, default 0 — how many times injected into context)
+├── last_applied (datetime, nullable — last time injected into a session)
+├── is_active (boolean, default true — false when demoted due to low confidence/usage)
+├── created_at
+└── updated_at
+
+```
+
+### FTS5 Virtual Tables (P1)
+
+Full-text search indexes for agent search tools. Kept in sync via SQLite triggers on INSERT/UPDATE/DELETE of the shadowed tables.
+
+```
+memory_entries_fts    — shadows memory_entries.value (only active, non-archived entries)
+messages_fts          — shadows conversation_messages.content
+summaries_fts         — shadows conversation_summaries.summary
+documents_fts         — shadows documents.title (extend to content when document indexing is built)
 ```
 
 ### Relationships
@@ -823,7 +948,7 @@ Agent ──N:N──> Spaces (via agent_spaces)
 Agent ──1:N──> Agent Permissions
 Agent ──1:N──> Conversations
 Agent ──1:N──> Background Tasks
-
+Agent ──1:N──> Behavioral Rules
 Document ──N:1──> Space
 Document ──N:N──> Items (via document_items)
 
@@ -832,7 +957,14 @@ Automation ──N:1──> Agent
 Automation ──1:N──> Automation Runs
 Automation Run ──N:1──> Background Task (nullable)
 
-Memory Entry: standalone, keyed by (namespace, key)
+Background Task ──N:1──> Background Task (parent, nullable — for sub-task hierarchies)
+
+Behavioral Rule ──N:1──> Agent
+Behavioral Rule ──N:1──> Conversation (source, nullable)
+
+Conversation Summary ──N:1──> Conversation Summary (consolidated_into, nullable)
+
+Memory Entry: standalone, keyed by (namespace, key). Temporal: valid_from/valid_until track when facts were true.
 Notification: standalone, optionally linked to space/conversation
 ```
 
@@ -976,10 +1108,14 @@ Frontend: POST /api/v1/conversations/{id}/close
   ▼
 Backend: ConversationService.close()
   → SessionManager.close_session()
-    → Sends final message to agent: "Summarize this conversation: key decisions, outcomes, open questions"
+    → flush_memory(): "Save any important unsaved facts to memory now"
+    → Agent calls save_fact() as needed (write-time dedup runs on each)
+    → Sends final message: "Summarize this conversation: key decisions, outcomes, open questions"
     → Agent responds with summary
     → Store summary in conversation_summaries table
     → Store summary text on conversation record
+    → Check consolidation threshold: if space has 20+ unconsolidated summaries,
+      generate meta-summary and mark individual summaries as consolidated
     → Terminate SDK session
     → conversation.status = "closed", conversation.closed_at = now()
   │
@@ -1030,33 +1166,125 @@ User can refine, or accept
   Agent appears in space's agent list, ready to start conversations
 ```
 
+### Flow 7: Write-Time Fact Management
+
+```
+Agent calls save_fact("Bob now owns the hiring budget", importance=0.8)
+  │
+  ▼
+Backend: MemoryService.save_fact_with_dedup()
+  → Load all active facts in same namespace (max 50 due to cap)
+  → LLM comparison: "Given these existing facts, classify this new fact:
+    ADD (new info), UPDATE (modify existing), DELETE (supersedes existing), NOOP (already captured)"
+  │
+  ├── ADD → Create new memory_entry with valid_from=now, valid_until=null
+  │
+  ├── UPDATE → Modify existing entry's value, update updated_at
+  │
+  ├── DELETE → Set valid_until=now on the superseded fact ("Alice owns budget"),
+  │            create new entry ("Bob owns budget") with valid_from=now
+  │
+  └── NOOP → No action, fact already captured
+  │
+  ▼
+If namespace is at cap (50 entries):
+  → Calculate scores for all active entries
+  → Archive lowest-scored entry (set archived_at=now)
+  → Archived entry excluded from future dedup comparisons and context assembly
+  → Still searchable via recall_facts tool
+```
+
+### Flow 8: Mid-Task Steering
+
+```
+User delegates: "Research competitor X's pricing strategy"
+  → Background task created, agent starts working
+  │
+  ▼
+Agent is executing tool calls: WebSearch("competitor X pricing"), Read(file), ...
+  │
+  ▼
+User sees activity log, realizes agent is researching wrong company
+  → User types in background task message input: "Wrong company — I mean X Corp, the SaaS one"
+  │
+  ▼
+Frontend: POST /api/v1/conversations/{id}/steer
+  → Message added to conversation's steering queue
+  │
+  ▼
+At next tool-call boundary (current tool finishes):
+  → Session Manager checks steering queue
+  → Remaining queued tools for this turn are skipped
+  → Steering message injected as next user message
+  │
+  ▼
+Agent receives: "Wrong company — I mean X Corp, the SaaS one"
+  → Adjusts course, continues research with correct target
+  → Partial results from earlier tools are preserved
+```
+
+### Flow 9: Proactive Budget Enforcement (during send_message)
+
+```
+User sends message in a long-running conversation
+  │
+  ▼
+Backend: SessionManager.send_message()
+  → Estimate total context: system_prompt + memory + conversation_history + pending_message
+  │
+  ├── Under 70% of context window → proceed normally with query()
+  │
+  └── Over 70% → compression needed before LLM call:
+      │
+      ▼
+      1. flush_memory(): agent saves unsaved facts to persistent memory
+      2. Observation masking: keep recent 2-3 exchanges verbatim
+      3. Summarize older exchanges (cut at turn boundaries only)
+      4. Store checkpoint summary in conversation_summaries
+      │
+      ▼
+      Proceed with query() using compressed context
+      (user sees no interruption — this is transparent)
+```
+
 ---
 
-## Context Pruning Strategy
+## Context Pruning and Memory Lifecycle Strategy
 
-Context grows over time. Without pruning, agents in a busy space would drown in 5 months of accumulated history. The pruning strategy is layered — each tier of context has its own mechanisms.
+Context grows over time. Without pruning, agents in a busy space would drown in 5 months of accumulated history. The strategy is layered: each tier has its own mechanisms, and a cross-cutting lifecycle management system prevents long-term bloat.
 
-### Tier 1: Facts (memory_entries)
+### Tier 1: Semantic Memory — Facts (memory_entries)
 
-Facts are the highest-signal, most persistent entries. They accumulate slowly — agents only write them when they learn something genuinely reusable.
+Facts are the highest-signal, most persistent entries. Agents actively curate them via `save_fact`, `update_fact`, and `delete_fact` MCP tools.
 
-**Pruning mechanisms:**
-- **Per-namespace cap:** 50 entries per space namespace, 20 per agent namespace. When the cap is hit, oldest entries are evicted.
-- **Key-based overwrite:** Agents can overwrite entries by writing to the same key. "Uses React 18" gets overwritten by "Uses React 19" — same key, new value. No growth.
+**Write-time quality control:**
+- **Dedup on write (ADD/UPDATE/DELETE/NOOP):** Every new fact triggers an LLM comparison against existing active facts in the same namespace. The LLM decides: ADD (genuinely new), UPDATE (modify existing to incorporate new info), DELETE (mark existing as superseded via `valid_until`), or NOOP (already captured). This prevents bloat at the source. Per Mem0 pattern — 26% quality improvement over append-only storage.
+- **Temporal supersession:** When a fact is superseded, it gets `valid_until = now`. The old fact is not deleted — it's preserved for historical queries. Context assembly only loads facts where `valid_until IS NULL`.
+- **Key-based overwrite:** Agents can also overwrite entries by writing to the same (namespace, key). "Uses React 18" gets overwritten by "Uses React 19" — same key, new value. No growth.
+
+**Retrieval scoring:**
+- Context assembly ranks active facts by: `score = importance × e^(-λ × days_since_access) × (1 + access_count × 0.2)` where `λ = 0.16 × (1 - importance × 0.8)`. Higher importance = slower decay. Frequently accessed facts resist fading.
+- Token budget: 1000 tokens for space facts, 500 for global. Lowest-scored entries within budget are dropped from context but remain queryable via `recall_facts` tool.
+
+**Lifecycle management:**
+- **Per-namespace cap:** 50 active entries per space namespace, 20 per agent namespace. When the cap is hit during a write, the lowest-scored active entry is archived (`archived_at = now`). Archived entries are excluded from context assembly and write-time dedup comparisons, but remain searchable via tools.
+- **Auto-archival of superseded facts:** Facts with `valid_until` set more than 90 days ago are automatically archived on a weekly check.
+- **Periodic consolidation (monthly or manual):** LLM reviews all active facts for a space. Merges related entries (3 facts about tech stack → 1 comprehensive fact), flags contradictions, suggests archival for entries with zero access in 60+ days. Results surfaced to user as a notification requiring approval — the system never deletes or merges without confirmation.
 - **Stale detection:** Entries not accessed in 90+ days are flagged. The system surfaces them periodically: "These memory entries haven't been used in 3 months. Keep, archive, or delete?"
-- **Token budget:** Context assembly allocates a fixed budget for facts (1000 tokens for space, 500 for global). If there are more facts than fit, most recent + most frequently accessed entries win. The rest are omitted from context but remain in the database and queryable via MCP tools.
 
-### Tier 2: Conversation Summaries (conversation_summaries)
+### Tier 2: Episodic Memory — Conversation Summaries (conversation_summaries)
 
 Summaries grow linearly — one per closed conversation, plus mid-conversation checkpoints. A space with 3 conversations per week = ~60 summaries in 5 months.
 
 **Pruning mechanisms:**
-- **Recency window:** Context assembly only injects the N most recent summaries (default: 10). Older summaries exist in the database and are searchable via `search_conversations` MCP tool, but aren't auto-injected.
-- **Summary-of-summaries (periodic consolidation):** Monthly or quarterly, the system generates a meta-summary — a condensed version of the last 20-30 summaries. Example: "From January to March: shipped the API redesign, hired two candidates, resolved the auth issue. Key decisions: moved to JWT tokens, chose Tailwind v4." The meta-summary replaces individual summaries in context assembly. Old summaries remain in the DB for search.
-- **Checkpoint pruning:** Mid-conversation checkpoint summaries (`is_checkpoint=true`) are superseded by the final close summary. After a conversation closes, its checkpoints can be archived (kept in DB but excluded from context assembly).
-- **Token budget:** Fixed allocation of 2000 tokens. If 10 summaries don't fit, oldest are truncated or dropped.
+- **Recency window:** Context assembly injects the meta-summary first (if exists), then the most recent unconsolidated summaries that fit the budget.
+- **Threshold-triggered consolidation:** When a space accumulates 20+ unconsolidated summaries, the system automatically generates a meta-summary during the next conversation close. The meta-summary condenses all unconsolidated summaries into one compact block. Example: "From January to March: shipped the API redesign, hired two candidates, resolved the auth issue. Key decisions: moved to JWT tokens, chose Tailwind v4." Individual summaries that were consolidated are marked with `consolidated_into` pointing to the meta-summary — they remain in the DB and are searchable via `search_summaries`, but excluded from context assembly.
+- **Successive consolidation:** When a second round of 20 summaries accumulates, the new meta-summary covers both the old meta-summary and new individual summaries. Always one current meta-summary covering full history.
+- **Manual trigger:** User can trigger consolidation from space settings at any time, regardless of threshold.
+- **Checkpoint pruning:** Mid-conversation checkpoint summaries (`is_checkpoint=true`) are superseded by the final close summary. After a conversation closes, its checkpoints are excluded from context assembly (kept in DB for search).
+- **Token budget:** Fixed allocation of 2000 tokens.
 
-### Tier 3: Board State (generated at assembly time)
+### Tier 3: Working Memory — Board State (generated at assembly time)
 
 Board state is always fresh — generated from the database, not stored. But a space with 200 items would produce a large dump.
 
@@ -1064,41 +1292,63 @@ Board state is always fresh — generated from the database, not stored. But a s
 - **Active items only:** Exclude archived items.
 - **Recency filter:** Only include items updated in the last 30 days, plus anything with an upcoming due date.
 - **Summarize, don't enumerate:** "12 tasks in To Do, 3 in In Progress, 2 completed this week" rather than listing all 200 items. Agents have `get_item` and `list_items` MCP tools for on-demand detail.
-- **Token budget:** Fixed allocation of 1500 tokens.
+- **Token budget:** Fixed allocation of 1500 tokens. Placed at the end of context (closest to user's message) for maximum model attention.
 
-### Tier 4: In-Session Conversation History
+### Tier 4: Procedural Memory — Behavioral Rules (behavioral_rules)
 
-This is the raw message history within an active SDK session. Managed by the CLI's own context window handling — it compresses older messages when the window fills.
+Behavioral rules accumulate from user corrections. Growth is slow (~5-10 per agent over months) but without lifecycle management, agents could accumulate contradictory rules.
+
+**Lifecycle mechanisms:**
+- **Per-agent cap:** 30 active rules per agent. When cap is hit, lowest-confidence rule is deactivated.
+- **Confidence tracking:** Rules start at confidence 0.5. Confirmed by user → confidence increases toward 1.0. Overridden by user → confidence decreases. Rules below confidence 0.3 after 10+ sessions are auto-deactivated (`is_active = false`).
+- **Application tracking:** `apply_count` and `last_applied` track how often and how recently a rule was used. Rules not applied in 10+ sessions with low confidence are auto-deactivated.
+- **Token budget:** Fixed allocation of 500 tokens within the system prompt section (beginning of context, highest attention).
+
+### Tier 5: In-Session Conversation History
+
+This is the raw message history within an active SDK session.
 
 **Pruning mechanisms:**
-- **Auto-summary checkpoint:** When context usage exceeds 70%, the Session Manager triggers a mid-conversation summary checkpoint. This captures state in the database before CLI compression degrades quality.
-- **User-initiated close:** When context becomes unwieldy, the user closes the conversation. Final summary is generated. New conversation starts with summary context, not raw history.
+- **Proactive budget enforcement:** Before each LLM call, the Session Manager estimates total context size. If it exceeds 70% of the context window, compression is triggered before the call — not as error recovery after the fact.
+- **Mandatory pre-compaction flush:** Before any compression, the `flush_memory()` operation runs: the agent is prompted to save unsaved facts to persistent memory. This prevents information loss during the inherently lossy summarization step.
+- **Observation masking:** During compression, the most recent 2-3 complete exchanges (user message + agent response) are kept verbatim. Only older exchanges are summarized. This preserves the immediate working context. JetBrains research found this approach gives a 2.6% task completion improvement while being 52% cheaper than full summarization.
+- **Turn-boundary compression:** Compression always cuts at user-message boundaries — never in the middle of a tool-call sequence. This preserves conversation coherence.
+- **User-initiated close:** When context becomes unwieldy, the user closes the conversation. Flush + final summary is generated. New conversation starts with summary context.
 - **Notification at 90%:** System suggests closing and starting fresh when context is nearly full.
 
-### Conversation Search (On-Demand Context)
+### On-Demand Search (Beyond Context Window)
 
-Not everything needs to be in the initial context injection. Agents have MCP tools to pull historical context on demand:
+Not everything needs to be in the initial context injection. Agents have MCP tools to pull historical context on demand, backed by FTS5 full-text search indexes:
 
-- `search_conversations(space_id, query?, date_range?, agent_id?)` — search closed conversation summaries by keyword, date range, or agent. Returns matching summaries with conversation IDs.
+- `search_conversations(query?, space_id?, date_range?, agent_id?)` — FTS5 search on conversation message content. `space_id` is optional — omit for cross-space search scoped to the agent's permitted spaces.
+- `search_summaries(query, space_id?)` — FTS5 search on conversation summary content. Cross-space capable.
 - `get_conversation_messages(conversation_id, limit?)` — pull specific messages from a closed conversation. For when the summary isn't enough and the agent needs the actual exchange.
-- `read_memory(namespace?, key?, search?)` — search facts by namespace, key, or full-text.
+- `recall_facts(query?, namespace?, category?, date_range?)` — search facts with optional filters. Omitting namespace searches all namespaces. Results scored by the same retrieval formula used in context assembly.
 
-This means an agent that needs context from 3 months ago can find it without that context being pre-loaded into every session. The initial context injection covers "what's happened recently." On-demand search covers "what happened historically."
+Cross-space search is permission-scoped: agents only see results from spaces they have access to via the `agent_spaces` join table. Odin (system-level) can search all spaces.
+
+This means an agent that needs context from 3 months ago can find it without that context being pre-loaded into every session. The initial context injection covers "what's likely needed." On-demand search covers "what might be needed."
 
 ### Overall Context Budget
 
 ```
 Context assembly total: ~8000 tokens (~4% of 200k context window)
 
-Agent identity + role prompt:     ~2000 tokens (fixed, never truncated)
-Board state summary:              ~1500 tokens (fresh, pruned by recency)
-Conversation summaries:           ~2000 tokens (last N, pruned by recency)
-Space facts:                      ~1000 tokens (capped, pruned by recency + access)
-Global facts:                      ~500 tokens (capped, pruned by recency + access)
-Tool documentation:               ~1000 tokens (fixed, never truncated)
+BEGINNING (high model attention):
+  Agent identity + role prompt:     ~1500 tokens (fixed, never truncated)
+  Procedural rules:                  ~500 tokens (active rules, ranked by confidence)
+  Tool documentation:               ~1000 tokens (fixed, never truncated)
+
+MIDDLE (lower model attention):
+  Conversation summaries:           ~2000 tokens (meta-summary + recent unconsolidated)
+  Space facts:                      ~1000 tokens (scored: importance × decay × access)
+  Global facts:                      ~500 tokens (scored: importance × decay × access)
+
+END (high model attention):
+  Board/to-do state:                ~1500 tokens (fresh, pruned by recency)
 ```
 
-The vast majority of the context window remains available for the actual conversation. The 8000-token injection is a starting point — tunable per space or per agent if needed.
+The vast majority of the context window remains available for the actual conversation. The 8000-token injection is a starting point — tunable per space or per agent if needed. Content ordering exploits the U-shaped attention curve documented in "Lost in the Middle" (Liu et al., 2023).
 
 ---
 
@@ -1155,7 +1405,7 @@ Restore = replace the SQLite file with a backup copy and restart the backend. Co
 
 1. **Streaming conversations** — SSE gives real-time, token-by-token agent responses. Same feel as Claude CLI.
 2. **Multiple concurrent sessions** — SessionManager tracks multiple SDK sessions. Up to 5 concurrent (per user's estimate).
-3. **Context that survives** — three-tier memory + conversation summaries + context assembly. New agents in a space automatically know what happened before.
+3. **Context that survives** — four-tier memory (semantic, episodic, working, procedural) + scored retrieval + attention-optimized assembly. New agents in a space automatically know what happened before, how to behave, and what's important.
 4. **Granular permissions** — every tool call goes through the PermissionEnforcer. Per-agent, per-resource, per-operation. In-conversation and background approval flows.
 5. **Odin front door** — always-visible Haiku-powered chat. Handles simple actions directly (~1-2s), routes complex work to space agents.
 6. **Background delegation** — agents work asynchronously, results flow back to the board/conversation. Progress monitoring via SSE.
@@ -1183,7 +1433,7 @@ What gets rebuilt:
 - Data model (new schema)
 - API routes (new endpoints for conversations, items, permissions)
 - Session management (new — the core of the new architecture)
-- Context assembly (new — three-tier system)
+- Context assembly (new — four-tier system with scored retrieval, attention-optimized ordering, and lifecycle management)
 - Permission enforcement (new — granular matrix)
 - Frontend (significant rework — conversation panels, home dashboard, table view)
 

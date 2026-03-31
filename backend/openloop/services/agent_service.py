@@ -1,7 +1,9 @@
+from datetime import UTC, datetime
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from backend.openloop.db.models import Agent, AgentPermission, Space
+from backend.openloop.db.models import Agent, AgentPermission, PermissionRequest, Space
 
 
 def create_agent(
@@ -174,3 +176,35 @@ def delete_permission(db: Session, permission_id: str) -> None:
         raise HTTPException(status_code=404, detail="Permission not found")
     db.delete(perm)
     db.commit()
+
+
+# --- Permission Requests ---
+
+
+def resolve_permission_request(
+    db: Session,
+    request_id: str,
+    *,
+    status: str,
+) -> PermissionRequest:
+    """Resolve a pending permission request (approve or deny).
+
+    Sets resolved_by='user' and resolved_at to current UTC time.
+    """
+    req = db.query(PermissionRequest).filter(PermissionRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Permission request not found")
+
+    allowed = ("approved", "denied")
+    if status not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"status must be one of {allowed}",
+        )
+
+    req.status = status
+    req.resolved_by = "user"
+    req.resolved_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(req)
+    return req

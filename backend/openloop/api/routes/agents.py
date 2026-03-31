@@ -7,6 +7,8 @@ from backend.openloop.api.schemas import (
     AgentPermissionSet,
     AgentResponse,
     AgentUpdate,
+    PermissionRequestResponse,
+    PermissionRequestUpdate,
 )
 from backend.openloop.database import get_db
 from backend.openloop.services import agent_service
@@ -83,3 +85,19 @@ def set_permission(
 @router.delete("/permissions/{permission_id}", status_code=204)
 def delete_permission(permission_id: str, db: Session = Depends(get_db)) -> None:
     agent_service.delete_permission(db, permission_id)
+
+
+# --- Permission Requests ---
+
+
+@router.patch(
+    "/permission-requests/{request_id}",
+    response_model=PermissionRequestResponse,
+)
+def resolve_permission_request(
+    request_id: str,
+    body: PermissionRequestUpdate,
+    db: Session = Depends(get_db),
+) -> PermissionRequestResponse:
+    req = agent_service.resolve_permission_request(db, request_id, status=body.status.value)
+    return PermissionRequestResponse.model_validate(req)

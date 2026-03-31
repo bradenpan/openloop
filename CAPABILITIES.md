@@ -134,6 +134,7 @@ A conversation is a persistent, named chat thread with an agent, scoped to a spa
 - Can be closed when context becomes unwieldy — the system generates a conversation summary capturing decisions, outcomes, and open questions. This summary is stored as space context.
 - Can be reopened or new conversations started — the agent gets the summary from prior conversations, not the full raw history. Full history remains accessible if the agent needs to look something up.
 - Can delegate work to sub-agents (e.g., the recruiting agent spins up a research sub-agent to build a candidate brief)
+- Can be steered mid-task — if an agent is working in the background and going down the wrong path, you can send a correction between tool calls without restarting the entire task
 - Can create/update to-dos and board items as a side effect of the conversation
 - Multiple conversations can be active simultaneously within a space
 
@@ -188,15 +189,29 @@ You can also view and edit agent configurations directly in the UI after creatio
 
 ### Memory and Documents
 
-Each space has a knowledge base. Memory operates in three tiers:
+Each space has a knowledge base. Memory operates in four tiers, mapped from established cognitive memory types:
 
-1. **Facts** — persistent key-value entries. "Sarah prefers morning meetings." "The auth module uses JWT tokens." Long-lived, curated by agents and humans. These are the institutional knowledge of the space.
+1. **Semantic memory (facts)** — persistent entries representing knowledge about the world. "Sarah prefers morning meetings." "The auth module uses JWT tokens." "Deploy target is AWS us-east-1." Facts are curated by agents and humans. Agents have explicit tools to save, update, and delete facts — they actively manage what they know, not just passively receive context.
 
-2. **Conversation summaries** — auto-generated when conversations are closed, or checkpointed mid-conversation when context usage is high. "On March 28, we discussed restructuring the API. Decided on approach X. Open question: how to handle migration." This is how context survives across conversations.
+   Facts are temporally aware: each fact tracks when it became true (`valid_from`) and when it was superseded (`valid_until`). When a new fact contradicts an existing one ("Bob now owns the budget" replacing "Alice owns the budget"), the old fact is marked as superseded — not deleted. This preserves history while keeping current facts clean. Agents can query historical facts ("who owned the budget in January?") via date-range search.
 
-3. **Board/to-do state** — current state of items, recent changes, upcoming deadlines. Auto-generated from the database. Always fresh.
+   Facts are deduplicated at write time. Every new fact is compared against existing facts in the same namespace. The system decides: ADD (new information), UPDATE (modify existing fact), DELETE (mark as superseded), or NOOP (already captured). This prevents bloat at the source rather than relying on periodic cleanup.
 
-**Context assembly** pulls from all three tiers when an agent starts a conversation or picks up a task. The system manages the token budget so context doesn't overwhelm. Agents can also search prior conversations on demand — summaries are auto-loaded, but full message history from closed conversations is queryable via tools.
+2. **Episodic memory (conversation summaries)** — auto-generated when conversations are closed, or checkpointed mid-conversation when context usage is high. "On March 28, we discussed restructuring the API. Decided on approach X. Open question: how to handle migration." This is how context survives across conversations.
+
+   When a space accumulates 20+ unconsolidated summaries, the system automatically generates a meta-summary — a condensed overview covering months of history in one compact block. The individual summaries remain searchable but are replaced in context assembly by the meta-summary. This prevents agents from losing awareness of long-term project trajectory as history grows.
+
+3. **Working memory (board/to-do state)** — current state of items, recent changes, upcoming deadlines. Auto-generated from the database. Always fresh.
+
+4. **Procedural memory (behavioral rules)** — learned rules about how the agent should behave, captured from user corrections and confirmed patterns. "Always check the CRM before drafting follow-up emails." "User prefers bullet points over long paragraphs." "When formatting reports, include a summary section at the top." These rules are injected into the agent's context with high priority at the start of every conversation. Rules gain confidence when confirmed by the user; rules that are overridden lose confidence and eventually deactivate. This is how agents improve over time — corrections stick across sessions.
+
+**Context assembly** pulls from all four tiers when an agent starts a conversation or picks up a task. The system manages a token budget (~8000 tokens) so context doesn't overwhelm. Content is ordered to exploit how models pay attention: high-priority information (identity, behavioral rules, tool definitions) at the beginning, reference material (facts, summaries) in the middle, and immediately relevant context (board state, current task) at the end closest to the user's message.
+
+Before any context compression (at 70% context usage or on conversation close), the system runs a mandatory memory flush: the agent is prompted to save any important unsaved facts to persistent memory before the summary is generated. This prevents information loss during the inherently lossy summarization step. During compression, the most recent 2-3 conversation exchanges are kept verbatim — only older history is summarized.
+
+Facts are scored for retrieval by a blend of importance, recency, and access frequency — not just "most recent entries." A frequently-referenced architectural decision from 3 months ago ranks higher than yesterday's meeting note. Each namespace has a hard cap (50 facts per space, 20 per agent, 30 procedural rules per agent). When the cap is hit, the lowest-scored entry is archived. A periodic consolidation job reviews facts, merges related entries, flags contradictions, and suggests archival — surfacing results for user approval.
+
+Agents can also search beyond what's in their context window. Conversation messages, summaries, and facts are searchable via FTS5 full-text indexes. Search works across spaces (scoped to spaces the agent has access to), enabling agents to find relevant information from other domains when needed.
 
 **Documents and data** are stored externally:
 - **Google Drive** (primary) — spaces link to Drive folders. Accessible from anywhere.
@@ -263,12 +278,13 @@ Conversations are opened from spaces or via Odin. When you're in a conversation:
 
 - **Chat mode (default):** Interactive back-and-forth. Streaming responses. Agent has space context pre-loaded.
 - **Delegation mode:** "Go do X" — agent works in background. Notification when done.
+- **Steering mode:** Send a message to a running agent between tool calls, causing it to adjust course without restarting. The current tool finishes, remaining queued tools are skipped, and your message is processed next.
 - **Sub-agents:** Agent spins up focused sub-agents for specific sub-tasks. Results flow back.
 - **Model selection:** Switchable per conversation. Default is the agent's configured model.
 
 ### Background Agent Monitoring
 
-Compact status indicator: "Code Agent working on 'Refactor auth module' — 2 min elapsed." Click to expand into a streaming log. Low-density by default, high-density on demand.
+Compact status indicator: "Code Agent working on 'Refactor auth module' — 2 min elapsed." Click to expand into a streaming log. Low-density by default, high-density on demand. For multi-step tasks, shows current step and step history ("Step 3/5: Analyzing competitor C"). Failed tasks show exactly where they stopped and what was completed, enabling resume from the failure point rather than full restart.
 
 ### Automation Dashboard
 
@@ -298,41 +314,51 @@ Accessible from Home or Settings. Shows:
 5. **Odin (front door)** — always-visible chat input running on Haiku. Handles simple actions directly, routes complex work to space agents. Natural language, no memorized commands.
 6. **Agent conversations** — start a named conversation with an agent in a space context. Interactive chat with streaming responses. Agent has access to space data, memory, and board state. Can create/update to-dos and board items. Model selectable per conversation (default Sonnet, option for Opus).
 7. **Agent delegation** — tell an agent to go work on a task in the background. Status indicator with expandable log. Results flow back.
-8. **Context management** — conversations maintain history. Closing generates a summary. Auto-checkpoint when context usage exceeds 70%. New conversations get summaries + facts + board state. Agents can search prior conversations on demand.
-9. **Permissions layer** — per-agent, per-resource, per-operation permissions with three grant levels. Inline approval in conversations, pending approvals visible in Home Attention Items. No timeout — agents wait indefinitely for approval. System guardrails non-overridable.
+8. **Context management** — conversations maintain history. Closing generates a summary. Mandatory pre-compaction memory flush before any summarization (agent saves unsaved facts to persistent memory before context is compressed). Proactive budget enforcement checks context size before each LLM call and compresses at clean turn boundaries when needed. Recent 2-3 exchanges kept verbatim during compression — only older history is summarized. Auto-checkpoint when context usage exceeds 70%. New conversations get summaries + facts + behavioral rules + board state. Context ordered for maximum model attention: high-priority at beginning/end, reference material in middle.
+9. **Agent memory tools** — agents have explicit tools to save, update, and delete facts. Agents actively curate their knowledge rather than passively receiving context. System prompts instruct agents to use these proactively. Write-time dedup prevents contradictory or duplicate entries.
+10. **Permissions layer** — per-agent, per-resource, per-operation permissions with three grant levels. Inline approval in conversations, pending approvals visible in Home Attention Items. No timeout — agents wait indefinitely for approval. System guardrails non-overridable.
 
 ### P1 — Important, build soon after launch
 
-10. **Agent Builder** — specialized agent for creating new agents through conversational requirements gathering. Writes config and registers in system. Accessible via Odin. (At P0 launch, agents created via UI form. Agent Builder adds the conversational creation flow.)
-11. **Records (CRM-style items)** — tracked entities with custom fields and pipelines. Linked to-dos/tasks. Table view.
-12. **Table view** — alternative to Kanban for CRM-style spaces. Rows = records, columns = configurable fields.
-13. **Google Drive integration** — link Drive folders to spaces. Agents read/write documents. Indexed and searchable.
-14. **Documents/data management** — per-space document management with metadata, tags, search.
-15. **Sub-agent delegation** — agents can spin up sub-agents for focused work within a conversation.
-16. **Conversation management** — list all conversations across spaces, sort by recency, close stale ones, search history.
-17. **Multiple active conversations** — 2-3 open simultaneously, flip between them.
-18. **Proactive surfacing** — agents scan board and data for dropped balls, stale items, overdue follow-ups.
-19. **Automated daily backup** — scheduled Google Drive backup of SQLite database.
-20. **Cron-based automations** — scheduled agent runs (daily briefing, hourly email check, weekly health summary). Automation CRUD, run history, dashboard. Manual trigger button.
+11. **Agent Builder** — specialized agent for creating new agents through conversational requirements gathering. Writes config and registers in system. Accessible via Odin. (At P0 launch, agents created via UI form. Agent Builder adds the conversational creation flow.)
+12. **Records (CRM-style items)** — tracked entities with custom fields and pipelines. Linked to-dos/tasks. Table view.
+13. **Table view** — alternative to Kanban for CRM-style spaces. Rows = records, columns = configurable fields.
+14. **Google Drive integration** — link Drive folders to spaces. Agents read/write documents. Indexed and searchable.
+15. **Documents/data management** — per-space document management with metadata, tags, search.
+16. **Sub-agent delegation** — agents can spin up sub-agents for focused work within a conversation.
+17. **Conversation management** — list all conversations across spaces, sort by recency, close stale ones, search history.
+18. **Multiple active conversations** — 2-3 open simultaneously, flip between them.
+19. **Proactive surfacing** — agents scan board and data for dropped balls, stale items, overdue follow-ups.
+20. **Automated daily backup** — scheduled Google Drive backup of SQLite database.
+21. **Cron-based automations** — scheduled agent runs (daily briefing, hourly email check, weekly health summary). Automation CRUD, run history, dashboard. Manual trigger button.
+22. **Procedural memory** — behavioral rules learned from user corrections, captured with confidence scores, injected into agent context at start of every conversation. Agents improve over time — corrections stick across sessions.
+23. **Temporal fact management** — facts track when they became true and when they were superseded. Historical facts preserved for querying. Write-time comparison detects contradictions and supersedes old facts automatically.
+24. **Cross-space and deep search** — FTS5 full-text indexes on memory, messages, and summaries. Conversation and summary search across spaces (scoped to agent permissions). Replaces basic substring matching with ranked results.
+25. **Mid-task steering** — send a message to a running background agent between tool calls to redirect it. Current tool finishes, remaining queued tools skipped, correction processed. No restart needed.
 
 ### P2 — Valuable, build when core is solid
 
-21. **Calendar integration** — read calendar, surface upcoming meetings.
-22. **Email integration** — read/draft emails, sort inbox, flag items needing response.
-23. **Event-based automations** — triggered by calendar events, new emails, data source updates. Requires event bus.
-24. **Morning briefing** — pre-configured automation: daily summary across all spaces.
-25. **Meeting prep automation** — event-triggered: detect meetings without briefs, auto-dispatch prep agents.
-26. **Follow-up tracking** — scheduled automation: time-based reminders on items and records.
-27. **Stale work detection** — scheduled automation: surface items that haven't moved.
-28. **API data source integrations** — connect Garmin, bank feeds, and other APIs to spaces.
-29. **Configurable autonomy** — per-agent autonomy levels for specific operation types.
-30. **Subspaces** — nested spaces with context inheritance.
+26. **Calendar integration** — read calendar, surface upcoming meetings.
+27. **Email integration** — read/draft emails, sort inbox, flag items needing response.
+28. **Event-based automations** — triggered by calendar events, new emails, data source updates. Requires event bus.
+29. **Morning briefing** — pre-configured automation: daily summary across all spaces.
+30. **Meeting prep automation** — event-triggered: detect meetings without briefs, auto-dispatch prep agents.
+31. **Follow-up tracking** — scheduled automation: time-based reminders on items and records.
+32. **Stale work detection** — scheduled automation: surface items that haven't moved.
+33. **API data source integrations** — connect Garmin, bank feeds, and other APIs to spaces.
+34. **Configurable autonomy** — per-agent autonomy levels for specific operation types.
+35. **Subspaces** — nested spaces with context inheritance.
+36. **Memory lifecycle management** — hard caps per namespace with lowest-scored eviction. Auto-archival of superseded facts after 90 days. Periodic LLM-driven consolidation: merges related facts, flags contradictions, suggests archival — surfaces to user for approval.
+37. **Summary consolidation** — automated meta-summary generation when a space exceeds 20 unconsolidated summaries. Condensed overview replaces individual summaries in context assembly. Manual trigger available. Successive consolidation keeps one current meta-summary covering full history.
+38. **Retrieval scoring** — context assembly scores facts by importance, recency, and access frequency (Ebbinghaus-inspired decay). Frequently-used, high-importance facts stay prominent regardless of age.
+39. **Multi-step workflow tracking** — background tasks track current step, total steps, and step results. Parent-child task hierarchies for sub-agent delegation. Failed tasks show exactly where they stopped, enabling resume from failure point.
 
 ### P3 — Future
 
-31. **Remote access** — interact via Discord, Slack, or web interface from any device.
-32. **Mobile access** — view to-dos, board, and conversations from phone.
-33. **Multi-user** — share spaces, assign tasks to people.
+40. **Remote access** — interact via Discord, Slack, or web interface from any device.
+41. **Mobile access** — view to-dos, board, and conversations from phone.
+42. **Multi-user** — share spaces, assign tasks to people.
+43. **Hybrid memory search** — vector embeddings + FTS5 keyword search with temporal decay and diversity reranking. Requires embedding infrastructure.
 
 ---
 
@@ -342,7 +368,7 @@ Accessible from Home or Settings. Shows:
 - FastAPI backend + React frontend + SQLite (local-first stack)
 - Kanban board UI with drag-and-drop
 - Agent execution via Claude SDK
-- Memory system (expanded from current key-value to three-tier)
+- Memory system (expanded from current key-value to four-tier: semantic, episodic, working, procedural)
 - CLI for power-user operations
 
 ### Changed
@@ -388,6 +414,15 @@ Accessible from Home or Settings. Shows:
 16. **Crash recovery** — on startup, interrupted conversations are detected and surfaced. User can reopen (attempts SDK resume) or close them.
 17. **Item provenance** — to-dos and board items track `source_conversation_id` so users can trace where work came from.
 18. **SSE architecture** — single multiplexed endpoint (`/api/v1/events`) for all streaming. Frontend demultiplexes by source ID.
+19. **Four-tier memory** — semantic (facts), episodic (summaries), working (board state), procedural (behavioral rules). Procedural memory is injected into the system prompt section with high priority. Based on the CoALA cognitive memory framework adopted independently by Letta/MemGPT, LangMem, and CrewAI.
+20. **Agent-managed memory** — agents have explicit tools to save, update, and delete facts. System prompts instruct agents to use these proactively. Pre-compaction flush makes fact saving mandatory before any context compression.
+21. **Temporal fact management** — facts carry `valid_from`/`valid_until`. Superseded facts are not deleted; they're timestamped and archived after 90 days. Write-time comparison uses the LLM for semantic matching (ADD/UPDATE/DELETE/NOOP operations per Mem0 pattern).
+22. **Memory lifecycle** — hard caps per namespace (50 space, 20 agent, 30 procedural rules). Lowest-scored entries archived on overflow using Ebbinghaus-inspired scoring (importance x decay x access boost). Monthly LLM-driven consolidation with user approval.
+23. **Context safety** — pre-compaction flush (mandatory before any summarization), proactive budget enforcement (before LLM calls, not after), observation masking (recent 2-3 turns verbatim during compression), context ordering (high-priority at beginning/end, reference material in middle per "Lost in the Middle" findings).
+24. **Summary consolidation** — automated, threshold-triggered at 20 unconsolidated summaries per space. Piggybacks on conversation close. Manual trigger available. Successive consolidation produces one current meta-summary covering full history.
+25. **Cross-space search** — conversation and summary search tools accept optional `space_id`. Omitting it searches all spaces the agent has access to (scoped by `agent_spaces`). FTS5 replaces LIKE matching for all text search.
+26. **Mid-task steering** — users can inject messages into running background tasks between tool calls. Current tool completes, remaining queued tools skipped, steering message processed next.
+27. **Workflow tracking** — background tasks track step-level progress with parent-child hierarchies. Failed tasks show where they stopped. Audit detects stale (>10min queued) and stuck (>30min running) tasks.
 
 ---
 
@@ -401,3 +436,4 @@ Accessible from Home or Settings. Shows:
 6. **Storage is external** — Google Drive for documents, SQLite for structured data, repos for code, APIs for live data. OpenLoop is the orchestration layer.
 7. **Claude Max, not API** — all agent execution via Claude Agent SDK under Max subscription. Haiku for Odin, Sonnet/Opus for agents.
 8. **Granular security by default** — per-agent, per-resource, per-operation permissions. No agent gets broad access by default.
+9. **Agents improve over time** — procedural memory captures corrections, write-time dedup keeps knowledge clean, lifecycle management prevents bloat, and retrieval scoring surfaces the right context. The system gets smarter with use, not just bigger.

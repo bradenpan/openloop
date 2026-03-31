@@ -1,7 +1,7 @@
 from datetime import datetime
 
-from contract.enums import GrantLevel, Operation
-from pydantic import BaseModel, ConfigDict
+from contract.enums import GrantLevel, Operation, PermissionRequestStatus
+from pydantic import BaseModel, ConfigDict, field_validator
 
 __all__ = [
     "AgentCreate",
@@ -9,6 +9,8 @@ __all__ = [
     "AgentResponse",
     "AgentPermissionSet",
     "AgentPermissionResponse",
+    "PermissionRequestUpdate",
+    "PermissionRequestResponse",
 ]
 
 
@@ -62,3 +64,30 @@ class AgentPermissionResponse(BaseModel):
     resource_pattern: str
     operation: str
     grant_level: str
+
+
+class PermissionRequestUpdate(BaseModel):
+    status: PermissionRequestStatus
+
+    @field_validator("status")
+    @classmethod
+    def status_must_be_resolution(cls, v: PermissionRequestStatus) -> PermissionRequestStatus:
+        if v not in (PermissionRequestStatus.APPROVED, PermissionRequestStatus.DENIED):
+            raise ValueError("status must be 'approved' or 'denied'")
+        return v
+
+
+class PermissionRequestResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    agent_id: str
+    conversation_id: str | None
+    tool_name: str
+    resource: str
+    operation: str
+    tool_input: dict | None
+    status: str
+    resolved_by: str | None
+    created_at: datetime
+    resolved_at: datetime | None

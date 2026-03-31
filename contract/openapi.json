@@ -5,13 +5,14 @@
     "version": "0.1.0"
   },
   "paths": {
-    "/api/v1/agents": {
+    "/api/v1/agents/running": {
       "get": {
         "tags": [
           "agents"
         ],
-        "summary": "List Agents",
-        "operationId": "list_agents_api_v1_agents_get",
+        "summary": "Get Running Sessions",
+        "description": "Return all active/queued sessions from in-memory tracking.",
+        "operationId": "get_running_sessions_api_v1_agents_running_get",
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -19,16 +20,19 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/AgentResponse"
+                    "additionalProperties": true,
+                    "type": "object"
                   },
                   "type": "array",
-                  "title": "Response List Agents Api V1 Agents Get"
+                  "title": "Response Get Running Sessions Api V1 Agents Running Get"
                 }
               }
             }
           }
         }
-      },
+      }
+    },
+    "/api/v1/agents": {
       "post": {
         "tags": [
           "agents"
@@ -36,14 +40,14 @@
         "summary": "Create Agent",
         "operationId": "create_agent_api_v1_agents_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/AgentCreate"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -52,6 +56,63 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/AgentResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "List Agents",
+        "operationId": "list_agents_api_v1_agents_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentResponse"
+                  },
+                  "title": "Response List Agents Api V1 Agents Get"
                 }
               }
             }
@@ -316,6 +377,58 @@
         }
       }
     },
+    "/api/v1/agents/permission-requests/{request_id}": {
+      "patch": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Resolve Permission Request",
+        "operationId": "resolve_permission_request_api_v1_agents_permission_requests__request_id__patch",
+        "parameters": [
+          {
+            "name": "request_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Request Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermissionRequestUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionRequestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/conversations": {
       "post": {
         "tags": [
@@ -393,6 +506,28 @@
                 }
               ],
               "title": "Status"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
             }
           }
         ],
@@ -754,6 +889,28 @@
               ],
               "title": "Space Id"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
         ],
         "responses": {
@@ -909,6 +1066,26 @@
         }
       }
     },
+    "/api/v1/events": {
+      "get": {
+        "tags": [
+          "events"
+        ],
+        "summary": "Sse Events",
+        "description": "Multiplexed SSE endpoint \u2014 streams all events to the frontend.",
+        "operationId": "sse_events_api_v1_events_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/documents": {
       "post": {
         "tags": [
@@ -986,6 +1163,28 @@
                 }
               ],
               "title": "Search"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
             }
           }
         ],
@@ -1216,6 +1415,28 @@
               "type": "boolean",
               "default": false,
               "title": "Archived"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
             }
           }
         ],
@@ -1557,6 +1778,28 @@
               ],
               "title": "Search"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
         ],
         "responses": {
@@ -1735,6 +1978,28 @@
               ],
               "title": "Is Read"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
         ],
         "responses": {
@@ -1807,41 +2072,19 @@
         }
       }
     },
-    "/api/v1/spaces": {
-      "get": {
-        "tags": [
-          "spaces"
-        ],
-        "summary": "List Spaces",
-        "operationId": "list_spaces_api_v1_spaces_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/SpaceResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Spaces Api V1 Spaces Get"
-                }
-              }
-            }
-          }
-        }
-      },
+    "/api/v1/odin/message": {
       "post": {
         "tags": [
-          "spaces"
+          "odin"
         ],
-        "summary": "Create Space",
-        "operationId": "create_space_api_v1_spaces_post",
+        "summary": "Send Odin Message",
+        "description": "Send a message to Odin. Returns the stored user message (201).\n\nThe Odin response streams via SSE through the event bus.",
+        "operationId": "send_odin_message_api_v1_odin_message_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SpaceCreate"
+                "$ref": "#/components/schemas/OdinMessageRequest"
               }
             }
           },
@@ -1853,7 +2096,105 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/spaces": {
+      "post": {
+        "tags": [
+          "spaces"
+        ],
+        "summary": "Create Space",
+        "operationId": "create_space_api_v1_spaces_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SpaceCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
                   "$ref": "#/components/schemas/SpaceResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "spaces"
+        ],
+        "summary": "List Spaces",
+        "operationId": "list_spaces_api_v1_spaces_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SpaceResponse"
+                  },
+                  "title": "Response List Spaces Api V1 Spaces Get"
                 }
               }
             }
@@ -2073,6 +2414,28 @@
                 }
               ],
               "title": "Is Done"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
             }
           }
         ],
@@ -3879,6 +4242,19 @@
         ],
         "title": "NotificationResponse"
       },
+      "OdinMessageRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "OdinMessageRequest"
+      },
       "Operation": {
         "type": "string",
         "enum": [
@@ -3889,6 +4265,121 @@
           "execute"
         ],
         "title": "Operation"
+      },
+      "PermissionRequestResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "resource": {
+            "type": "string",
+            "title": "Resource"
+          },
+          "operation": {
+            "type": "string",
+            "title": "Operation"
+          },
+          "tool_input": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tool Input"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "conversation_id",
+          "tool_name",
+          "resource",
+          "operation",
+          "tool_input",
+          "status",
+          "resolved_by",
+          "created_at",
+          "resolved_at"
+        ],
+        "title": "PermissionRequestResponse"
+      },
+      "PermissionRequestStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "denied"
+        ],
+        "title": "PermissionRequestStatus"
+      },
+      "PermissionRequestUpdate": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PermissionRequestStatus"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "PermissionRequestUpdate"
       },
       "SpaceCreate": {
         "properties": {

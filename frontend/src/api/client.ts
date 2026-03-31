@@ -1,6 +1,6 @@
-const API_BASE = '/api/v1'
+import createFetchClient from 'openapi-fetch';
+import type { paths } from './types';
 
-export async function fetchHealth() {
-  const res = await fetch(`${API_BASE}/health`)
-  return res.json()
-}
+export const api = createFetchClient<paths>({
+  baseUrl: '', // Vite proxy handles /api → localhost:8000
+});
