@@ -1,0 +1,89 @@
+@import "tailwindcss";
+@import "./styles/design-tokens.css";
+
+/* === Base Styles === */
+html {
+  font-family: var(--font-sans);
+  font-size: 16px;
+  line-height: var(--leading-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+/* === Scrollbar === */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-text-tertiary);
+}
+
+/* === Selection === */
+::selection {
+  background-color: var(--color-accent-muted);
+  color: var(--color-accent-text);
+}
+
+/* === Focus visible === */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* === Monospace utility === */
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* === Custom Tailwind utilities === */
+@utility bg-primary { background-color: var(--color-bg-primary); }
+@utility bg-secondary { background-color: var(--color-bg-secondary); }
+@utility bg-tertiary { background-color: var(--color-bg-tertiary); }
+@utility bg-elevated { background-color: var(--color-bg-elevated); }
+
+@utility text-primary { color: var(--color-text-primary); }
+@utility text-secondary { color: var(--color-text-secondary); }
+@utility text-tertiary { color: var(--color-text-tertiary); }
+@utility text-accent { color: var(--color-accent-text); }
+
+@utility border-default { border-color: var(--color-border-default); }
+@utility border-subtle { border-color: var(--color-border-subtle); }
+@utility border-strong { border-color: var(--color-border-strong); }
+
+/* === Keyframe animations === */
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes panel-in {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}

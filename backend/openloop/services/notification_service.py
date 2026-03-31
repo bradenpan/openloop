@@ -1,0 +1,57 @@
+from fastapi import HTTPException
+from sqlalchemy.orm import Session
+
+from backend.openloop.db.models import Notification
+
+
+def create_notification(
+    db: Session,
+    *,
+    type: str,
+    title: str,
+    body: str | None = None,
+    space_id: str | None = None,
+    conversation_id: str | None = None,
+) -> Notification:
+    """Create a notification."""
+    notif = Notification(
+        type=type,
+        title=title,
+        body=body,
+        space_id=space_id,
+        conversation_id=conversation_id,
+    )
+    db.add(notif)
+    db.commit()
+    db.refresh(notif)
+    return notif
+
+
+def list_notifications(
+    db: Session,
+    *,
+    is_read: bool | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[Notification]:
+    """List notifications, optionally filtered by read status."""
+    query = db.query(Notification)
+    if is_read is not None:
+        query = query.filter(Notification.is_read == is_read)
+    return query.order_by(Notification.created_at.desc()).offset(offset).limit(limit).all()
+
+
+def mark_read(db: Session, notification_id: str) -> Notification:
+    """Mark a notification as read."""
+    notif = db.query(Notification).filter(Notification.id == notification_id).first()
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    notif.is_read = True
+    db.commit()
+    db.refresh(notif)
+    return notif
+
+
+def unread_count(db: Session) -> int:
+    """Get the count of unread notifications."""
+    return db.query(Notification).filter(Notification.is_read == False).count()  # noqa: E712
