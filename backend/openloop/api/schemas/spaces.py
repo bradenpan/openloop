@@ -18,6 +18,7 @@ class SpaceUpdate(BaseModel):
     board_enabled: bool | None = None
     default_view: DefaultView | None = None
     board_columns: list[str] | None = None
+    custom_field_schema: list[dict] | None = None
 
 
 class SpaceResponse(BaseModel):
@@ -31,5 +32,6 @@ class SpaceResponse(BaseModel):
     board_enabled: bool
     default_view: str | None
     board_columns: list[str] | None
+    custom_field_schema: list[dict] | None
     created_at: datetime
     updated_at: datetime

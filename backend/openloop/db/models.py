@@ -44,15 +44,15 @@ def _utcnow() -> datetime:
 agent_spaces = Table(
     "agent_spaces",
     Base.metadata,
-    Column("agent_id", String(36), ForeignKey("agents.id"), primary_key=True),
-    Column("space_id", String(36), ForeignKey("spaces.id"), primary_key=True),
+    Column("agent_id", String(36), ForeignKey("agents.id", ondelete="CASCADE"), primary_key=True),
+    Column("space_id", String(36), ForeignKey("spaces.id", ondelete="CASCADE"), primary_key=True),
 )
 
 document_items = Table(
     "document_items",
     Base.metadata,
-    Column("document_id", String(36), ForeignKey("documents.id"), primary_key=True),
-    Column("item_id", String(36), ForeignKey("items.id"), primary_key=True),
+    Column("document_id", String(36), ForeignKey("documents.id", ondelete="CASCADE"), primary_key=True),
+    Column("item_id", String(36), ForeignKey("items.id", ondelete="CASCADE"), primary_key=True),
 )
 
 
@@ -66,7 +66,7 @@ class Space(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     parent_space_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("spaces.id"), nullable=True
+        String(36), ForeignKey("spaces.id", ondelete="SET NULL"), nullable=True
     )
     name: Mapped[str] = mapped_column(String, unique=True, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -76,6 +76,7 @@ class Space(Base):
     board_columns: Mapped[list | None] = mapped_column(
         SA_JSON, default=lambda: ["idea", "scoping", "todo", "in_progress", "done"]
     )
+    custom_field_schema: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -86,42 +87,36 @@ class Space(Base):
         back_populates="space",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     items: Mapped[list["Item"]] = relationship(
         "Item",
         back_populates="space",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     conversations: Mapped[list["Conversation"]] = relationship(
         "Conversation",
         back_populates="space",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     documents: Mapped[list["Document"]] = relationship(
         "Document",
         back_populates="space",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     data_sources: Mapped[list["DataSource"]] = relationship(
         "DataSource",
         back_populates="space",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     conversation_summaries: Mapped[list["ConversationSummary"]] = relationship(
         "ConversationSummary",
         back_populates="space",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     agents: Mapped[list["Agent"]] = relationship(
         "Agent", secondary=agent_spaces, back_populates="spaces", lazy="select"
@@ -138,7 +133,7 @@ class Todo(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     space_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("spaces.id"), nullable=False, index=True
+        String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(String, nullable=False)
     is_done: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -146,10 +141,13 @@ class Todo(Base):
     sort_position: Mapped[float] = mapped_column(Float, default=0.0)
     created_by: Mapped[str] = mapped_column(String, default="user")
     source_conversation_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("conversations.id"), nullable=True
+        String(36), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
     )
     promoted_to_item_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("items.id"), nullable=True
+        String(36), ForeignKey("items.id", ondelete="SET NULL"), nullable=True
+    )
+    record_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("items.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
@@ -161,6 +159,9 @@ class Todo(Base):
     )
     promoted_to_item: Mapped["Item | None"] = relationship(
         "Item", foreign_keys=[promoted_to_item_id], lazy="select"
+    )
+    record: Mapped["Item | None"] = relationship(
+        "Item", foreign_keys=[record_id], lazy="select"
     )
 
 
@@ -174,7 +175,7 @@ class Item(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     space_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("spaces.id"), nullable=False, index=True
+        String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
     item_type: Mapped[str] = mapped_column(String, nullable=False)
     is_agent_task: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -185,15 +186,15 @@ class Item(Base):
     sort_position: Mapped[float] = mapped_column(Float, default=0.0)
     custom_fields: Mapped[dict | None] = mapped_column(SA_JSON, nullable=True)
     parent_record_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("items.id"), nullable=True
+        String(36), ForeignKey("items.id", ondelete="SET NULL"), nullable=True
     )
     assigned_agent_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("agents.id"), nullable=True
+        String(36), ForeignKey("agents.id", ondelete="SET NULL"), nullable=True
     )
     due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[str] = mapped_column(String, default="user")
     source_conversation_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("conversations.id"), nullable=True
+        String(36), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
     )
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -210,12 +211,15 @@ class Item(Base):
     source_conversation: Mapped["Conversation | None"] = relationship(
         "Conversation", foreign_keys=[source_conversation_id], lazy="select"
     )
+    children: Mapped[list["Item"]] = relationship(
+        "Item", foreign_keys="Item.parent_record_id", lazy="select",
+        overlaps="parent_record",
+    )
     events: Mapped[list["ItemEvent"]] = relationship(
         "ItemEvent",
         back_populates="item",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     documents: Mapped[list["Document"]] = relationship(
         "Document", secondary=document_items, back_populates="items", lazy="select"
@@ -232,7 +236,7 @@ class ItemEvent(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     item_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("items.id"), nullable=False, index=True
+        String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True
     )
     event_type: Mapped[str] = mapped_column(String, nullable=False)
     old_value: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -272,14 +276,12 @@ class Agent(Base):
         back_populates="agent",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     conversations: Mapped[list["Conversation"]] = relationship(
         "Conversation",
         back_populates="agent",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     background_tasks: Mapped[list["BackgroundTask"]] = relationship(
         "BackgroundTask", back_populates="agent", lazy="select"
@@ -296,7 +298,7 @@ class AgentPermission(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     agent_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("agents.id"), nullable=False, index=True
+        String(36), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
     )
     resource_pattern: Mapped[str] = mapped_column(String, nullable=False)
     operation: Mapped[str] = mapped_column(String, nullable=False)
@@ -317,7 +319,7 @@ class DataSource(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     space_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("spaces.id"), nullable=False, index=True
+        String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
     source_type: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -341,9 +343,9 @@ class Conversation(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     space_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("spaces.id"), nullable=True, index=True
+        String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=True, index=True
     )
-    agent_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id"), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[str] = mapped_column(String, default="active")
     model_override: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -360,21 +362,18 @@ class Conversation(Base):
         back_populates="conversation",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     summaries: Mapped[list["ConversationSummary"]] = relationship(
         "ConversationSummary",
         back_populates="conversation",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
     permission_requests: Mapped[list["PermissionRequest"]] = relationship(
         "PermissionRequest",
         back_populates="conversation",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
 
 
@@ -388,7 +387,7 @@ class ConversationMessage(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     conversation_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("conversations.id"), nullable=False, index=True
+        String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     role: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
@@ -409,10 +408,10 @@ class ConversationSummary(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     conversation_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("conversations.id"), nullable=False, index=True
+        String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     space_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("spaces.id"), nullable=True, index=True
+        String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=True, index=True
     )
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     decisions: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
@@ -421,7 +420,7 @@ class ConversationSummary(Base):
     # Phase 3b: summary consolidation
     is_meta_summary: Mapped[bool] = mapped_column(Boolean, default=False)
     consolidated_into: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("conversation_summaries.id"), nullable=True
+        String(36), ForeignKey("conversation_summaries.id", ondelete="SET NULL"), nullable=True
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
@@ -472,12 +471,12 @@ class BehavioralRule(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     agent_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("agents.id"), nullable=False, index=True
+        String(36), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
     )
     rule: Mapped[str] = mapped_column(Text, nullable=False)
     source_type: Mapped[str] = mapped_column(String, nullable=False)
     source_conversation_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("conversations.id"), nullable=True
+        String(36), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
     )
     confidence: Mapped[float] = mapped_column(Float, default=0.5)
     apply_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -503,13 +502,16 @@ class Document(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     space_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("spaces.id"), nullable=False, index=True
+        String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
     )
     title: Mapped[str] = mapped_column(String, nullable=False)
     source: Mapped[str] = mapped_column(String, nullable=False)
     local_path: Mapped[str | None] = mapped_column(String, nullable=True)
     drive_file_id: Mapped[str | None] = mapped_column(String, nullable=True)
     drive_folder_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    mime_type: Mapped[str | None] = mapped_column(String, nullable=True)
+    content_text: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     indexed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -531,9 +533,9 @@ class PermissionRequest(Base):
     __tablename__ = "permission_requests"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    agent_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id"), nullable=False)
+    agent_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
     conversation_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("conversations.id"), nullable=True
+        String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True
     )
     tool_name: Mapped[str] = mapped_column(String, nullable=False)
     resource: Mapped[str] = mapped_column(String, nullable=False)
@@ -563,9 +565,9 @@ class Notification(Base):
     type: Mapped[str] = mapped_column(String, nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    space_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("spaces.id"), nullable=True)
+    space_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=True)
     conversation_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("conversations.id"), nullable=True
+        String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True
     )
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
@@ -582,8 +584,8 @@ class Automation(Base):
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
-    space_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("spaces.id"), nullable=True)
-    agent_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id"), nullable=False)
+    space_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("spaces.id", ondelete="SET NULL"), nullable=True)
+    agent_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
     trigger_type: Mapped[str] = mapped_column(String, nullable=False)
     cron_expression: Mapped[str | None] = mapped_column(String, nullable=True)
@@ -603,7 +605,6 @@ class Automation(Base):
         back_populates="automation",
         lazy="select",
         cascade="all, delete-orphan",
-        passive_deletes=True,
     )
 
 
@@ -617,10 +618,10 @@ class AutomationRun(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     automation_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("automations.id"), nullable=False, index=True
+        String(36), ForeignKey("automations.id", ondelete="CASCADE"), nullable=False, index=True
     )
     background_task_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("background_tasks.id"), nullable=True
+        String(36), ForeignKey("background_tasks.id", ondelete="SET NULL"), nullable=True
     )
     status: Mapped[str] = mapped_column(String, nullable=False)
     result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -643,14 +644,14 @@ class BackgroundTask(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
     conversation_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("conversations.id"), nullable=True
+        String(36), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
     )
     automation_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("automations.id"), nullable=True
+        String(36), ForeignKey("automations.id", ondelete="SET NULL"), nullable=True
     )
-    agent_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id"), nullable=False)
-    space_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("spaces.id"), nullable=True)
-    item_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("items.id"), nullable=True)
+    agent_id: Mapped[str] = mapped_column(String(36), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False)
+    space_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("spaces.id", ondelete="SET NULL"), nullable=True)
+    item_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("items.id", ondelete="SET NULL"), nullable=True)
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String, default="queued")
     result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -659,7 +660,7 @@ class BackgroundTask(Base):
     total_steps: Mapped[int | None] = mapped_column(Integer, nullable=True)
     step_results: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     parent_task_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("background_tasks.id"), nullable=True
+        String(36), ForeignKey("background_tasks.id", ondelete="SET NULL"), nullable=True
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

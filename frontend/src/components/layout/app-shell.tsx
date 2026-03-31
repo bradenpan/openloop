@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import { Sidebar } from './sidebar';
 import { OdinBar } from './odin-bar';
+import { SearchModal } from '../search-modal';
 import { useSSEConnection } from '../../hooks/use-sse';
 
 export function AppShell() {
@@ -15,6 +16,7 @@ export function AppShell() {
         </main>
         <OdinBar />
       </div>
+      <SearchModal />
     </div>
   );
 }

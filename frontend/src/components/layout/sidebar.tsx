@@ -1,6 +1,7 @@
 import { NavLink } from 'react-router-dom';
 import { useUIStore } from '../../stores/ui-store';
 import { $api } from '../../api/hooks';
+import { SearchButton } from '../search-modal';
 
 export function Sidebar() {
   const collapsed = useUIStore((s) => s.sidebarCollapsed);
@@ -17,6 +18,7 @@ export function Sidebar() {
         >
           &#9776;
         </button>
+        <SearchButton collapsed />
       </aside>
     );
   }
@@ -37,6 +39,8 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 overflow-auto py-2 px-2">
+        <SearchButton />
+
         <NavLink
           to="/"
           end

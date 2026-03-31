@@ -31,6 +31,10 @@ data/
 .env.local
 .env.*.local
 
+# Google OAuth credentials
+credentials.json
+token.json
+
 # IDE
 .vscode/
 .idea/

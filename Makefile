@@ -5,7 +5,7 @@ dev:
 	$(MAKE) dev-backend & $(MAKE) dev-frontend & wait
 
 dev-backend:
-	cd backend && uvicorn openloop.main:app --reload --host 0.0.0.0 --port 8000
+	cd backend && uvicorn openloop.main:app --reload --host 0.0.0.0 --port 8010
 
 dev-frontend:
 	cd frontend && npx vite --host --port 5173

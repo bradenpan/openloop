@@ -1,8 +1,12 @@
+import logging
+
 from contract.enums import ItemType
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from backend.openloop.db.models import Item, ItemEvent, Space
+from backend.openloop.db.models import Item, ItemEvent, Space, Todo
+
+logger = logging.getLogger(__name__)
 
 
 def create_item(
@@ -36,6 +40,10 @@ def create_item(
             status_code=422,
             detail=f"Invalid stage '{stage}'. Valid: {space.board_columns}",
         )
+
+    # Validate custom fields against space schema
+    if custom_fields:
+        validate_custom_fields(db, space_id, custom_fields)
 
     # Default to first column if board is enabled and no stage specified
     if stage is None and space.board_enabled and space.board_columns:
@@ -91,7 +99,10 @@ def list_items(
     space_id: str | None = None,
     stage: str | None = None,
     item_type: str | None = None,
+    parent_record_id: str | None = None,
     archived: bool = False,
+    sort_by: str | None = None,
+    sort_order: str = "asc",
     limit: int = 50,
     offset: int = 0,
 ) -> list[Item]:
@@ -103,12 +114,32 @@ def list_items(
         query = query.filter(Item.stage == stage)
     if item_type is not None:
         query = query.filter(Item.item_type == item_type)
-    return query.order_by(Item.sort_position.asc()).offset(offset).limit(limit).all()
+    if parent_record_id is not None:
+        query = query.filter(Item.parent_record_id == parent_record_id)
+
+    # Determine sort column
+    _sortable = {
+        "title": Item.title,
+        "created_at": Item.created_at,
+        "updated_at": Item.updated_at,
+        "due_date": Item.due_date,
+        "stage": Item.stage,
+        "sort_position": Item.sort_position,
+    }
+    sort_col = _sortable.get(sort_by, Item.sort_position)
+    order = sort_col.desc() if sort_order == "desc" else sort_col.asc()
+
+    return query.order_by(order).offset(offset).limit(limit).all()
 
 
 def update_item(db: Session, item_id: str, triggered_by: str = "user", **kwargs) -> Item:
     """Update a board item. Uses exclude_unset pattern."""
     item = get_item(db, item_id)
+
+    # Validate custom fields if provided
+    if "custom_fields" in kwargs and kwargs["custom_fields"] is not None:
+        validate_custom_fields(db, item.space_id, kwargs["custom_fields"])
+
     updatable = {
         "title",
         "description",
@@ -174,6 +205,67 @@ def archive_item(db: Session, item_id: str, triggered_by: str = "user") -> Item:
     db.commit()
     db.refresh(item)
     return item
+
+
+def validate_custom_fields(db: Session, space_id: str, custom_fields: dict) -> None:
+    """Validate custom_fields against the space's custom_field_schema.
+
+    Logs warnings for unknown fields but does not reject them (lenient).
+    """
+    space = db.query(Space).filter(Space.id == space_id).first()
+    if not space or not space.custom_field_schema:
+        return
+
+    schema_names = {f["name"] for f in space.custom_field_schema if "name" in f}
+    for field_name in custom_fields:
+        if field_name not in schema_names:
+            logger.warning(
+                "Unknown custom field '%s' for space %s (valid: %s)",
+                field_name,
+                space_id,
+                schema_names,
+            )
+
+
+def get_record_with_children(db: Session, record_id: str) -> dict:
+    """Return a record item with its child items and linked todos."""
+    item = get_item(db, record_id)
+
+    children = (
+        db.query(Item)
+        .filter(Item.parent_record_id == record_id, Item.archived == False)  # noqa: E712
+        .order_by(Item.sort_position.asc())
+        .all()
+    )
+    linked_todos = (
+        db.query(Todo)
+        .filter(Todo.record_id == record_id)
+        .order_by(Todo.sort_position.asc())
+        .all()
+    )
+
+    return {
+        "record": item,
+        "child_records": children,
+        "linked_todos": linked_todos,
+    }
+
+
+def link_todo_to_record(db: Session, todo_id: str, record_id: str) -> Todo:
+    """Link a todo to a record by setting record_id on the todo."""
+    # Verify record exists
+    record = db.query(Item).filter(Item.id == record_id).first()
+    if not record:
+        raise HTTPException(status_code=404, detail="Record not found")
+
+    todo = db.query(Todo).filter(Todo.id == todo_id).first()
+    if not todo:
+        raise HTTPException(status_code=404, detail="Todo not found")
+
+    todo.record_id = record_id
+    db.commit()
+    db.refresh(todo)
+    return todo
 
 
 def _log_event(

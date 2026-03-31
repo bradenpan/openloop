@@ -108,17 +108,51 @@ All 6 tasks done per IMPLEMENTATION-PLAN.md. Memory system upgraded from basic k
 - `llm_utils.py` was not in the original plan — created as a shared utility for LLM system calls (dedup, flush, etc.).
 - Plan described compression as effective for the current SDK session. In practice, the SDK retains full JSONL history and has no truncation API. Compression creates DB checkpoints useful for future reopens but doesn't reduce current session context. Documented as a known limitation.
 
+## Phase 4: Records, Table View, Documents, Search — COMPLETE
+
+All 7 tasks done per IMPLEMENTATION-PLAN.md. CRM-style records, table view, document management with Drive, and FTS5 full-text search.
+
+**Pre-flight (Task 3.7 resolved):** Integration check confirmed frontend↔backend↔SSE all working. Fixed cascade delete bug (all 37 ForeignKeys missing `ondelete`), changed default port from 8000 to 8010 (avoids clash with dispatch app), added `credentials.json`/`token.json` to `.gitignore`.
+
+**Task 4.1 (Records Backend):** Added `custom_field_schema` (JSON) to Space model. Added `record_id` FK on Todo for linking todos to records. Extended item service with sorting (`sort_by`/`sort_order`), parent-child filtering, custom field validation, `get_record_with_children`, `link_todo_to_record`. New endpoints: `GET /spaces/{id}/field-schema`, `GET /items/{id}/children`, `POST /items/{id}/link-todo`.
+
+**Task 4.2 (Table View Frontend):** Table component with sortable column headers, stage filter, inline cell editing (text/number/date/select), column show/hide popover with localStorage persistence. Three-way view toggle (Board | Table | Documents) in Space view. Record creation modal. Item detail panel enhanced with custom fields, child records, and linked todos sections.
+
+**Task 4.3 (Document Management):** Added `file_size`, `mime_type`, `content_text` to Document model. Upload endpoint (multipart), directory scanning, content streaming endpoint. Text extraction for 16 file types. Frontend: document panel with drag-and-drop upload, document viewer slide-over with inline tag editing.
+
+**Task 4.4 (Google Drive Integration):** OAuth client using `credentials.json`/`token.json`. Drive folder linking via data_sources, file indexing with text extraction, refresh (add/update/remove detection). API routes at `/api/v1/drive`. Three new MCP tools (`read_drive_file`, `list_drive_files`, `create_drive_file`). Frontend: Link Drive button, Drive badge on documents, refresh button.
+
+**Task 4.5a (FTS5 Search Infrastructure):** FTS5 virtual tables for conversation_messages, conversation_summaries, memory_entries, documents (title + content_text). SQLite triggers for INSERT/UPDATE/DELETE sync. Memory triggers exclude archived and superseded entries. Search service with BM25 ranking and `snippet()` excerpts. `GET /api/v1/search` endpoint. Frontend: global search modal with Ctrl+K shortcut, debounced search, results grouped by type.
+
+**Task 4.5b (Cross-Space Search Tools):** Upgraded `search_conversations` and `recall_facts` MCP tools from LIKE to FTS5. New `search_summaries` tool. All cross-space capable with permission scoping via `agent_spaces` join table. Odin searches all spaces.
+
+**Task 4.6 (Tests):** 41 integration tests covering records, documents, search, Drive, and end-to-end workflows.
+
+**Code review (8 issues found and fixed):**
+1. Path traversal in file upload — sanitized filenames with `Path.name`
+2. XSS in search snippets — HTML-escaped excerpts with safe `<mark>` restoration
+3. Migration ordering — chained 3 parallel heads into linear sequence
+4. `nullslast()` unsupported on SQLite — replaced with `func.coalesce`
+5. Drive datetime comparison — string compare replaced with proper datetime parsing
+6. `update_document` missing field allowlist — added explicit `_DOC_UPDATABLE_FIELDS`
+7. Upload/refresh errors silently swallowed in frontend — added error feedback
+8. FTS5 documents index only had `title` — extended to include `content_text`
+
+**Deviations from plan:**
+- Port changed from 8000 to 8010 to avoid conflict with the old dispatch app
+- Cascade delete bug (pre-existing from Phase 2) fixed as part of pre-flight — all FKs now have `ondelete="CASCADE"` or `ondelete="SET NULL"`, `passive_deletes=True` removed
+
 ## Current State
 
-- **593 backend tests passing** (498 original + 95 new), lint clean
+- **750 backend tests passing** (593 prior + 157 new), lint clean
 - **39 frontend Playwright tests passing**
-- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety
-- Frontend: dashboard, space view, conversation panel, agent management, 3 palettes
-- Integration check (3.7) still pending
+- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive
+- Frontend: dashboard, space view (board + table + documents), conversation panel, agent management, search modal, document panel + viewer, 3 palettes
+- Integration check (3.7) resolved
 
-## Phases 4–7: Not Started
+## Phases 5–7: Not Started
 
-See IMPLEMENTATION-PLAN.md for full breakdown. Phase 4 (Records, Table View, Documents, Search) is next. Phases 4, 5, 6 can overlap.
+See IMPLEMENTATION-PLAN.md for full breakdown. Phase 5 (Agent Builder, Sub-agents, Steering) is next. Phases 5, 6, 7 can overlap.
 
 ---
 

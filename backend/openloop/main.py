@@ -27,6 +27,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     finally:
         db.close()
 
+    # FTS index check — rebuild if source tables have data but FTS tables are empty
+    from backend.openloop.services import search_service
+
+    db = SessionLocal()
+    try:
+        rebuilt = search_service.check_and_rebuild_if_needed(db)
+        if rebuilt:
+            logger.info("FTS indexes rebuilt on startup")
+    except Exception:
+        logger.warning("FTS startup check failed — search may be unavailable", exc_info=True)
+    finally:
+        db.close()
+
     yield
     # Shutdown logic
 
@@ -39,7 +52,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=["http://localhost:5173", "http://localhost:5174"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -50,6 +63,7 @@ from backend.openloop.api.routes.agents import router as agents_router  # noqa: 
 from backend.openloop.api.routes.conversations import router as conversations_router  # noqa: E402
 from backend.openloop.api.routes.data_sources import router as data_sources_router  # noqa: E402
 from backend.openloop.api.routes.documents import router as documents_router  # noqa: E402
+from backend.openloop.api.routes.drive import router as drive_router  # noqa: E402
 from backend.openloop.api.routes.events import router as events_router  # noqa: E402
 from backend.openloop.api.routes.home import router as home_router  # noqa: E402
 from backend.openloop.api.routes.items import router as items_router  # noqa: E402
@@ -58,6 +72,7 @@ from backend.openloop.api.routes.notifications import router as notifications_ro
 from backend.openloop.api.routes.odin import router as odin_router  # noqa: E402
 from backend.openloop.api.routes.running import router as running_router  # noqa: E402
 from backend.openloop.api.routes.spaces import router as spaces_router  # noqa: E402
+from backend.openloop.api.routes.search import router as search_router  # noqa: E402
 from backend.openloop.api.routes.todos import router as todos_router  # noqa: E402
 
 # NOTE: running_router must be included BEFORE agents_router because both use
@@ -69,11 +84,13 @@ app.include_router(conversations_router)
 app.include_router(data_sources_router)
 app.include_router(events_router)
 app.include_router(documents_router)
+app.include_router(drive_router)
 app.include_router(home_router)
 app.include_router(items_router)
 app.include_router(memory_router)
 app.include_router(notifications_router)
 app.include_router(odin_router)
+app.include_router(search_router)
 app.include_router(spaces_router)
 app.include_router(todos_router)
 

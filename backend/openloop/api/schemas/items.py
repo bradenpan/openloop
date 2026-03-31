@@ -3,12 +3,16 @@ from datetime import datetime
 from contract.enums import ItemType
 from pydantic import BaseModel, ConfigDict
 
+from backend.openloop.api.schemas.todos import TodoResponse
+
 __all__ = [
     "ItemCreate",
     "ItemUpdate",
     "ItemResponse",
     "ItemMove",
     "ItemEventResponse",
+    "RecordChildrenResponse",
+    "LinkTodoRequest",
 ]
 
 
@@ -75,3 +79,13 @@ class ItemEventResponse(BaseModel):
     new_value: str | None
     triggered_by: str
     created_at: datetime
+
+
+class RecordChildrenResponse(BaseModel):
+    record: ItemResponse
+    child_records: list[ItemResponse]
+    linked_todos: list[TodoResponse]
+
+
+class LinkTodoRequest(BaseModel):
+    todo_id: str

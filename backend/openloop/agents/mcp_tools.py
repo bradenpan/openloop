@@ -12,6 +12,9 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from sqlalchemy import text
+from sqlalchemy.orm import Session
+
 from backend.openloop.database import SessionLocal
 from backend.openloop.services import (
     agent_service,
@@ -20,6 +23,7 @@ from backend.openloop.services import (
     document_service,
     item_service,
     memory_service,
+    search_service,
     space_service,
     todo_service,
 )
@@ -61,6 +65,24 @@ def _ok(result) -> str:
 
 def _err(msg: str) -> str:
     return json.dumps({"is_error": True, "error": msg})
+
+
+def _get_agent_space_ids(db: Session, agent_id: str) -> list[str] | None:
+    """Get space IDs this agent has access to via the agent_spaces join table.
+
+    Returns None for system agents (like Odin) that have no space restrictions,
+    meaning they can search all spaces. Returns a list of space IDs for scoped agents.
+    """
+    if not agent_id:
+        return None
+    rows = db.execute(
+        text("SELECT space_id FROM agent_spaces WHERE agent_id = :agent_id"),
+        {"agent_id": agent_id},
+    ).fetchall()
+    if not rows:
+        # No space restrictions — system agent (Odin) or agent with global access
+        return None
+    return [r[0] for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -436,42 +458,121 @@ async def update_fact(fact_id: str, new_content: str, *, _db=None) -> str:
             db.close()
 
 
-# recall_facts (smart read with scoring)
+# recall_facts (smart read with scoring — FTS5 backed)
 async def recall_facts(
-    query: str = "", namespace: str = "", category: str = "", *, _db=None
+    query: str = "", namespace: str = "", category: str = "", limit: str = "20", *, _db=None
 ) -> str:
-    """Search and retrieve facts from memory, ranked by relevance score.
+    """Search and retrieve facts from memory using full-text search.
 
-    If namespace is provided, returns scored entries from that namespace.
-    If query is provided, searches across key/value fields.
+    query: search terms for FTS5 search across memory values.
+    namespace: filter by namespace. If provided without query, returns
+        scored entries from that namespace (importance-based ranking).
+    category: filter by category.
+    limit: max results for FTS5 search (default 20).
+
+    When query is provided, uses FTS5 BM25 ranking. When only namespace
+    is provided, falls back to importance-based scored retrieval.
     """
     db = _get_db(_db)
     try:
-        if namespace:
+        limit_int = _parse_int(limit, 20)
+
+        if query and query.strip():
+            # FTS5 search with BM25 ranking
+            fts_results = search_service.search_memory(
+                db,
+                query,
+                namespace=namespace or None,
+                limit=limit_int,
+            )
+            if category:
+                # Post-filter by category (FTS5 doesn't index category)
+                # We need to look up the actual entry for category filtering
+                filtered = []
+                for r in fts_results:
+                    from backend.openloop.db.models import MemoryEntry
+
+                    entry = db.query(MemoryEntry).filter(MemoryEntry.id == r["id"]).first()
+                    if entry and (not category or entry.category == category):
+                        r["importance"] = entry.importance
+                        r["category"] = entry.category
+                        r["tags"] = entry.tags
+                        r["access_count"] = entry.access_count
+                        # Track access
+                        entry.access_count += 1
+                        entry.last_accessed = datetime.now(UTC)
+                        filtered.append(r)
+                db.commit()
+                fts_results = filtered
+            else:
+                # Enrich results with importance/category/tags from the ORM
+                from backend.openloop.db.models import MemoryEntry
+
+                for r in fts_results:
+                    entry = db.query(MemoryEntry).filter(MemoryEntry.id == r["id"]).first()
+                    if entry:
+                        r["importance"] = entry.importance
+                        r["category"] = entry.category
+                        r["tags"] = entry.tags
+                        r["access_count"] = entry.access_count
+                        entry.access_count += 1
+                        entry.last_accessed = datetime.now(UTC)
+                db.commit()
+
+            return _ok(
+                [
+                    {
+                        "id": r["id"],
+                        "namespace": r["title"].split("/")[0] if "/" in r["title"] else "",
+                        "key": r["title"].split("/")[1] if "/" in r["title"] else r["title"],
+                        "value": r["excerpt"],
+                        "importance": r.get("importance", 0.5),
+                        "category": r.get("category"),
+                        "tags": r.get("tags"),
+                        "relevance_score": r["relevance_score"],
+                        "access_count": r.get("access_count", 0),
+                    }
+                    for r in fts_results
+                ]
+            )
+        elif namespace:
+            # Namespace-based scored retrieval (importance ranking)
             entries = memory_service.get_scored_entries(db, namespace)
             if category:
                 entries = [e for e in entries if e.category == category]
-        else:
-            entries = memory_service.list_entries(
-                db,
-                search=query or None,
+            return _ok(
+                [
+                    {
+                        "id": e.id,
+                        "namespace": e.namespace,
+                        "key": e.key,
+                        "value": e.value,
+                        "importance": e.importance,
+                        "category": e.category,
+                        "tags": e.tags,
+                    }
+                    for e in entries
+                ]
             )
+        else:
+            # No query and no namespace — return all entries
+            entries = memory_service.list_entries(db)
             if category:
                 entries = [e for e in entries if e.category == category]
-        return _ok(
-            [
-                {
-                    "id": e.id,
-                    "namespace": e.namespace,
-                    "key": e.key,
-                    "value": e.value,
-                    "importance": e.importance,
-                    "category": e.category,
-                    "tags": e.tags,
-                }
-                for e in entries
-            ]
-        )
+            return _ok(
+                [
+                    {
+                        "id": e.id,
+                        "namespace": e.namespace,
+                        "key": e.key,
+                        "value": e.value,
+                        "importance": e.importance,
+                        "category": e.category,
+                        "tags": e.tags,
+                    }
+                    for e in entries
+                ]
+            )
     except Exception as e:
         db.rollback()
         return _err(str(e))
@@ -810,28 +911,118 @@ async def get_conversation_summaries(space_id: str, limit: str = "5", *, _db=Non
 
 
 # 17. search_conversations
-async def search_conversations(space_id: str, query: str = "", *, _db=None) -> str:
-    """Search conversation messages using basic LIKE matching."""
-    from backend.openloop.db.models import Conversation, ConversationMessage
+async def search_conversations(
+    query: str,
+    space_id: str = "",
+    conversation_id: str = "",
+    limit: str = "20",
+    *,
+    _db=None,
+    _agent_id: str = "",
+) -> str:
+    """Search conversation messages using full-text search (FTS5).
 
+    query: the search terms (required).
+    space_id: filter to a specific space. If omitted, searches across all
+        spaces this agent has access to.
+    conversation_id: filter to a specific conversation.
+    limit: max results (default 20).
+    """
     db = _get_db(_db)
     try:
-        q = db.query(ConversationMessage).join(Conversation)
-        q = q.filter(Conversation.space_id == space_id)
-        if query:
-            pattern = f"%{query}%"
-            q = q.filter(ConversationMessage.content.ilike(pattern))
-        messages = q.order_by(ConversationMessage.created_at.desc()).limit(20).all()
+        if not query or not query.strip():
+            return _ok([])
+
+        limit_int = _parse_int(limit, 20)
+        sid = space_id or None
+        cid = conversation_id or None
+
+        # Determine space scoping for cross-space search
+        space_ids = None
+        if not sid:
+            space_ids = _get_agent_space_ids(db, _agent_id)
+            # space_ids=None means system agent — search everything
+
+        results = search_service.search_messages(
+            db,
+            query,
+            space_id=sid,
+            space_ids=space_ids,
+            conversation_id=cid,
+            limit=limit_int,
+        )
         return _ok(
             [
                 {
-                    "message_id": m.id,
-                    "conversation_id": m.conversation_id,
-                    "role": m.role,
-                    "content": m.content[:200],
-                    "created_at": m.created_at.isoformat(),
+                    "message_id": r["id"],
+                    "conversation_id": r["source_id"],
+                    "role": r["title"].split(" in ")[0] if " in " in r["title"] else "",
+                    "excerpt": r["excerpt"],
+                    "space_id": r["space_id"],
+                    "space_name": r["space_name"],
+                    "relevance_score": r["relevance_score"],
+                    "created_at": r["created_at"],
                 }
-                for m in messages
+                for r in results
+            ]
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 17b. search_summaries
+async def search_summaries(
+    query: str,
+    space_id: str = "",
+    limit: str = "20",
+    *,
+    _db=None,
+    _agent_id: str = "",
+) -> str:
+    """Search conversation summaries using full-text search (FTS5).
+
+    query: the search terms (required).
+    space_id: filter to a specific space. If omitted, searches across all
+        spaces this agent has access to.
+    limit: max results (default 20).
+    """
+    db = _get_db(_db)
+    try:
+        if not query or not query.strip():
+            return _ok([])
+
+        limit_int = _parse_int(limit, 20)
+        sid = space_id or None
+
+        # Determine space scoping for cross-space search
+        space_ids = None
+        if not sid:
+            space_ids = _get_agent_space_ids(db, _agent_id)
+
+        results = search_service.search_summaries(
+            db,
+            query,
+            space_id=sid,
+            space_ids=space_ids,
+            limit=limit_int,
+        )
+        return _ok(
+            [
+                {
+                    "summary_id": r["id"],
+                    "conversation_id": r["source_id"],
+                    "conversation_name": r["title"].removeprefix("Summary: "),
+                    "excerpt": r["excerpt"],
+                    "space_id": r["space_id"],
+                    "space_name": r["space_name"],
+                    "relevance_score": r["relevance_score"],
+                    "created_at": r["created_at"],
+                }
+                for r in results
             ]
         )
     except Exception as e:
@@ -1086,6 +1277,74 @@ async def get_cross_space_todos(is_done: str = "", *, _db=None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Google Drive tools (26-28)
+# ---------------------------------------------------------------------------
+
+
+# 26. read_drive_file
+async def read_drive_file(file_id: str, *, _db=None) -> str:
+    """Read text content of a Google Drive file by its file ID."""
+    try:
+        from backend.openloop.services import gdrive_client
+
+        if not gdrive_client.is_authenticated():
+            return _err("Google Drive is not authenticated. Link a Drive folder first.")
+
+        text = gdrive_client.read_file_text(file_id)
+        if text is None:
+            return _err("File is binary or could not be read as text")
+        # Truncate very large files to avoid overwhelming context
+        if len(text) > 50000:
+            text = text[:50000] + "\n\n... [truncated at 50,000 characters]"
+        return _ok({"file_id": file_id, "content": text})
+    except Exception as e:
+        return _err(str(e))
+
+
+# 27. list_drive_files
+async def list_drive_files(folder_id: str, *, _db=None) -> str:
+    """List files in a Google Drive folder."""
+    try:
+        from backend.openloop.services import gdrive_client
+
+        if not gdrive_client.is_authenticated():
+            return _err("Google Drive is not authenticated. Link a Drive folder first.")
+
+        files = gdrive_client.list_files(folder_id)
+        return _ok(
+            [
+                {
+                    "id": f["id"],
+                    "name": f["name"],
+                    "mimeType": f.get("mimeType"),
+                    "size": f.get("size"),
+                    "modifiedTime": f.get("modifiedTime"),
+                }
+                for f in files
+            ]
+        )
+    except Exception as e:
+        return _err(str(e))
+
+
+# 28. create_drive_file
+async def create_drive_file(
+    folder_id: str, name: str, content: str, mime_type: str = "text/plain", *, _db=None
+) -> str:
+    """Create a new file in a Google Drive folder."""
+    try:
+        from backend.openloop.services import gdrive_client
+
+        if not gdrive_client.is_authenticated():
+            return _err("Google Drive is not authenticated. Link a Drive folder first.")
+
+        result = gdrive_client.create_file(folder_id, name, content, mime_type)
+        return _ok({"id": result["id"], "name": result["name"], "mimeType": result.get("mimeType")})
+    except Exception as e:
+        return _err(str(e))
+
+
+# ---------------------------------------------------------------------------
 # Builder functions
 # ---------------------------------------------------------------------------
 
@@ -1116,8 +1375,12 @@ _STANDARD_TOOLS = {
     "get_todo_state": get_todo_state,
     "get_conversation_summaries": get_conversation_summaries,
     "search_conversations": search_conversations,
+    "search_summaries": search_summaries,
     "get_conversation_messages": get_conversation_messages,
     "delegate_task": delegate_task,
+    "read_drive_file": read_drive_file,
+    "list_drive_files": list_drive_files,
+    "create_drive_file": create_drive_file,
 }
 
 _ODIN_TOOLS = {

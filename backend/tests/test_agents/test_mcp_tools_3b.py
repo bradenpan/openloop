@@ -13,6 +13,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.openloop.agents.mcp_tools import (
@@ -31,6 +32,60 @@ from backend.openloop.services import (
     memory_service,
 )
 from contract.enums import DedupDecision
+
+
+# FTS5 setup needed for recall_facts query-based tests
+_FTS_MEMORY_SETUP = [
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS fts_memory_entries
+    USING fts5(value, content='memory_entries', content_rowid='rowid');
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_memory_entries_ai
+    AFTER INSERT ON memory_entries
+    WHEN new.archived_at IS NULL AND new.valid_until IS NULL
+    BEGIN
+        INSERT INTO fts_memory_entries(rowid, value)
+        VALUES (new.rowid, new.value);
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_memory_entries_bd
+    BEFORE DELETE ON memory_entries
+    BEGIN
+        INSERT INTO fts_memory_entries(fts_memory_entries, rowid, value)
+        VALUES ('delete', old.rowid, old.value);
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_memory_entries_au
+    AFTER UPDATE ON memory_entries
+    BEGIN
+        INSERT INTO fts_memory_entries(fts_memory_entries, rowid, value)
+        VALUES ('delete', old.rowid, old.value);
+        INSERT INTO fts_memory_entries(rowid, value)
+        SELECT new.rowid, new.value
+        WHERE new.archived_at IS NULL AND new.valid_until IS NULL;
+    END;
+    """,
+]
+
+
+@pytest.fixture()
+def fts_memory_db(db_session: Session) -> Session:
+    """Create FTS5 memory table and triggers for recall_facts query tests."""
+    conn = db_session.connection()
+    for sql in _FTS_MEMORY_SETUP:
+        conn.execute(text(sql))
+    db_session.commit()
+
+    yield db_session
+
+    conn = db_session.connection()
+    for name in ["fts_memory_entries_ai", "fts_memory_entries_bd", "fts_memory_entries_au"]:
+        conn.execute(text(f"DROP TRIGGER IF EXISTS {name};"))
+    conn.execute(text("DROP TABLE IF EXISTS fts_memory_entries;"))
+    db_session.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -149,16 +204,16 @@ class TestRecallFacts:
         assert len(result["result"]) == 2
 
     @pytest.mark.asyncio
-    async def test_recall_with_query(self, db_session: Session):
-        """recall_facts with query should search across entries."""
+    async def test_recall_with_query(self, fts_memory_db: Session):
+        """recall_facts with query should search across entries via FTS5."""
         memory_service.create_entry(
-            db_session, namespace="global", key="tech", value="Python + React"
+            fts_memory_db, namespace="global", key="tech", value="Python + React"
         )
         memory_service.create_entry(
-            db_session, namespace="global", key="weather", value="sunny today"
+            fts_memory_db, namespace="global", key="weather", value="sunny today"
         )
 
-        result_str = await recall_facts(query="Python", _db=db_session)
+        result_str = await recall_facts(query="Python", _db=fts_memory_db)
         result = _parse(result_str)
         assert len(result["result"]) == 1
         assert "Python" in result["result"][0]["value"]

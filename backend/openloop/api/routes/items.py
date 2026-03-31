@@ -7,7 +7,10 @@ from backend.openloop.api.schemas import (
     ItemMove,
     ItemResponse,
     ItemUpdate,
+    LinkTodoRequest,
+    RecordChildrenResponse,
 )
+from backend.openloop.api.schemas.todos import TodoResponse
 from backend.openloop.database import get_db
 from backend.openloop.services import item_service
 
@@ -38,7 +41,10 @@ def list_items(
     space_id: str | None = Query(None),
     stage: str | None = Query(None),
     item_type: str | None = Query(None),
+    parent_record_id: str | None = Query(None),
     archived: bool = Query(False),
+    sort_by: str | None = Query(None),
+    sort_order: str = Query("asc"),
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
@@ -48,7 +54,10 @@ def list_items(
         space_id=space_id,
         stage=stage,
         item_type=item_type,
+        parent_record_id=parent_record_id,
         archived=archived,
+        sort_by=sort_by,
+        sort_order=sort_order,
         limit=limit,
         offset=offset,
     )
@@ -78,6 +87,24 @@ def move_item(item_id: str, body: ItemMove, db: Session = Depends(get_db)) -> It
 def archive_item(item_id: str, db: Session = Depends(get_db)) -> ItemResponse:
     item = item_service.archive_item(db, item_id)
     return ItemResponse.model_validate(item)
+
+
+@router.get("/{item_id}/children", response_model=RecordChildrenResponse)
+def get_record_children(item_id: str, db: Session = Depends(get_db)) -> RecordChildrenResponse:
+    result = item_service.get_record_with_children(db, item_id)
+    return RecordChildrenResponse(
+        record=ItemResponse.model_validate(result["record"]),
+        child_records=[ItemResponse.model_validate(c) for c in result["child_records"]],
+        linked_todos=[TodoResponse.model_validate(t) for t in result["linked_todos"]],
+    )
+
+
+@router.post("/{record_id}/link-todo", response_model=TodoResponse)
+def link_todo_to_record(
+    record_id: str, body: LinkTodoRequest, db: Session = Depends(get_db)
+) -> TodoResponse:
+    todo = item_service.link_todo_to_record(db, body.todo_id, record_id)
+    return TodoResponse.model_validate(todo)
 
 
 @router.get("/{item_id}/events", response_model=list[ItemEventResponse])

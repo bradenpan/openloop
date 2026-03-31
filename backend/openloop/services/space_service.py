@@ -29,7 +29,7 @@ _TEMPLATE_DEFAULTS: dict[str, dict] = {
 }
 
 # Fields that can be updated via PATCH
-_UPDATABLE_FIELDS = {"name", "description", "board_enabled", "default_view", "board_columns"}
+_UPDATABLE_FIELDS = {"name", "description", "board_enabled", "default_view", "board_columns", "custom_field_schema"}
 
 
 def create_space(db: Session, *, name: str, template: str, description: str | None = None) -> Space:

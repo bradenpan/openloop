@@ -34,5 +34,6 @@ class TodoResponse(BaseModel):
     created_by: str
     source_conversation_id: str | None
     promoted_to_item_id: str | None
+    record_id: str | None
     created_at: datetime
     updated_at: datetime

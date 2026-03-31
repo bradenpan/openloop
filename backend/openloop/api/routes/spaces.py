@@ -39,6 +39,12 @@ def update_space(space_id: str, body: SpaceUpdate, db: Session = Depends(get_db)
     return SpaceResponse.model_validate(space)
 
 
+@router.get("/{space_id}/field-schema")
+def get_field_schema(space_id: str, db: Session = Depends(get_db)):
+    space = space_service.get_space(db, space_id)
+    return space.custom_field_schema or []
+
+
 @router.delete("/{space_id}", status_code=204)
 def delete_space(space_id: str, db: Session = Depends(get_db)) -> None:
     space_service.delete_space(db, space_id)

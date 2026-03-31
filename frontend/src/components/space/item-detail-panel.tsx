@@ -2,6 +2,16 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
 import { Panel, Button, Badge } from '../ui';
+import type { components } from '../../api/types';
+
+type ItemResponse = components['schemas']['ItemResponse'];
+type TodoResponse = components['schemas']['TodoResponse'];
+
+interface FieldSchema {
+  name: string;
+  type: string;
+  options?: string[];
+}
 
 interface ItemDetailPanelProps {
   itemId: string | null;
@@ -28,6 +38,26 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
     { enabled: open && itemId != null },
   );
   const events = eventsData ?? [];
+
+  // Fetch children (child records + linked todos)
+  const { data: childrenData } = $api.useQuery(
+    'get',
+    '/api/v1/items/{item_id}/children',
+    { params: { path: { item_id: itemId! } } },
+    { enabled: open && itemId != null },
+  );
+  const childRecords: ItemResponse[] = childrenData?.child_records ?? [];
+  const linkedTodos: TodoResponse[] = childrenData?.linked_todos ?? [];
+
+  // Fetch field schema from the item's space
+  const spaceIdForSchema = itemData?.space_id;
+  const { data: fieldSchemaData } = $api.useQuery(
+    'get',
+    '/api/v1/spaces/{space_id}/field-schema',
+    { params: { path: { space_id: spaceIdForSchema! } } },
+    { enabled: open && spaceIdForSchema != null },
+  );
+  const fieldSchema: FieldSchema[] = Array.isArray(fieldSchemaData) ? fieldSchemaData as FieldSchema[] : [];
 
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
@@ -159,6 +189,56 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
               />
             </div>
           </div>
+
+          {/* Custom Fields */}
+          {fieldSchema.length > 0 && item.custom_fields && (
+            <div className="border-t border-border pt-4 mt-1">
+              <h4 className="text-xs font-medium text-muted uppercase tracking-wider mb-3">Custom Fields</h4>
+              <div className="flex flex-col gap-2">
+                {fieldSchema.map((field) => {
+                  const val = item.custom_fields?.[field.name];
+                  return (
+                    <div key={field.name} className="flex items-center gap-2">
+                      <span className="text-xs text-muted w-28 shrink-0 capitalize">{field.name.replace(/_/g, ' ')}</span>
+                      <span className="text-xs text-foreground">{val != null ? String(val) : '--'}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Child Records */}
+          {childRecords.length > 0 && (
+            <div className="border-t border-border pt-4 mt-1">
+              <h4 className="text-xs font-medium text-muted uppercase tracking-wider mb-3">Child Records</h4>
+              <div className="flex flex-col gap-1.5">
+                {childRecords.map((child) => (
+                  <div key={child.id} className="flex items-center gap-2 text-xs bg-raised rounded-md px-3 py-2">
+                    <span className="text-foreground font-medium flex-1 truncate">{child.title}</span>
+                    {child.stage && <Badge variant="info">{child.stage}</Badge>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Linked Todos */}
+          {linkedTodos.length > 0 && (
+            <div className="border-t border-border pt-4 mt-1">
+              <h4 className="text-xs font-medium text-muted uppercase tracking-wider mb-3">Linked Todos</h4>
+              <div className="flex flex-col gap-1.5">
+                {linkedTodos.map((todo) => (
+                  <div key={todo.id} className="flex items-center gap-2 text-xs bg-raised rounded-md px-3 py-2">
+                    <span className={`flex-1 truncate ${todo.is_done ? 'line-through text-muted' : 'text-foreground'}`}>
+                      {todo.title}
+                    </span>
+                    {todo.is_done && <Badge variant="success">Done</Badge>}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Metadata */}
           <div className="flex items-center gap-2 text-xs text-muted">
