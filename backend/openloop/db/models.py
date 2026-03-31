@@ -121,6 +121,32 @@ class Space(Base):
     agents: Mapped[list["Agent"]] = relationship(
         "Agent", secondary=agent_spaces, back_populates="spaces", lazy="select"
     )
+    widgets: Mapped[list["SpaceWidget"]] = relationship(
+        "SpaceWidget", back_populates="space", cascade="all, delete-orphan", lazy="select"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 1b. space_widgets
+# ---------------------------------------------------------------------------
+
+
+class SpaceWidget(Base):
+    __tablename__ = "space_widgets"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    space_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    widget_type: Mapped[str] = mapped_column(String, nullable=False)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    size: Mapped[str] = mapped_column(String, default="medium")
+    config: Mapped[dict | None] = mapped_column(SA_JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relationships
+    space: Mapped["Space"] = relationship("Space", back_populates="widgets")
 
 
 # ---------------------------------------------------------------------------

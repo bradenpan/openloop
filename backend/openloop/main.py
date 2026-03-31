@@ -71,6 +71,7 @@ from backend.openloop.api.routes.memory import router as memory_router  # noqa: 
 from backend.openloop.api.routes.notifications import router as notifications_router  # noqa: E402
 from backend.openloop.api.routes.odin import router as odin_router  # noqa: E402
 from backend.openloop.api.routes.running import router as running_router  # noqa: E402
+from backend.openloop.api.routes.layout import router as layout_router  # noqa: E402
 from backend.openloop.api.routes.spaces import router as spaces_router  # noqa: E402
 from backend.openloop.api.routes.search import router as search_router  # noqa: E402
 from backend.openloop.api.routes.todos import router as todos_router  # noqa: E402
@@ -90,6 +91,7 @@ app.include_router(items_router)
 app.include_router(memory_router)
 app.include_router(notifications_router)
 app.include_router(odin_router)
+app.include_router(layout_router)
 app.include_router(search_router)
 app.include_router(spaces_router)
 app.include_router(todos_router)

@@ -87,15 +87,21 @@ There are two weights of tracked work:
 
 Agents can create and manage both to-dos and board items through their MCP tools.
 
-### Space Views
+### Space Layouts
 
-Spaces adapt their display to what's enabled:
+Each space has a configurable layout — an arrangement of widgets that defines what the space shows and how. A widget is a self-contained UI component: a kanban board, a data table, a to-do list, a conversation sidebar, a chart, a stat card, a notes panel, or a data feed.
 
-- **To-do list** (always present) — checkbox list of lightweight items. Visible in every space.
-- **Board view** (optional) — Kanban columns. Items grouped by stage, drag-and-drop. Default for project-type spaces.
-- **Table view** (optional) — rows and columns. Each row is a record or task. Sortable, filterable. Default for CRM-type spaces.
+Space templates provide sensible default layouts:
+- **Project** — to-do panel (left), kanban board (center), conversations (right)
+- **CRM** — to-do panel (left), data table (center), conversations (right)
+- **Knowledge Base** — notes panel (center), conversations (right)
+- **Simple** — to-do panel (center), conversations (right)
 
-Both board and table views show the same underlying board items. You can switch between them. The to-do list is always available alongside either view.
+These defaults match the current fixed-view behavior. But layouts are editable — you can add, remove, rearrange, and configure widgets through a layout editor in space settings, or ask an agent to do it for you.
+
+**Agent-designed layouts:** Tell an agent "redesign this space to show my health data with charts and a bloodwork tracker" and the agent writes a new layout config — adding chart widgets connected to your Garmin data source, a table widget for bloodwork entries, and removing the kanban board you don't need. Agents have MCP tools to read and modify space layouts just like they have tools to create to-dos or move board items.
+
+**Core widget types:** to-do panel, kanban board, data table, conversation sidebar. These are available at launch. **Extended widget types** (charts, stat cards, markdown notes, data feeds) are added later and depend on data source integrations to be meaningful.
 
 Default board columns: **Idea → Scoping → To Do → In Progress → Done**.
 
@@ -335,6 +341,7 @@ Accessible from Home or Settings. Shows:
 23. **Temporal fact management** — facts track when they became true and when they were superseded. Historical facts preserved for querying. Write-time comparison detects contradictions and supersedes old facts automatically.
 24. **Cross-space and deep search** — FTS5 full-text indexes on memory, messages, and summaries. Conversation and summary search across spaces (scoped to agent permissions). Replaces basic substring matching with ranked results.
 25. **Mid-task steering** — send a message to a running background agent to redirect it. Background delegation uses a managed turn loop: the session manager auto-continues between agent turns, checking a steering queue at each turn boundary. User corrections are picked up at the next turn boundary — no restart needed. Works within the Claude Agent SDK's existing `query()` + `resume` mechanism.
+26. **Widget-based space layouts** — spaces use a configurable widget layout instead of hardcoded views. Templates provide defaults. Layouts editable via settings panel and agent MCP tools. Core widgets: to-do panel, kanban board, data table, conversation sidebar. Agents can read, modify, and fully redesign space layouts.
 
 ### P2 — Valuable, build when core is solid
 
@@ -352,13 +359,14 @@ Accessible from Home or Settings. Shows:
 37. **Summary consolidation** — automated meta-summary generation when a space exceeds 20 unconsolidated summaries. Condensed overview replaces individual summaries in context assembly. Manual trigger available. Successive consolidation keeps one current meta-summary covering full history.
 38. **Retrieval scoring** — context assembly scores facts by importance, recency, and access frequency (Ebbinghaus-inspired decay). Frequently-used, high-importance facts stay prominent regardless of age.
 39. **Multi-step workflow tracking** — background tasks track current step, total steps, and step results. Parent-child task hierarchies for sub-agent delegation. Failed tasks show exactly where they stopped, enabling resume from failure point.
+40. **Extended widget library** — chart/graph widgets (connected to data sources), stat cards, markdown/notes panels, data feed widgets. Depends on API data source integrations. Enables agent-designed spaces like a health dashboard with Garmin charts and bloodwork tracking.
 
 ### P3 — Future
 
-40. **Remote access** — interact via Discord, Slack, or web interface from any device.
-41. **Mobile access** — view to-dos, board, and conversations from phone.
-42. **Multi-user** — share spaces, assign tasks to people.
-43. **Hybrid memory search** — vector embeddings + FTS5 keyword search with temporal decay and diversity reranking. Requires embedding infrastructure.
+41. **Remote access** — interact via Discord, Slack, or web interface from any device.
+42. **Mobile access** — view to-dos, board, and conversations from phone.
+43. **Multi-user** — share spaces, assign tasks to people.
+44. **Hybrid memory search** — vector embeddings + FTS5 keyword search with temporal decay and diversity reranking. Requires embedding infrastructure.
 
 ---
 
@@ -423,6 +431,7 @@ Accessible from Home or Settings. Shows:
 25. **Cross-space search** — conversation and summary search tools accept optional `space_id`. Omitting it searches all spaces the agent has access to (scoped by `agent_spaces`). FTS5 replaces LIKE matching for all text search.
 26. **Mid-task steering** — background delegation uses a managed turn loop where the session manager auto-continues between agent turns. A steering queue accepts user corrections, which are injected at the next turn boundary via the SDK's `query(resume=session_id)` mechanism. No mid-tool-call injection required (the SDK doesn't support this). Agent system prompts instruct incremental work, creating natural turn boundaries for steering and progress tracking.
 27. **Workflow tracking** — background tasks track step-level progress with parent-child hierarchies. Failed tasks show where they stopped. Audit detects stale (>10min queued) and stuck (>30min running) tasks.
+28. **Space layouts** — widget-based, config-driven. Layout stored per space as an ordered list of widget configurations in a `space_widgets` table. Templates provide defaults that match the current fixed layouts. Agents have MCP tools to modify layouts. Core widgets (kanban, table, to-do, conversations) in P1. Extended widgets (charts, data feeds, stat cards) in P2 alongside data source integrations. Settings-panel layout editor first; drag-and-drop widget repositioning within the space view is a later enhancement.
 
 ---
 

@@ -1527,6 +1527,151 @@
         }
       }
     },
+    "/api/v1/drive/auth-status": {
+      "get": {
+        "tags": [
+          "drive"
+        ],
+        "summary": "Auth Status",
+        "operationId": "auth_status_api_v1_drive_auth_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriveAuthStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/drive/link": {
+      "post": {
+        "tags": [
+          "drive"
+        ],
+        "summary": "Link Drive Folder",
+        "operationId": "link_drive_folder_api_v1_drive_link_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DriveLinkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriveLinkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/drive/refresh/{data_source_id}": {
+      "post": {
+        "tags": [
+          "drive"
+        ],
+        "summary": "Refresh Drive Index",
+        "operationId": "refresh_drive_index_api_v1_drive_refresh__data_source_id__post",
+        "parameters": [
+          {
+            "name": "data_source_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Data Source Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DriveRefreshResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/drive/files/{file_id}/content": {
+      "get": {
+        "tags": [
+          "drive"
+        ],
+        "summary": "Get Drive File Content",
+        "description": "Proxy Drive file content to the frontend.",
+        "operationId": "get_drive_file_content_api_v1_drive_files__file_id__content_get",
+        "parameters": [
+          {
+            "name": "file_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "File Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/home/dashboard": {
       "get": {
         "tags": [
@@ -2486,6 +2631,253 @@
         }
       }
     },
+    "/api/v1/spaces/{space_id}/layout": {
+      "get": {
+        "tags": [
+          "layouts"
+        ],
+        "summary": "Get Layout",
+        "operationId": "get_layout_api_v1_spaces__space_id__layout_get",
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Space Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LayoutResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "put": {
+        "tags": [
+          "layouts"
+        ],
+        "summary": "Set Layout",
+        "operationId": "set_layout_api_v1_spaces__space_id__layout_put",
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Space Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LayoutBulkReplace"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LayoutResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/spaces/{space_id}/layout/widgets": {
+      "post": {
+        "tags": [
+          "layouts"
+        ],
+        "summary": "Add Widget",
+        "operationId": "add_widget_api_v1_spaces__space_id__layout_widgets_post",
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Space Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WidgetCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/spaces/{space_id}/layout/widgets/{widget_id}": {
+      "patch": {
+        "tags": [
+          "layouts"
+        ],
+        "summary": "Update Widget",
+        "operationId": "update_widget_api_v1_spaces__space_id__layout_widgets__widget_id__patch",
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Space Id"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Widget Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WidgetUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WidgetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "layouts"
+        ],
+        "summary": "Remove Widget",
+        "operationId": "remove_widget_api_v1_spaces__space_id__layout_widgets__widget_id__delete",
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Space Id"
+            }
+          },
+          {
+            "name": "widget_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Widget Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/search": {
       "get": {
         "tags": [
@@ -2524,6 +2916,24 @@
               "title": "Space Id"
             },
             "description": "Filter by space"
+          },
+          {
+            "name": "conversation_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter message search to a specific conversation",
+              "title": "Conversation Id"
+            },
+            "description": "Filter message search to a specific conversation"
           },
           {
             "name": "type",
@@ -4018,7 +4428,9 @@
           "tags": {
             "anyOf": [
               {
-                "items": {},
+                "items": {
+                  "type": "string"
+                },
                 "type": "array"
               },
               {
@@ -4098,6 +4510,93 @@
         },
         "type": "object",
         "title": "DocumentUpdate"
+      },
+      "DriveAuthStatusResponse": {
+        "properties": {
+          "authenticated": {
+            "type": "boolean",
+            "title": "Authenticated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "authenticated"
+        ],
+        "title": "DriveAuthStatusResponse"
+      },
+      "DriveLinkRequest": {
+        "properties": {
+          "space_id": {
+            "type": "string",
+            "title": "Space Id"
+          },
+          "folder_id": {
+            "type": "string",
+            "title": "Folder Id"
+          },
+          "folder_name": {
+            "type": "string",
+            "title": "Folder Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "space_id",
+          "folder_id",
+          "folder_name"
+        ],
+        "title": "DriveLinkRequest"
+      },
+      "DriveLinkResponse": {
+        "properties": {
+          "data_source_id": {
+            "type": "string",
+            "title": "Data Source Id"
+          },
+          "folder_id": {
+            "type": "string",
+            "title": "Folder Id"
+          },
+          "folder_name": {
+            "type": "string",
+            "title": "Folder Name"
+          },
+          "documents_indexed": {
+            "type": "integer",
+            "title": "Documents Indexed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "data_source_id",
+          "folder_id",
+          "folder_name",
+          "documents_indexed"
+        ],
+        "title": "DriveLinkResponse"
+      },
+      "DriveRefreshResponse": {
+        "properties": {
+          "added": {
+            "type": "integer",
+            "title": "Added"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          },
+          "removed": {
+            "type": "integer",
+            "title": "Removed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "added",
+          "updated",
+          "removed"
+        ],
+        "title": "DriveRefreshResponse"
       },
       "GrantLevel": {
         "type": "string",
@@ -4570,6 +5069,38 @@
         },
         "type": "object",
         "title": "ItemUpdate"
+      },
+      "LayoutBulkReplace": {
+        "properties": {
+          "widgets": {
+            "items": {
+              "$ref": "#/components/schemas/WidgetCreate"
+            },
+            "type": "array",
+            "title": "Widgets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "widgets"
+        ],
+        "title": "LayoutBulkReplace"
+      },
+      "LayoutResponse": {
+        "properties": {
+          "widgets": {
+            "items": {
+              "$ref": "#/components/schemas/WidgetResponse"
+            },
+            "type": "array",
+            "title": "Widgets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "widgets"
+        ],
+        "title": "LayoutResponse"
       },
       "LinkTodoRequest": {
         "properties": {
@@ -5784,6 +6315,166 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "WidgetCreate": {
+        "properties": {
+          "widget_type": {
+            "$ref": "#/components/schemas/WidgetType"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          },
+          "size": {
+            "$ref": "#/components/schemas/WidgetSize",
+            "default": "medium"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          }
+        },
+        "type": "object",
+        "required": [
+          "widget_type"
+        ],
+        "title": "WidgetCreate"
+      },
+      "WidgetResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "space_id": {
+            "type": "string",
+            "title": "Space Id"
+          },
+          "widget_type": {
+            "type": "string",
+            "title": "Widget Type"
+          },
+          "position": {
+            "type": "integer",
+            "title": "Position"
+          },
+          "size": {
+            "type": "string",
+            "title": "Size"
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "space_id",
+          "widget_type",
+          "position",
+          "size",
+          "config",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WidgetResponse"
+      },
+      "WidgetSize": {
+        "type": "string",
+        "enum": [
+          "small",
+          "medium",
+          "large",
+          "full"
+        ],
+        "title": "WidgetSize"
+      },
+      "WidgetType": {
+        "type": "string",
+        "enum": [
+          "todo_panel",
+          "kanban_board",
+          "data_table",
+          "conversations",
+          "chart",
+          "stat_card",
+          "markdown",
+          "data_feed"
+        ],
+        "title": "WidgetType"
+      },
+      "WidgetUpdate": {
+        "properties": {
+          "size": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WidgetSize"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "config": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config"
+          },
+          "position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position"
+          }
+        },
+        "type": "object",
+        "title": "WidgetUpdate"
       }
     }
   }

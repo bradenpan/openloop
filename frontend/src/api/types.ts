@@ -378,6 +378,77 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/drive/auth-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Auth Status */
+        get: operations["auth_status_api_v1_drive_auth_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drive/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Link Drive Folder */
+        post: operations["link_drive_folder_api_v1_drive_link_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drive/refresh/{data_source_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Refresh Drive Index */
+        post: operations["refresh_drive_index_api_v1_drive_refresh__data_source_id__post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/drive/files/{file_id}/content": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Drive File Content
+         * @description Proxy Drive file content to the frontend.
+         */
+        get: operations["get_drive_file_content_api_v1_drive_files__file_id__content_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/home/dashboard": {
         parameters: {
             query?: never;
@@ -607,6 +678,59 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/spaces/{space_id}/layout": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Layout */
+        get: operations["get_layout_api_v1_spaces__space_id__layout_get"];
+        /** Set Layout */
+        put: operations["set_layout_api_v1_spaces__space_id__layout_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/spaces/{space_id}/layout/widgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Add Widget */
+        post: operations["add_widget_api_v1_spaces__space_id__layout_widgets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/spaces/{space_id}/layout/widgets/{widget_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Remove Widget */
+        delete: operations["remove_widget_api_v1_spaces__space_id__layout_widgets__widget_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Widget */
+        patch: operations["update_widget_api_v1_spaces__space_id__layout_widgets__widget_id__patch"];
         trace?: never;
     };
     "/api/v1/search": {
@@ -1027,7 +1151,7 @@ export interface components {
             /** Mime Type */
             mime_type: string | null;
             /** Tags */
-            tags: unknown[] | null;
+            tags: string[] | null;
             /** Indexed At */
             indexed_at: string | null;
             /**
@@ -1047,6 +1171,40 @@ export interface components {
             title?: string | null;
             /** Tags */
             tags?: string[] | null;
+        };
+        /** DriveAuthStatusResponse */
+        DriveAuthStatusResponse: {
+            /** Authenticated */
+            authenticated: boolean;
+        };
+        /** DriveLinkRequest */
+        DriveLinkRequest: {
+            /** Space Id */
+            space_id: string;
+            /** Folder Id */
+            folder_id: string;
+            /** Folder Name */
+            folder_name: string;
+        };
+        /** DriveLinkResponse */
+        DriveLinkResponse: {
+            /** Data Source Id */
+            data_source_id: string;
+            /** Folder Id */
+            folder_id: string;
+            /** Folder Name */
+            folder_name: string;
+            /** Documents Indexed */
+            documents_indexed: number;
+        };
+        /** DriveRefreshResponse */
+        DriveRefreshResponse: {
+            /** Added */
+            added: number;
+            /** Updated */
+            updated: number;
+            /** Removed */
+            removed: number;
         };
         /**
          * GrantLevel
@@ -1187,6 +1345,16 @@ export interface components {
             parent_record_id?: string | null;
             /** Is Agent Task */
             is_agent_task?: boolean | null;
+        };
+        /** LayoutBulkReplace */
+        LayoutBulkReplace: {
+            /** Widgets */
+            widgets: components["schemas"]["WidgetCreate"][];
+        };
+        /** LayoutResponse */
+        LayoutResponse: {
+            /** Widgets */
+            widgets: components["schemas"]["WidgetResponse"][];
         };
         /** LinkTodoRequest */
         LinkTodoRequest: {
@@ -1573,6 +1741,65 @@ export interface components {
             input?: unknown;
             /** Context */
             ctx?: Record<string, never>;
+        };
+        /** WidgetCreate */
+        WidgetCreate: {
+            widget_type: components["schemas"]["WidgetType"];
+            /** Position */
+            position?: number | null;
+            /** @default medium */
+            size: components["schemas"]["WidgetSize"];
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** WidgetResponse */
+        WidgetResponse: {
+            /** Id */
+            id: string;
+            /** Space Id */
+            space_id: string;
+            /** Widget Type */
+            widget_type: string;
+            /** Position */
+            position: number;
+            /** Size */
+            size: string;
+            /** Config */
+            config: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * WidgetSize
+         * @enum {string}
+         */
+        WidgetSize: "small" | "medium" | "large" | "full";
+        /**
+         * WidgetType
+         * @enum {string}
+         */
+        WidgetType: "todo_panel" | "kanban_board" | "data_table" | "conversations" | "chart" | "stat_card" | "markdown" | "data_feed";
+        /** WidgetUpdate */
+        WidgetUpdate: {
+            size?: components["schemas"]["WidgetSize"] | null;
+            /** Config */
+            config?: {
+                [key: string]: unknown;
+            } | null;
+            /** Position */
+            position?: number | null;
         };
     };
     responses: never;
@@ -2595,6 +2822,121 @@ export interface operations {
             };
         };
     };
+    auth_status_api_v1_drive_auth_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriveAuthStatusResponse"];
+                };
+            };
+        };
+    };
+    link_drive_folder_api_v1_drive_link_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DriveLinkRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriveLinkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    refresh_drive_index_api_v1_drive_refresh__data_source_id__post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                data_source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriveRefreshResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_drive_file_content_api_v1_drive_files__file_id__content_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                file_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_dashboard_api_v1_home_dashboard_get: {
         parameters: {
             query?: never;
@@ -3175,6 +3517,173 @@ export interface operations {
             };
         };
     };
+    get_layout_api_v1_spaces__space_id__layout_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LayoutResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_layout_api_v1_spaces__space_id__layout_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LayoutBulkReplace"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LayoutResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_widget_api_v1_spaces__space_id__layout_widgets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WidgetCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WidgetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_widget_api_v1_spaces__space_id__layout_widgets__widget_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+                widget_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_widget_api_v1_spaces__space_id__layout_widgets__widget_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+                widget_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WidgetUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WidgetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     search_api_v1_search_get: {
         parameters: {
             query: {
@@ -3182,6 +3691,8 @@ export interface operations {
                 q: string;
                 /** @description Filter by space */
                 space_id?: string | null;
+                /** @description Filter message search to a specific conversation */
+                conversation_id?: string | null;
                 /** @description Filter by type: messages, summaries, memory, documents */
                 type?: string | null;
                 limit?: number;

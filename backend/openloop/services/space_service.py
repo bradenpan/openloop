@@ -3,6 +3,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from backend.openloop.db.models import Space
+from backend.openloop.services import layout_service
 
 # Default board columns per template
 _TEMPLATE_DEFAULTS: dict[str, dict] = {
@@ -54,6 +55,10 @@ def create_space(db: Session, *, name: str, template: str, description: str | No
     db.add(space)
     db.commit()
     db.refresh(space)
+
+    # Create default widgets for the new space
+    layout_service.create_default_widgets(db, space.id, template)
+
     return space
 
 

@@ -22,6 +22,7 @@ from backend.openloop.services import (
     conversation_service,
     document_service,
     item_service,
+    layout_service,
     memory_service,
     search_service,
     space_service,
@@ -86,7 +87,7 @@ def _get_agent_space_ids(db: Session, agent_id: str) -> list[str] | None:
 
 
 # ---------------------------------------------------------------------------
-# Standard tools (1–19): available to all agents
+# Standard tools (1–28): available to all agents
 # ---------------------------------------------------------------------------
 
 
@@ -1345,6 +1346,156 @@ async def create_drive_file(
 
 
 # ---------------------------------------------------------------------------
+# Layout tools (29-33): available to all agents
+# ---------------------------------------------------------------------------
+
+
+# 29. get_space_layout
+async def get_space_layout(space_id: str, *, _db=None) -> str:
+    """Get the widget layout for a space. Returns an ordered list of widgets with their types, sizes, positions, and configurations."""
+    db = _get_db(_db)
+    try:
+        widgets = layout_service.get_layout(db, space_id)
+        return _ok(
+            [
+                {
+                    "id": w.id,
+                    "widget_type": w.widget_type,
+                    "position": w.position,
+                    "size": w.size,
+                    "config": w.config,
+                }
+                for w in widgets
+            ]
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 30. add_widget
+async def add_widget(
+    space_id: str,
+    widget_type: str,
+    position: str = "",
+    size: str = "medium",
+    config: str = "",
+    *,
+    _db=None,
+) -> str:
+    """Add a widget to a space's layout. widget_type must be one of: todo_panel, kanban_board, data_table, conversations, chart, stat_card, markdown, data_feed. size is one of: small, medium, large, full. position is 0-indexed (omit to append at end). config is optional JSON string for widget-specific settings."""
+    db = _get_db(_db)
+    try:
+        position_int = _parse_int(position)
+        config_dict = json.loads(config) if config else None
+        widget = layout_service.add_widget(
+            db,
+            space_id,
+            widget_type=widget_type,
+            position=position_int,
+            size=size,
+            config=config_dict,
+        )
+        return _ok(
+            {
+                "id": widget.id,
+                "widget_type": widget.widget_type,
+                "position": widget.position,
+                "size": widget.size,
+                "config": widget.config,
+            }
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 31. update_widget
+async def update_widget(
+    widget_id: str,
+    size: str = "",
+    config: str = "",
+    position: str = "",
+    *,
+    _db=None,
+) -> str:
+    """Update a widget's size, config, or position. Only provided fields are changed. config is a JSON string."""
+    db = _get_db(_db)
+    try:
+        kwargs = {}
+        if size:
+            kwargs["size"] = size
+        if config:
+            kwargs["config"] = json.loads(config)
+        if position:
+            kwargs["position"] = _parse_int(position)
+        widget = layout_service.update_widget(db, widget_id, **kwargs)
+        return _ok(
+            {
+                "id": widget.id,
+                "widget_type": widget.widget_type,
+                "position": widget.position,
+                "size": widget.size,
+                "config": widget.config,
+            }
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 32. remove_widget
+async def remove_widget(widget_id: str, *, _db=None) -> str:
+    """Remove a widget from a space's layout. Remaining widgets are automatically reordered."""
+    db = _get_db(_db)
+    try:
+        layout_service.remove_widget(db, widget_id)
+        return _ok({"removed": widget_id})
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 33. set_space_layout
+async def set_space_layout(space_id: str, widgets: str, *, _db=None) -> str:
+    """Bulk replace a space's entire layout. widgets is a JSON array of objects with widget_type (required), size (optional, default 'medium'), and config (optional). Positions are assigned automatically. Use this for full layout redesigns."""
+    db = _get_db(_db)
+    try:
+        widgets_list = json.loads(widgets)
+        new_widgets = layout_service.set_layout(db, space_id, widgets_list)
+        return _ok(
+            [
+                {
+                    "id": w.id,
+                    "widget_type": w.widget_type,
+                    "position": w.position,
+                    "size": w.size,
+                    "config": w.config,
+                }
+                for w in new_widgets
+            ]
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# ---------------------------------------------------------------------------
 # Builder functions
 # ---------------------------------------------------------------------------
 
@@ -1381,6 +1532,11 @@ _STANDARD_TOOLS = {
     "read_drive_file": read_drive_file,
     "list_drive_files": list_drive_files,
     "create_drive_file": create_drive_file,
+    "get_space_layout": get_space_layout,
+    "add_widget": add_widget,
+    "update_widget": update_widget,
+    "remove_widget": remove_widget,
+    "set_space_layout": set_space_layout,
 }
 
 _ODIN_TOOLS = {
@@ -1454,7 +1610,7 @@ def _make_decorated_tools(tool_map: dict, agent_name: str, agent_id: str = "") -
 def build_agent_tools(agent_name: str, agent_id: str = ""):
     """Build the standard MCP tool server for a space agent.
 
-    Returns a server from create_sdk_mcp_server with tools 1-19.
+    Returns a server from create_sdk_mcp_server with tools 1-33.
     agent_id is the UUID needed for behavioral rule operations.
     """
     from claude_agent_sdk import create_sdk_mcp_server
@@ -1466,7 +1622,7 @@ def build_agent_tools(agent_name: str, agent_id: str = ""):
 def build_odin_tools(agent_id: str = ""):
     """Build the Odin-specific MCP tool server.
 
-    Returns a server from create_sdk_mcp_server with standard tools (1-19)
+    Returns a server from create_sdk_mcp_server with standard tools (1-33)
     plus Odin-only tools (20-25).
     """
     from claude_agent_sdk import create_sdk_mcp_server

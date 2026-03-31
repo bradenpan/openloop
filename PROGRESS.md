@@ -142,17 +142,39 @@ All 7 tasks done per IMPLEMENTATION-PLAN.md. CRM-style records, table view, docu
 - Port changed from 8000 to 8010 to avoid conflict with the old dispatch app
 - Cascade delete bug (pre-existing from Phase 2) fixed as part of pre-flight — all FKs now have `ondelete="CASCADE"` or `ondelete="SET NULL"`, `passive_deletes=True` removed
 
+## Phase 4b: Flexible Space Layouts — COMPLETE
+
+All 5 tasks done per IMPLEMENTATION-PLAN.md. Widget-based space layouts replacing the hardcoded 3-column view.
+
+**Task 4b.1 (Schema + Backend):** New `space_widgets` table with `WidgetType` and `WidgetSize` enums. Layout service (6 functions: get, add, update, remove, set, create_default_widgets). 5 API endpoints under `/api/v1/spaces/{id}/layout`. Alembic migration creates default widgets for all existing spaces based on template. Space creation auto-generates default widgets.
+
+**Task 4b.2 (Widget Renderer):** Space.tsx refactored from hardcoded flex layout to CSS Grid driven by layout API. Widget registry maps types to components. Self-contained widget wrappers (TodoPanel, KanbanBoard, DataTable, ConversationSidebar, DocumentPanel). Board/Table toggle preserved when both exist. Placeholder for future widget types (chart, stat_card, markdown, data_feed).
+
+**Task 4b.3 (Layout Editor UI):** Slide-over panel from gear icon in space header. Widget cards with up/down reorder arrows, inline size dropdown, expandable config accordion, remove with click-twice confirmation. Grid picker for adding widgets. All changes live (immediate API calls). Design inspired by Notion/Linear/Grafana.
+
+**Task 4b.4 (Agent Layout MCP Tools):** 5 new MCP tools (29-33): `get_space_layout`, `add_widget`, `update_widget`, `remove_widget`, `set_space_layout`. Registered as standard tools available to all agents.
+
+**Task 4b.5 (Tests):** 31 new tests across service (15), API (10), and MCP (6) layers.
+
+**Code review (3 issues found and fixed):**
+1. `set_layout` NOT NULL crash when bulk-replacing without explicit positions — enforced sequential position assignment
+2. Grid row React keys used array indices — switched to stable widget ID composites
+3. Layout editor query invalidation key missing params — added explicit space params for reliable cache busting
+
+**Deviations from plan:**
+- None — executed as specified in IMPLEMENTATION-PLAN.md
+
 ## Current State
 
-- **750 backend tests passing** (593 prior + 157 new), lint clean
+- **781 backend tests passing** (750 prior + 31 new), lint clean
 - **39 frontend Playwright tests passing**
-- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive
-- Frontend: dashboard, space view (board + table + documents), conversation panel, agent management, search modal, document panel + viewer, 3 palettes
+- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts
+- Frontend: dashboard, space view (widget-based layout), conversation panel, agent management, search modal, document panel + viewer, layout editor, 3 palettes
 - Integration check (3.7) resolved
 
 ## Phases 5–7: Not Started
 
-See IMPLEMENTATION-PLAN.md for full breakdown. Phase 5 (Agent Builder, Sub-agents, Steering) is next. Phases 5, 6, 7 can overlap.
+See IMPLEMENTATION-PLAN.md for full breakdown. Phase 5 (Agent Builder, Sub-agents, Steering) is next. Phases 4b, 5, 6 can overlap.
 
 ---
 

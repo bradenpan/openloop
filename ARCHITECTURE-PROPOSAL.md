@@ -87,7 +87,7 @@ The web UI. Displays data, sends user actions, receives streamed responses.
 
 **Key UI surfaces:**
 - Home dashboard (cross-space)
-- Space view (board/table + conversations + documents)
+- Space view (widget-based layout: kanban, table, to-dos, conversations, charts, data feeds — configurable per space)
 - Conversation panel (chat interface with streaming)
 - Agent monitoring (status indicators, expandable logs)
 - Settings (agents, permissions, spaces)
@@ -106,6 +106,13 @@ POST   /api/v1/spaces                      Create space (with template: project,
 GET    /api/v1/spaces                      List spaces
 GET    /api/v1/spaces/{id}                 Get space detail + config
 PATCH  /api/v1/spaces/{id}                 Update space config
+
+# Space layouts (widget-based, configurable per space)
+GET    /api/v1/spaces/{id}/layout          Get ordered list of widgets for space
+POST   /api/v1/spaces/{id}/layout/widgets  Add widget to layout
+PATCH  /api/v1/spaces/{id}/layout/widgets/{widget_id}  Update widget config/position/size
+DELETE /api/v1/spaces/{id}/layout/widgets/{widget_id}  Remove widget from layout
+PUT    /api/v1/spaces/{id}/layout          Bulk replace layout (for agent-generated layouts)
 
 # To-dos (lightweight, every space)
 POST   /api/v1/todos                       Create to-do
@@ -435,6 +442,13 @@ search_conversations(query?, space_id?, date_range?, agent_id?)  # space_id opti
 search_summaries(query, space_id?)                               # FTS5 search on summary content, cross-space capable
 get_conversation_messages(conversation_id, limit?)
 
+# Layout operations (for agent-designed spaces)
+get_space_layout(space_id)                                    # returns ordered widget list with configs
+add_widget(space_id, widget_type, position?, size?, config?)  # adds widget to space layout
+update_widget(widget_id, size?, config?, position?)           # modifies existing widget
+remove_widget(widget_id)                                      # removes widget from layout
+set_space_layout(space_id, widgets)                           # bulk replace — for full redesigns
+
 # Agent operations (for sub-agent delegation, P1)
 delegate_task(agent_name, instruction, space_id)
 ```
@@ -713,6 +727,17 @@ spaces
 ├── created_at
 └── updated_at
 
+space_widgets (configurable layout — each row is one widget in a space's view)
+├── id (UUID, PK)
+├── space_id (FK → spaces, indexed)
+├── widget_type (string — "todo_panel" | "kanban_board" | "data_table" | "conversations" |
+│                          "chart" | "stat_card" | "markdown" | "data_feed")
+├── position (integer — ordering within layout, 0-indexed)
+├── size (string — "small" | "medium" | "large" | "full")
+├── config (JSON — widget-specific: columns for kanban, data source ref for charts, field list for tables, etc.)
+├── created_at
+└── updated_at
+
 todos
 ├── id (UUID, PK)
 ├── space_id (FK → spaces, indexed)
@@ -956,6 +981,7 @@ documents_fts         — shadows documents.title (extend to content when docume
 ### Relationships
 
 ```
+Space ──1:N──> SpaceWidgets (configurable layout)
 Space ──1:N──> Todos
 Space ──1:N──> Items (board items)
 Space ──1:N──> Conversations
@@ -1462,7 +1488,8 @@ Restore = replace the SQLite file with a backup copy and restart the backend. Co
 10. **Automations** — cron-based scheduled agent runs with full run history. Same agents, permissions, and tools as manual conversations. Automation dashboard for visibility.
 11. **CRM and task views** — same data, different views. Board for tasks, table for records. Per-space defaults.
 12. **To-dos everywhere** — lightweight checklist in every space plus cross-space aggregation on Home.
-13. **Flexible spaces** — not everything is a "project." Knowledge bases, CRM systems, simple to-do lists. Template-based creation.
+13. **Flexible spaces** — not everything is a "project." Knowledge bases, CRM systems, simple to-do lists. Template-based creation with widget-based layouts.
+14. **Agent-designed layouts** — agents can read, modify, and fully redesign space layouts via MCP tools. "Redesign my health space with Garmin charts" is a tool call, not a feature request. Templates provide defaults; agents and users customize from there.
 
 ---
 

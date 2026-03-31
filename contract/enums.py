@@ -110,3 +110,21 @@ class DedupDecision(StrEnum):
     UPDATE = "update"
     DELETE = "delete"
     NOOP = "noop"
+
+
+class WidgetType(StrEnum):
+    TODO_PANEL = "todo_panel"
+    KANBAN_BOARD = "kanban_board"
+    DATA_TABLE = "data_table"
+    CONVERSATIONS = "conversations"
+    CHART = "chart"
+    STAT_CARD = "stat_card"
+    MARKDOWN = "markdown"
+    DATA_FEED = "data_feed"
+
+
+class WidgetSize(StrEnum):
+    SMALL = "small"
+    MEDIUM = "medium"
+    LARGE = "large"
+    FULL = "full"

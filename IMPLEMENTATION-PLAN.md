@@ -826,10 +826,121 @@ Upgrade MCP search tools to use FTS5 and support cross-space search:
 
 ---
 
+## Phase 4b: Flexible Space Layouts
+
+**Goal:** Replace hardcoded space views with a widget-based layout system. Agents can read and redesign space layouts.
+**Depends on:** Phase 4 (table view exists as a widget candidate, core space views working).
+**Can overlap with Phases 5 and 6.**
+
+### Task 4b.1: Schema + Backend
+**Agent:** 1 agent
+**Complexity:** Medium
+
+Create `space_widgets` table and Alembic migration:
+- `id` (UUID, PK), `space_id` (FK → spaces), `widget_type` (string), `position` (integer), `size` (string — "small" | "medium" | "large" | "full"), `config` (JSON), `created_at`, `updated_at`
+- Add `WidgetType` enum to `contract/enums.py`: `todo_panel`, `kanban_board`, `data_table`, `conversations`, `chart`, `stat_card`, `markdown`, `data_feed`
+- Add `WidgetSize` enum to `contract/enums.py`: `small`, `medium`, `large`, `full`
+
+Extend SpaceService (or create `layout_service.py`) with layout CRUD:
+- `get_layout(db, space_id)` → ordered list of widgets
+- `add_widget(db, space_id, widget_type, position, size, config)` → creates widget, shifts positions of subsequent widgets
+- `update_widget(db, widget_id, **kwargs)` → update size, config, position
+- `remove_widget(db, widget_id)` → delete widget, reorder positions
+- `set_layout(db, space_id, widgets)` → bulk replace all widgets (for agent-generated full redesigns)
+
+Pydantic schemas: `WidgetCreate`, `WidgetUpdate`, `WidgetResponse`, `LayoutResponse` (ordered list of widgets).
+
+API endpoints:
+- `GET /api/v1/spaces/{id}/layout`
+- `POST /api/v1/spaces/{id}/layout/widgets`
+- `PATCH /api/v1/spaces/{id}/layout/widgets/{widget_id}`
+- `DELETE /api/v1/spaces/{id}/layout/widgets/{widget_id}`
+- `PUT /api/v1/spaces/{id}/layout` (bulk replace)
+
+Data migration: for all existing spaces, generate `space_widgets` rows from current `board_enabled` / `default_view` / `board_columns` values. Project spaces get [todo_panel, kanban_board, conversations]. CRM spaces get [todo_panel, data_table, conversations]. Knowledge Base and Simple spaces get appropriate defaults.
+
+Update space template defaults in `space_service.py` to create widgets on new space creation.
+
+**Acceptance criteria:** Widget CRUD works. Existing spaces get correct widgets via migration. New spaces from templates have correct default widgets. Bulk replace works for agent-generated layouts. `make generate-types` produces TypeScript types for widget schemas.
+
+### Task 4b.2: Widget Renderer + Space.tsx Refactor
+**Agent:** 1 agent using `frontend-design` skill
+**Complexity:** Large
+**Depends on:** 4b.1
+
+Refactor `Space.tsx` to read widget layout from API instead of hardcoding the 3-column layout:
+
+- **Widget registry**: a mapping from `widget_type` strings to React components:
+  - `"todo_panel"` → `<TodoPanel />`
+  - `"kanban_board"` → `<KanbanBoard />`
+  - `"data_table"` → `<DataTable />`
+  - `"conversations"` → `<ConversationSidebar />`
+  - Extended types (`chart`, `stat_card`, `markdown`, `data_feed`) render a placeholder until implemented
+- **Layout engine**: reads the ordered widget list from the API, renders each widget in a CSS Grid layout based on `position` and `size`
+- **Widget interface**: each widget component receives its `config` prop and renders independently. Standard props: `spaceId`, `widgetId`, `config`, `size`
+- Wrap existing components (TodoPanel, KanbanBoard, DataTable, ConversationSidebar) to conform to the widget interface
+- Fallback: if a space has no widgets (shouldn't happen after migration), render the template default
+
+**Acceptance criteria:** Existing spaces render identically to before (via migrated widget data). Adding/removing widgets via the API changes what renders in the space view. All four core widget types work. Unknown widget types render a graceful placeholder.
+
+### Task 4b.3: Layout Editor UI
+**Agent:** 1 agent using `frontend-design` skill
+**Complexity:** Medium
+**Depends on:** 4b.2
+**Can run in parallel with 4b.4**
+
+A layout editor accessible from space settings (gear icon or settings page):
+
+- Visual representation of current widget layout (list of widgets with type, size, position)
+- **Add widget**: picker showing available widget types with descriptions
+- **Remove widget**: click to remove with confirmation
+- **Reorder widgets**: up/down arrow buttons to change position
+- **Configure widget**: opens widget-specific config panel (e.g., choose columns for kanban, select visible fields for table)
+- **Size selector**: per-widget dropdown (small, medium, large, full)
+- Changes persist via API and space view updates immediately
+
+This is a settings panel, not drag-and-drop within the space view. Drag-and-drop repositioning is a future enhancement.
+
+**Acceptance criteria:** Can add, remove, reorder, resize, and configure widgets. Changes persist via API. Space view reflects changes immediately. Configuration panels work for kanban (column editor) and data table (field selector).
+
+### Task 4b.4: Agent Layout MCP Tools
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 4b.1
+**Can run in parallel with 4b.3**
+
+New MCP tools in `mcp_tools.py`:
+- `get_space_layout(space_id)` — returns ordered widget list with configs
+- `add_widget(space_id, widget_type, position?, size?, config?)` — adds widget to layout
+- `update_widget(widget_id, size?, config?, position?)` — modifies existing widget
+- `remove_widget(widget_id)` — removes widget from layout
+- `set_space_layout(space_id, widgets)` — bulk replace for full redesigns
+
+Each tool follows existing patterns: `@tool`-decorated async closure, own DB session, try/except with rollback, `is_error: True` on failure.
+
+Update Agent Builder (Phase 5.1, when built) instructions to include layout design as part of new space/agent setup: "After creating a space, ask the user if they want a custom layout or if the template default is fine."
+
+**Acceptance criteria:** Agent can read a layout, add/remove individual widgets, and bulk-replace an entire layout. Agent-written layouts render correctly in the frontend. Error handling follows existing MCP tool patterns.
+
+### Task 4b.5: Phase 4b Tests
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 4b.3, 4b.4
+
+- Widget CRUD API tests (create, read, update, delete, bulk replace)
+- Migration test (existing spaces get correct widgets based on template/board_enabled/default_view)
+- Widget renderer tests: correct components render for each type, unknown types show placeholder
+- Layout editor Playwright tests (add widget, remove widget, reorder, configure, resize)
+- Agent layout MCP tool tests (read layout, add/remove widgets, bulk replace)
+- Template default tests (new spaces created from each template get correct widget set)
+- Regression: existing space views render identically to pre-refactor
+
+---
+
 ## Phase 5: Agent Builder + Sub-agents
 
 **Goal:** Conversational agent creation and agent-to-agent delegation.
-**Can overlap with Phases 4 and 6.**
+**Can overlap with Phases 4b and 6.**
 
 ### Task 5.1: Agent Builder Agent
 **Agent:** 1 agent
@@ -904,7 +1015,7 @@ Upgrade MCP search tools to use FTS5 and support cross-space search:
 ## Phase 6: Automations
 
 **Goal:** Scheduled agent runs with dashboard and pre-built templates.
-**Can overlap with Phases 4 and 5.**
+**Can overlap with Phases 4b and 5.**
 
 ### Task 6.1: Automation Backend
 **Agent:** 1 agent
@@ -1041,6 +1152,7 @@ Full workflow Playwright tests:
 - **Mid-task steering**: delegate background task → send steering message → verify agent receives and adjusts course
 - **Summary consolidation**: close 20+ conversations in a space → verify meta-summary auto-generated → verify individual summaries marked as consolidated
 - **Cross-space search**: create content in two spaces → search from one space's agent → verify cross-space results respect permissions
+- **Space layout**: create space → verify default widgets → add/remove widgets via layout editor → verify space view updates → agent modifies layout via MCP tool → verify rendered correctly
 
 ---
 
@@ -1054,11 +1166,12 @@ Full workflow Playwright tests:
 | 3 | Full frontend — dashboard, board, conversations | 7 | 3-4 |
 | 3b | Four-tier memory, write-time dedup, temporal facts, context safety, procedural memory | 6 | 2 |
 | 4 | CRM, table view, documents, Drive, search + cross-space FTS5 search | 7 | 4 |
+| 4b | Widget-based space layouts, layout editor, agent layout tools | 5 | 2 |
 | 5 | Agent Builder, sub-agents, mid-task steering, workflow tracking | 5 | 2-3 |
 | 6 | Automations + dashboard + templates | 4 | 2 |
 | 7 | Lifecycle management, summary consolidation, backup, edge cases, integration tests | 6 | 3-4 |
 
-**Total: 58 tasks across 9 phases**
+**Total: 63 tasks across 10 phases**
 
 ---
 
@@ -1102,10 +1215,14 @@ Each task should be given to an agent with:
 | 3b.3 | MCP Tools (Memory, Behavioral rule operations) | Memory and Documents (agent-managed memory) |
 | 3b.4 | Layer 6: Context Assembler, Context Budget | Memory and Documents (context ordering, scored retrieval) |
 | 3b.5 | Layer 4: Session Manager (flush_memory, send_message), Flow 5, Flow 9 | Context management (P0 item 8) |
-| 4.1-4.2 | Data Model: items (custom_fields) | Items (Records), Space Views (Table view) |
+| 4.1-4.2 | Data Model: items (custom_fields) | Items (Records), Space Layouts (Table view) |
 | 4.3-4.4 | Layer 7: Data Layer, Data Model: documents, data_sources | Memory and Documents |
 | 4.5a | Layer 7: FTS5, FTS5 Virtual Tables | — |
 | 4.5b | Context Pruning (On-Demand Search), MCP Tools (Context operations) | Cross-space search (P1 item 24) |
+| 4b.1 | Data Model: space_widgets, Layer 2: Layout endpoints | Space Layouts, Resolved Decision 28 |
+| 4b.2 | Layer 1: Frontend (widget renderer) | Space Layouts |
+| 4b.3 | — | Space Layouts (layout editor) |
+| 4b.4 | MCP Tools (Layout operations) | Space Layouts (agent-designed layouts) |
 | 5.1 | — | Agent Creation (Agent Builder) |
 | 5.2a | Layer 4: delegate_background, Flow 8 | Agent Interaction (Sub-agents), Background Monitoring |
 | 5.2b | Layer 4: Session Manager (steer), Flow 8 | Agent Interaction (Steering mode), Resolved Decision 26 |
@@ -1168,10 +1285,12 @@ Phase 3b: 3b.1 (schema migration)
               ↓
          3b.6 (tests)
               ↓
-Phases 4, 5, 6 can overlap:
-  Phase 4: 4.1 → 4.2, 4.3 || 4.4 || 4.5a → 4.5b → 4.6
-  Phase 5: 5.1 || 5.2a → 5.2b → 5.2c → 5.3
-  Phase 6: 6.1 → 6.2 || 6.3 → 6.4
+Phases 4, 4b, 5, 6 can overlap:
+  Phase 4:  4.1 → 4.2, 4.3 || 4.4 || 4.5a → 4.5b → 4.6
+  Phase 4b: 4b.1 → 4b.2 → 4b.3 || 4b.4 → 4b.5
+            (depends on Phase 4 completion; can overlap with 5/6)
+  Phase 5:  5.1 || 5.2a → 5.2b → 5.2c → 5.3
+  Phase 6:  6.1 → 6.2 || 6.3 → 6.4
               ↓
 Phase 7: 7.1a || 7.1b || 7.2 || 7.3 (parallel) → 7.4 → 7.5
 ```
@@ -1182,5 +1301,5 @@ With 6 agents, max parallelism per phase:
 - Phase 2: 3 agents (2.1 || 2.2 || 2.7), then 4 (2.3b || 2.4 || 2.5 || 2.6)
 - Phase 3: 4 agents (3.2 || 3.3 || 3.4 || 3.5)
 - Phase 3b: 2 agents (3b.3 || 3b.4), rest sequential
-- Phases 4+5+6 overlap: up to 6 agents across all three phases
+- Phases 4+4b+5+6 overlap: up to 6 agents across all four phases
 - Phase 7: 4 agents (7.1a || 7.1b || 7.2 || 7.3)
