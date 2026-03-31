@@ -73,16 +73,48 @@ All 7 tasks done. Full frontend built: design system, app shell, dashboard, spac
 5. API data access — removed incorrect `.data` unwrap in 8 components (API returns arrays/objects directly, not wrapped)
 6. Odin bar — wired to send messages via POST /api/v1/odin/message with SSE streaming
 
-**Known gap from Phase 2:** `PATCH /api/v1/agents/permission-requests/{id}` endpoint doesn't exist. Frontend approval UI is built but the backend endpoint for responding to approval requests needs to be added. The permission enforcer polls the DB — the endpoint just needs to update the row's status field.
+**Resolved:** The `PATCH /api/v1/agents/permission-requests/{id}` endpoint exists (agents.py:93-103). Frontend approval UI and backend are wired.
+
+## Phase 3b: Memory Architecture + Context Safety — COMPLETE
+
+All 6 tasks done per IMPLEMENTATION-PLAN.md. Memory system upgraded from basic key-value CRUD to four-tier cognitive architecture. All backend — no frontend changes.
+
+**Task 3b.1:** Schema migration — 7 new columns on `memory_entries`, 2 on `conversation_summaries`, 4 on `background_tasks`, new `behavioral_rules` table. New enums: `RuleSourceType`, `DedupDecision`.
+
+**Task 3b.2:** Memory service rewrite + behavioral rule service. Write-time LLM dedup (Haiku-powered ADD/UPDATE/DELETE/NOOP via `llm_utils.py`), scored retrieval (Ebbinghaus-inspired decay formula), namespace caps (50 space, 20 agent) with lowest-scored eviction, temporal supersession. Behavioral rules: asymmetric confidence (+0.1/-0.2), auto-deactivation.
+
+**Task 3b.3:** 8 new MCP tools (save_fact, update_fact, recall_facts, delete_fact, save_rule, confirm_rule, override_rule, list_rules). Old read_memory/write_memory kept for backward compat.
+
+**Task 3b.4:** Context assembler rewritten — attention-optimized ordering (beginning: identity+rules+tools; middle: summaries+facts; end: board/todos), scored retrieval replaces basic list_entries, procedural memory injection, meta-summary handling, memory management instructions in agent prompts.
+
+**Task 3b.5:** Session manager safety — `flush_memory()` (mandatory pre-compaction), proactive budget enforcement (checks before SDK call), observation masking (7 recent turns verbatim), `verify_compaction()` (post-compression gap detection).
+
+**Task 3b.6:** 95 new tests + 3 real-LLM integration tests (`pytest -m llm`).
+
+**Bug fix (from Phase 2 review):** Permission enforcer timeout removed — was 5-min auto-deny, now infinite polling per spec.
+
+**Additional bug fixes from code review (8 issues found and fixed):**
+1. save_rule/list_rules passed agent name where UUID FK required — added `_agent_id` injection via tool builder
+2. `_slugify` key collision — append UUID suffix
+3. `_poll_for_approval` infinite loop on deleted request — guard added
+4. `llm_utils.py` missing ExceptionGroup catch
+5. `_estimate_conversation_context` inflated access/apply counters — added `read_only` flag
+6. `list_entries` didn't exclude superseded facts — added `valid_until` filter
+7. `delete_fact` bypassed service layer — created `supersede_entry()` in memory_service
+8. `source_type` accepted arbitrary strings — added enum validation
+
+**Deviations from plan:**
+- Plan called for `save_fact_with_dedup` as a sync function. Had to make it `async` because it calls the LLM. The MCP tool layer (already async) handles this fine, but it's a convention break at the service layer.
+- `llm_utils.py` was not in the original plan — created as a shared utility for LLM system calls (dedup, flush, etc.).
+- Plan described compression as effective for the current SDK session. In practice, the SDK retains full JSONL history and has no truncation API. Compression creates DB checkpoints useful for future reopens but doesn't reduce current session context. Documented as a known limitation.
 
 ## Current State
 
-- **498 backend tests passing**, lint clean
+- **593 backend tests passing** (498 original + 95 new), lint clean
 - **39 frontend Playwright tests passing**
-- **~130 source files** (90 backend + ~40 frontend)
-- Backend fully functional: CRUD for all entities, agent session management, SSE streaming, permission enforcement, Odin front door
-- Frontend fully built: dashboard, space view, conversation panel, agent management, design system with 3 palettes
-- Integration check (3.7) pending
+- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety
+- Frontend: dashboard, space view, conversation panel, agent management, 3 palettes
+- Integration check (3.7) still pending
 
 ## Phases 4–7: Not Started
 
@@ -99,5 +131,5 @@ See IMPLEMENTATION-PLAN.md for full breakdown. Phase 4 (Records, Table View, Doc
 5. **SDK `resume` is the primary conversation continuity mechanism** — no TTL, sessions persist indefinitely.
 6. **Permission hooks use own DB sessions** — not tied to request-scoped sessions, safe for async SDK context.
 7. **MCP tool name matching uses dynamic prefix extraction** — handles `mcp__openloop_{agentName}__toolName` pattern.
-8. **Approval polling has 5-minute timeout** — auto-denies with `resolved_by="system"` to prevent indefinite blocks.
+8. **Approval polling has no timeout** — agents wait indefinitely per spec (5-minute auto-deny removed in Phase 3b).
 9. **All list endpoints paginated** — default limit=50, max 200. Internal callers (context assembler, crash recovery) pass limit=10000.
