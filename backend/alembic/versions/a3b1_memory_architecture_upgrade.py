@@ -55,12 +55,13 @@ def upgrade() -> None:
             sa.Column("is_meta_summary", sa.Boolean(), nullable=False, server_default="0"),
         )
         batch_op.add_column(
-            sa.Column(
-                "consolidated_into",
-                sa.String(36),
-                sa.ForeignKey("conversation_summaries.id"),
-                nullable=True,
-            ),
+            sa.Column("consolidated_into", sa.String(36), nullable=True),
+        )
+        batch_op.create_foreign_key(
+            "fk_consolidated_into",
+            "conversation_summaries",
+            ["consolidated_into"],
+            ["id"],
         )
 
     # -- background_tasks: workflow tracking --
@@ -75,12 +76,13 @@ def upgrade() -> None:
             sa.Column("step_results", sa.JSON(), nullable=True),
         )
         batch_op.add_column(
-            sa.Column(
-                "parent_task_id",
-                sa.String(36),
-                sa.ForeignKey("background_tasks.id"),
-                nullable=True,
-            ),
+            sa.Column("parent_task_id", sa.String(36), nullable=True),
+        )
+        batch_op.create_foreign_key(
+            "fk_parent_task_id",
+            "background_tasks",
+            ["parent_task_id"],
+            ["id"],
         )
 
     # -- behavioral_rules: procedural memory --

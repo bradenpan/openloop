@@ -30,12 +30,14 @@ def upgrade() -> None:
     # -- todos: link to a record item --
     with op.batch_alter_table("todos", schema=None) as batch_op:
         batch_op.add_column(
-            sa.Column(
-                "record_id",
-                sa.String(36),
-                sa.ForeignKey("items.id", ondelete="SET NULL"),
-                nullable=True,
-            ),
+            sa.Column("record_id", sa.String(36), nullable=True),
+        )
+        batch_op.create_foreign_key(
+            "fk_todos_record_id",
+            "items",
+            ["record_id"],
+            ["id"],
+            ondelete="SET NULL",
         )
 
 
