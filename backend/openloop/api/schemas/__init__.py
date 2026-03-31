@@ -5,6 +5,7 @@ Import all schemas here for convenient access:
 """
 
 from backend.openloop.api.schemas.agents import *  # noqa: F401, F403
+from backend.openloop.api.schemas.behavioral_rules import *  # noqa: F401, F403
 from backend.openloop.api.schemas.conversations import *  # noqa: F401, F403
 from backend.openloop.api.schemas.data_sources import *  # noqa: F401, F403
 from backend.openloop.api.schemas.documents import *  # noqa: F401, F403

@@ -98,3 +98,15 @@ class MemoryNamespace(StrEnum):
     GLOBAL = "global"
     ODIN = "odin"
     # Space-specific namespaces use the space_id directly
+
+
+class RuleSourceType(StrEnum):
+    CORRECTION = "correction"
+    VALIDATION = "validation"
+
+
+class DedupDecision(StrEnum):
+    ADD = "add"
+    UPDATE = "update"
+    DELETE = "delete"
+    NOOP = "noop"

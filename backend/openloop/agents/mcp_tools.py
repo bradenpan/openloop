@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 from backend.openloop.database import SessionLocal
 from backend.openloop.services import (
     agent_service,
+    behavioral_rule_service,
     conversation_service,
     document_service,
     item_service,
@@ -351,6 +352,268 @@ async def write_memory(
                 "value": entry.value,
                 "tags": entry.tags,
             }
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# ---------------------------------------------------------------------------
+# Phase 3b: Enhanced memory + behavioral rule tools
+# ---------------------------------------------------------------------------
+
+
+# save_fact (smart write with dedup)
+async def save_fact(
+    content: str,
+    namespace: str = "",
+    importance: str = "0.5",
+    category: str = "",
+    *,
+    _db=None,
+    _agent_name: str = "agent",
+) -> str:
+    """Save a fact to memory with automatic deduplication.
+
+    The system checks if this fact is new, updates existing, or supersedes old facts.
+    namespace defaults to 'agent:<agent_name>' if not provided.
+    importance is a float 0.0-1.0 (default 0.5).
+    """
+    db = _get_db(_db)
+    try:
+        ns = namespace or f"agent:{_agent_name}"
+        imp = float(importance) if importance else 0.5
+        cat = category or None
+        decision, entry = await memory_service.save_fact_with_dedup(
+            db,
+            namespace=ns,
+            content=content,
+            importance=imp,
+            category=cat,
+            source=_agent_name,
+        )
+        return _ok(
+            {
+                "decision": decision.value,
+                "id": entry.id,
+                "namespace": entry.namespace,
+                "key": entry.key,
+                "value": entry.value,
+                "importance": entry.importance,
+                "category": entry.category,
+            }
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# update_fact
+async def update_fact(fact_id: str, new_content: str, *, _db=None) -> str:
+    """Explicitly update an existing fact's content by ID."""
+    db = _get_db(_db)
+    try:
+        entry = memory_service.update_entry(db, fact_id, value=new_content)
+        return _ok(
+            {
+                "id": entry.id,
+                "namespace": entry.namespace,
+                "key": entry.key,
+                "value": entry.value,
+            }
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# recall_facts (smart read with scoring)
+async def recall_facts(
+    query: str = "", namespace: str = "", category: str = "", *, _db=None
+) -> str:
+    """Search and retrieve facts from memory, ranked by relevance score.
+
+    If namespace is provided, returns scored entries from that namespace.
+    If query is provided, searches across key/value fields.
+    """
+    db = _get_db(_db)
+    try:
+        if namespace:
+            entries = memory_service.get_scored_entries(db, namespace)
+            if category:
+                entries = [e for e in entries if e.category == category]
+        else:
+            entries = memory_service.list_entries(
+                db,
+                search=query or None,
+            )
+            if category:
+                entries = [e for e in entries if e.category == category]
+        return _ok(
+            [
+                {
+                    "id": e.id,
+                    "namespace": e.namespace,
+                    "key": e.key,
+                    "value": e.value,
+                    "importance": e.importance,
+                    "category": e.category,
+                    "tags": e.tags,
+                }
+                for e in entries
+            ]
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# delete_fact
+async def delete_fact(fact_id: str, reason: str = "", *, _db=None) -> str:
+    """Mark a fact as superseded (sets valid_until=now). Provide a reason."""
+    db = _get_db(_db)
+    try:
+        entry = memory_service.supersede_entry(db, fact_id)
+        return _ok(
+            {
+                "id": entry.id,
+                "value": entry.value,
+                "valid_until": entry.valid_until.isoformat(),
+                "reason": reason,
+            }
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# save_rule
+async def save_rule(
+    rule: str,
+    source_type: str = "correction",
+    source_context: str = "",
+    *,
+    _db=None,
+    _agent_name: str = "agent",
+    _agent_id: str = "",
+) -> str:
+    """Save a behavioral rule learned from user correction or validation.
+
+    source_type: 'correction' or 'validation'.
+    source_context: optional conversation ID or other context.
+    """
+    db = _get_db(_db)
+    try:
+        entry = behavioral_rule_service.create_rule(
+            db,
+            agent_id=_agent_id,
+            rule=rule,
+            source_type=source_type or "correction",
+            source_conversation_id=source_context or None,
+        )
+        return _ok(
+            {
+                "id": entry.id,
+                "agent_id": entry.agent_id,
+                "rule": entry.rule,
+                "confidence": entry.confidence,
+                "source_type": entry.source_type,
+            }
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# confirm_rule
+async def confirm_rule(rule_id: str, *, _db=None) -> str:
+    """Confirm a rule was correct — increases confidence by 0.1 (capped at 1.0)."""
+    db = _get_db(_db)
+    try:
+        entry = behavioral_rule_service.confirm_rule(db, rule_id)
+        return _ok(
+            {
+                "id": entry.id,
+                "rule": entry.rule,
+                "confidence": entry.confidence,
+            }
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# override_rule
+async def override_rule(rule_id: str, *, _db=None) -> str:
+    """User contradicted this rule — decreases confidence by 0.2.
+
+    If confidence drops below 0.3 and rule has been applied 10+ times,
+    the rule is automatically deactivated.
+    """
+    db = _get_db(_db)
+    try:
+        entry = behavioral_rule_service.override_rule(db, rule_id)
+        return _ok(
+            {
+                "id": entry.id,
+                "rule": entry.rule,
+                "confidence": entry.confidence,
+                "is_active": entry.is_active,
+            }
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# list_rules
+async def list_rules(
+    agent_id: str = "", *, _db=None, _agent_name: str = "agent", _agent_id: str = ""
+) -> str:
+    """List active behavioral rules for an agent.
+
+    agent_id defaults to the current agent if not provided.
+    """
+    db = _get_db(_db)
+    try:
+        aid = agent_id or _agent_id
+        rules = behavioral_rule_service.list_rules(db, agent_id=aid)
+        return _ok(
+            [
+                {
+                    "id": r.id,
+                    "rule": r.rule,
+                    "confidence": r.confidence,
+                    "source_type": r.source_type,
+                    "apply_count": r.apply_count,
+                    "is_active": r.is_active,
+                }
+                for r in rules
+            ]
         )
     except Exception as e:
         db.rollback()
@@ -838,6 +1101,14 @@ _STANDARD_TOOLS = {
     "list_items": list_items,
     "read_memory": read_memory,
     "write_memory": write_memory,
+    "save_fact": save_fact,
+    "update_fact": update_fact,
+    "recall_facts": recall_facts,
+    "delete_fact": delete_fact,
+    "save_rule": save_rule,
+    "confirm_rule": confirm_rule,
+    "override_rule": override_rule,
+    "list_rules": list_rules,
     "read_document": read_document,
     "list_documents": list_documents,
     "create_document": create_document,
@@ -859,23 +1130,27 @@ _ODIN_TOOLS = {
 }
 
 
-def _make_decorated_tools(tool_map: dict, agent_name: str) -> list:
-    """Wrap raw async functions with @tool() and inject _agent_name via closures."""
+def _make_decorated_tools(tool_map: dict, agent_name: str, agent_id: str = "") -> list:
+    """Wrap raw async functions with @tool() and inject _agent_name/_agent_id via closures."""
     from claude_agent_sdk import tool
 
     decorated = []
     for name, fn in tool_map.items():
-        # Build a closure that binds agent_name for tools that support it
+        # Build a closure that binds agent_name/agent_id for tools that support them
         import inspect
 
         sig = inspect.signature(fn)
         has_agent_name = "_agent_name" in sig.parameters
+        has_agent_id = "_agent_id" in sig.parameters
 
-        if has_agent_name:
-            # Create closure binding agent_name
-            def _make_wrapper(original_fn, bound_name):
+        if has_agent_name or has_agent_id:
+            # Create closure binding agent_name and/or agent_id
+            def _make_wrapper(original_fn, bound_name, bound_id, inject_name, inject_id):
                 async def wrapper(**kwargs):
-                    kwargs["_agent_name"] = bound_name
+                    if inject_name:
+                        kwargs["_agent_name"] = bound_name
+                    if inject_id:
+                        kwargs["_agent_id"] = bound_id
                     return await original_fn(**kwargs)
 
                 # Copy metadata for the SDK
@@ -890,7 +1165,7 @@ def _make_decorated_tools(tool_map: dict, agent_name: str) -> list:
                 wrapper.__annotations__["return"] = str
                 return wrapper
 
-            wrapped = _make_wrapper(fn, agent_name)
+            wrapped = _make_wrapper(fn, agent_name, agent_id, has_agent_name, has_agent_id)
         else:
             # No agent_name needed, but still strip internal params from annotations
             def _make_clean_wrapper(original_fn):
@@ -913,18 +1188,19 @@ def _make_decorated_tools(tool_map: dict, agent_name: str) -> list:
     return decorated
 
 
-def build_agent_tools(agent_name: str):
+def build_agent_tools(agent_name: str, agent_id: str = ""):
     """Build the standard MCP tool server for a space agent.
 
     Returns a server from create_sdk_mcp_server with tools 1-19.
+    agent_id is the UUID needed for behavioral rule operations.
     """
     from claude_agent_sdk import create_sdk_mcp_server
 
-    tools = _make_decorated_tools(_STANDARD_TOOLS, agent_name)
+    tools = _make_decorated_tools(_STANDARD_TOOLS, agent_name, agent_id)
     return create_sdk_mcp_server(f"openloop_{agent_name}", tools=tools)
 
 
-def build_odin_tools():
+def build_odin_tools(agent_id: str = ""):
     """Build the Odin-specific MCP tool server.
 
     Returns a server from create_sdk_mcp_server with standard tools (1-19)
@@ -933,5 +1209,5 @@ def build_odin_tools():
     from claude_agent_sdk import create_sdk_mcp_server
 
     all_tools = {**_STANDARD_TOOLS, **_ODIN_TOOLS}
-    tools = _make_decorated_tools(all_tools, "odin")
+    tools = _make_decorated_tools(all_tools, "odin", agent_id)
     return create_sdk_mcp_server("openloop_odin", tools=tools)

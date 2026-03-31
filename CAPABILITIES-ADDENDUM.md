@@ -44,13 +44,17 @@ When you correct an agent, that correction is captured as a persistent behaviora
 
 **How it works (simplified):**
 
-A new memory category — behavioral rules — sits alongside facts and summaries. When the system detects a correction in conversation (or the user explicitly says "remember this for next time"), the rule is extracted, generalized ("don't do X in this specific case" becomes "before doing X, always check Y"), and stored with a confidence score. During context assembly, the top-ranked behavioral rules are injected into the system prompt section — the highest-priority position in the context window. Rules that are confirmed by the user gain confidence; rules that are overridden lose it.
+A new memory category — behavioral rules — sits alongside facts and summaries. Rules are captured from two sources: **corrections** (user says "don't do X" or "always check Y first") and **validated approaches** (user confirms a non-obvious choice worked well, or accepts an unusual approach without pushback). Both matter — corrections prevent repeated mistakes, while validated approaches prevent drift away from what works.
+
+When the system detects a correction or confirmation, the rule is extracted, generalized ("don't do X in this specific case" becomes "before doing X, always check Y"), and stored with a confidence score. During context assembly, the top-ranked behavioral rules are injected into the system prompt section — the highest-priority position in the context window.
+
+Confidence updates are **asymmetric**: confirmation increases confidence by a standard increment, but contradiction decreases confidence at **2x the rate**. This reflects a sound principle — it takes multiple confirmations to establish trust in a rule, but a single clear override should significantly erode it. Without this asymmetry, stale or wrong rules persist too long. Agents have explicit tools to report these events (`confirm_rule` when the user validates a rule was correct, `override_rule` when the user contradicts one). The agent can see its own behavioral rules in context and reason about whether a user response confirms or contradicts an existing rule.
 
 **Why it's important:**
 
 This is the difference between a tool and an assistant. A tool does the same thing every time. An assistant adapts to how you work. Every comparable system that users describe as "feeling smart" has some form of this: CrewAI's training system, LangMem's procedural memory, Claude Code's own CLAUDE.md feedback memories. OpenLoop agents should have it too.
 
-**Evidence:** LangMem demonstrated that prompt-evolution from correction feedback produces measurably better agent behavior. ReMe showed that a smaller model (Qwen3-8B) with good procedural memory outperformed a memoryless larger model (Qwen3-14B) — memory quality substitutes for model scale.
+**Evidence:** LangMem demonstrated that prompt-evolution from correction feedback produces measurably better agent behavior. ReMe showed that a smaller model (Qwen3-8B) with good procedural memory outperformed a memoryless larger model (Qwen3-14B) — memory quality substitutes for model scale. Critically, ReMe's multi-faceted distillation extracts patterns from both successes and failures — learning only from corrections causes agents to become overly cautious over time, avoiding past mistakes but drifting away from validated approaches.
 
 ---
 
@@ -298,7 +302,9 @@ Before any compression or summarization happens, the system tells the agent: "Sa
 
 This is a mandatory pipeline stage, not an optional prompt. Before `monitor_context_usage()` triggers a checkpoint (at 70%) and before `close_session()` generates a final summary, the system injects a flush instruction: "Review this conversation for any important facts, decisions, or user preferences that haven't been saved to memory yet. Save them now using your memory tools." The agent processes this instruction, calls `save_fact` as many times as needed, and then the normal checkpoint/close flow continues.
 
-OpenClaw implements this as a non-negotiable part of their compaction pipeline. It's their single most important safety mechanism against information loss.
+After compression completes, a **post-compaction verification** step checks that key facts referenced in the compressed section exist in persistent memory. If the flush missed something critical (agents can fail to save, as documented in Letta's known failure modes), the system flags the gap rather than silently losing the information. This is a lightweight check — scan the compressed content for fact-like statements and verify they appear in the memory store — not a full re-extraction.
+
+OpenClaw implements the flush as a non-negotiable part of their compaction pipeline. It's their single most important safety mechanism against information loss. OpenClaw Issue #31435 proposes extending this with workspace-level flush instructions (FLUSH.md) and post-compaction auditing — the verification step above addresses the same gap.
 
 **Why it's important:**
 
@@ -320,7 +326,7 @@ The system checks the budget before each message is sent to the LLM, not after. 
 
 Before every `query()` call, the session manager estimates total context size (system prompt + memory + conversation history + pending message). If it exceeds 70% of the context window:
 1. Trigger the pre-compaction flush (B1) to save important facts
-2. Compress older conversation turns at a turn boundary (keeping the most recent 2-3 turns verbatim, replacing older turns with a summary)
+2. Compress older conversation turns at a turn boundary (keeping the most recent 5-10 turns verbatim, replacing older turns with a summary)
 3. Then proceed with the LLM call
 
 The key detail: compression happens at turn boundaries — complete user message + agent response pairs. Never in the middle of a tool-call sequence. This preserves conversation coherence.
@@ -339,16 +345,16 @@ When conversation context gets compressed, the system generates a summary of the
 
 **What the user experiences after this change:**
 
-The most recent 2-3 complete exchanges (your message + agent response) are always kept verbatim — never summarized. Only older exchanges get compressed. This means the immediate working context — the thread you're actively pulling on — stays intact. The agent always has perfect recall of what just happened, even if older history has been condensed.
+The most recent exchanges (your message + agent response, configurable — default 5-10 depending on conversation complexity) are always kept verbatim — never summarized. Only older exchanges get compressed. This means the immediate working context — the thread you're actively pulling on — stays intact. The agent always has perfect recall of what just happened, even if older history has been condensed.
 
 **How it works (simplified):**
 
 During context compression (triggered by B2), the system applies "observation masking" instead of full summarization:
-- **Keep verbatim:** The 2-3 most recent user-agent exchange pairs
+- **Keep verbatim:** The most recent user-agent exchange pairs (configurable, default 5-10 exchanges depending on conversation length)
 - **Compress:** Everything older, into a summary that captures decisions, open questions, and key facts
 - **Extract:** Important discrete facts from the compressed section into persistent memory (via B1)
 
-JetBrains research found that "keeping a window of the latest 10 turns gave the best balance" — a 2.6% improvement in task completion while being 52% cheaper than full summarization approaches. The observation masking approach outperformed recursive summarization.
+JetBrains research found that "keeping a window of the latest 10 turns gave the best balance" — a 2.6% improvement in task completion while being 52% cheaper than full summarization approaches. The observation masking approach outperformed recursive summarization. PicoClaw keeps 4 messages; Lossless Claw keeps 64. A window of 5-10 exchanges balances context preservation against token budget, and should be tunable per agent or conversation type (shorter for simple Q&A, longer for complex multi-step work).
 
 **Why it's important:**
 
@@ -396,19 +402,27 @@ You tell your Research Agent to "go research competitor X's pricing strategy." T
 
 **What the user experiences after this change:**
 
-While the agent is working, you can send it a message: "Wrong company — I mean Competitor X Corp, the SaaS company." The agent receives this between tool calls. It finishes whatever tool is currently running (you don't lose partial results), skips any remaining queued tool calls, reads your correction, and adjusts course. The task continues with the right focus. No restart needed. The partial work is preserved.
+While the agent is working, you can send it a message: "Wrong company — I mean Competitor X Corp, the SaaS company." The agent receives this at the next turn boundary. It finishes its current turn of work (you don't lose partial results), reads your correction, and adjusts course. The task continues with the right focus. No restart needed. The partial work is preserved.
 
-This also works for interactive conversations where the agent is in the middle of a long tool-use sequence. Instead of waiting for the agent to finish reading 15 files, you can say "stop — I found the answer, it's in auth.py" and redirect it immediately.
+For interactive conversations, steering is the natural interaction model — the user sends messages between turns. No special mechanism needed beyond the standard conversation flow.
 
 **How it works (simplified):**
 
-A "steering queue" sits between the user and the running agent session. When a steering message arrives:
-1. The currently-executing tool call finishes (no interruption mid-tool)
-2. Any remaining queued tool calls for the current turn are skipped
-3. The steering message is injected as the next user message
-4. The agent processes it and continues from there
+Background delegation uses a **managed turn loop** rather than a single fire-and-forget query. The session manager controls the agent's execution cycle:
 
-PicoClaw implements this with a thread-safe queue, max 10 messages per scope, and two dequeue modes (one-at-a-time for corrections, drain-all for "stop everything" commands).
+1. Send initial instruction via `query()`
+2. Agent completes one turn of work (may include multiple tool calls within that turn)
+3. Agent returns — session manager now has control
+4. Check steering queue for user messages
+5. If steering message exists → `query(resume=session_id)` with the steering message as the next user input
+6. If no steering → `query(resume=session_id)` with a continuation prompt
+7. Repeat until agent reports completion
+
+The user experiences this identically to fire-and-forget delegation — the agent works autonomously in the background, and the session manager auto-continues between turns without any user involvement. The steering queue sits empty 99% of the time. Only when the user voluntarily sends a correction does it get picked up at the next turn boundary.
+
+**SDK context:** The Claude Agent SDK does not currently expose mid-tool-call message injection (Issue #70, closed without commitment). The managed turn loop works within the SDK's existing `query()` + `resume` mechanism — each turn is a separate `query()` call, and the session manager has full control between turns. This is the same pattern OpenClaw uses with its heartbeat daemon (agent runs in discrete cycles, messages queue via the gateway) and PicoClaw's thread-safe steering queue (max 10 messages per scope, one-at-a-time for corrections, drain-all for stop commands).
+
+Agent system prompts for background work include instructions to work incrementally: "Complete one meaningful step per turn. Report what you did and what you plan to do next." This creates natural turn boundaries where steering can be injected, and makes step-level progress tracking (D1) fall out naturally — each turn ≈ a trackable step.
 
 **Why it's important:**
 
@@ -556,7 +570,7 @@ User corrects agent
  B4 (Summary Consolidation) ◄── older history condensed, not lost
 ```
 
-The memory writes flow down. The context reads flow up. The safety mechanisms protect the transition between them. A7 keeps the active memory set small and relevant over time. A8 ensures everything beyond the context window is still reachable. And the agent control (C1) and capability persistence (D1, D2) operate alongside the whole system to make delegated work reliable and improvable.
+The memory writes flow down. The context reads flow up. The safety mechanisms protect the transition between them. A7 keeps the active memory set small and relevant over time. A8 ensures everything beyond the context window is still reachable. Agent control (C1, via managed turn loop) and workflow tracking (D1) operate alongside the whole system to make delegated work reliable and steerable.
 
 ---
 

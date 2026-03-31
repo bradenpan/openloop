@@ -40,6 +40,9 @@ select = ["E", "F", "I", "N", "W", "UP"]
 testpaths = ["backend/tests"]
 asyncio_mode = "auto"
 pythonpath = ["."]
+markers = [
+    "llm: marks tests that call the real Claude SDK (deselect with '-m \"not llm\"')",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

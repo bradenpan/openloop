@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -24,6 +25,7 @@ from backend.openloop.services import (
     agent_service,
     background_task_service,
     conversation_service,
+    memory_service,
     notification_service,
 )
 
@@ -53,6 +55,16 @@ CHECKPOINT_PROMPT = (
     "key topics discussed, decisions made, current status of tasks, and any "
     "open questions. This will be used as a checkpoint for context management."
 )
+
+FLUSH_MEMORY_PROMPT = (
+    "Review this conversation for any important facts, decisions, or user "
+    "preferences that haven't been saved to memory yet. Save them now using "
+    "your memory tools (save_fact, save_rule). This is mandatory before "
+    "context compression."
+)
+
+# Observation masking: keep this many recent user+assistant exchange pairs verbatim
+RECENT_TURNS_VERBATIM = 7
 
 # ---------------------------------------------------------------------------
 # Concurrency limits
@@ -182,7 +194,7 @@ async def start_session(
 
     # Build MCP tools — Odin gets extra tools
     is_odin = agent.name.lower() == "odin"
-    mcp_server = build_odin_tools() if is_odin else build_agent_tools(agent.name)
+    mcp_server = build_odin_tools(agent.id) if is_odin else build_agent_tools(agent.name, agent.id)
 
     # Determine model
     model_name = conversation.model_override or agent.default_model
@@ -326,7 +338,7 @@ async def _send_message_inner(
     # Load agent for model + MCP tools
     agent = agent_service.get_agent(db, state.agent_id)
     is_odin = agent.name.lower() == "odin"
-    mcp_server = build_odin_tools() if is_odin else build_agent_tools(agent.name)
+    mcp_server = build_odin_tools(agent.id) if is_odin else build_agent_tools(agent.name, agent.id)
 
     conversation = conversation_service.get_conversation(db, conversation_id)
     model_name = conversation.model_override or agent.default_model
@@ -334,6 +346,19 @@ async def _send_message_inner(
 
     # Build permission hooks (re-register on resume)
     hooks = _build_hooks_dict(state.agent_id, conversation_id)
+
+    # --- Proactive budget enforcement ---
+    estimated_context = _estimate_conversation_context(db, conversation_id, message)
+    utilization = estimated_context / CONTEXT_WINDOW_TOKENS
+    if utilization > CHECKPOINT_THRESHOLD:
+        logger.info(
+            "Proactive compression: context at ~%.0f%% for conversation %s",
+            utilization * 100,
+            conversation_id,
+        )
+        # Flush memory first, then compress
+        await flush_memory(db, conversation_id=conversation_id)
+        await _compress_conversation(db, conversation_id=conversation_id)
 
     # Call the SDK with streaming
     # NOTE: The user message is saved by the API route, not here, to avoid double-saving.
@@ -394,6 +419,54 @@ async def _send_message_inner(
         await monitor_context_usage(db, conversation_id=conversation_id, usage=result_message.usage)
 
 
+async def flush_memory(db: Session, *, conversation_id: str) -> None:
+    """Mandatory pre-compaction memory flush.
+
+    Injects an instruction to the agent to save unsaved facts before
+    any summarization or compression occurs. Called by close_session()
+    and _create_checkpoint().
+    """
+    from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
+    state = _active_sessions.get(conversation_id)
+    if not state or not state.sdk_session_id:
+        return
+
+    conversation = conversation_service.get_conversation(db, conversation_id)
+    agent = agent_service.get_agent(db, conversation.agent_id)
+    is_odin = agent.name.lower() == "odin"
+    mcp_server = build_odin_tools(agent.id) if is_odin else build_agent_tools(agent.name, agent.id)
+    model_name = conversation.model_override or agent.default_model
+    model = resolve_model(model_name)
+
+    # Build permission hooks
+    hooks = _build_hooks_dict(conversation.agent_id, conversation_id)
+
+    try:
+        async for event in query(
+            prompt=FLUSH_MEMORY_PROMPT,
+            resume=state.sdk_session_id,
+            options=ClaudeAgentOptions(
+                model=model,
+                mcp_servers=[mcp_server],
+                hooks=hooks,
+            ),
+        ):
+            if isinstance(event, ResultMessage):
+                # Update session_id if changed
+                if event.session_id and event.session_id != state.sdk_session_id:
+                    state.sdk_session_id = event.session_id
+                    conversation_service.update_conversation(
+                        db, conversation_id, sdk_session_id=event.session_id
+                    )
+    except (Exception, ExceptionGroup) as exc:
+        logger.warning(
+            "flush_memory failed for conversation %s (non-blocking): %s",
+            conversation_id,
+            exc,
+        )
+
+
 async def close_session(
     db: Session,
     *,
@@ -420,12 +493,15 @@ async def close_session(
 
     summary_text = ""
 
+    # Flush unsaved facts to memory before generating the closing summary
+    await flush_memory(db, conversation_id=conversation_id)
+
     if sdk_session_id:
         # Load agent for model + MCP tools
         conversation = conversation_service.get_conversation(db, conversation_id)
         agent = agent_service.get_agent(db, conversation.agent_id)
         is_odin = agent.name.lower() == "odin"
-        mcp_server = build_odin_tools() if is_odin else build_agent_tools(agent.name)
+        mcp_server = build_odin_tools(agent.id) if is_odin else build_agent_tools(agent.name, agent.id)
         model_name = conversation.model_override or agent.default_model
         model = resolve_model(model_name)
 
@@ -568,7 +644,7 @@ async def _run_background_task(
     from backend.openloop.database import SessionLocal
 
     is_odin = agent_name.lower() == "odin"
-    mcp_server = build_odin_tools() if is_odin else build_agent_tools(agent_name)
+    mcp_server = build_odin_tools(agent_id) if is_odin else build_agent_tools(agent_name, agent_id)
     model = resolve_model(default_model)
 
     db = SessionLocal()
@@ -712,7 +788,7 @@ async def reopen_conversation(
     # Session invalid or missing — start a new one with context injection
     agent = agent_service.get_agent(db, conversation.agent_id)
     is_odin = agent.name.lower() == "odin"
-    mcp_server = build_odin_tools() if is_odin else build_agent_tools(agent.name)
+    mcp_server = build_odin_tools(agent.id) if is_odin else build_agent_tools(agent.name, agent.id)
     model_name = conversation.model_override or agent.default_model
     model = resolve_model(model_name)
 
@@ -885,10 +961,13 @@ async def _create_checkpoint(
     if not state or not state.sdk_session_id:
         return
 
+    # Flush unsaved facts to memory before checkpointing
+    await flush_memory(db, conversation_id=conversation_id)
+
     conversation = conversation_service.get_conversation(db, conversation_id)
     agent = agent_service.get_agent(db, conversation.agent_id)
     is_odin = agent.name.lower() == "odin"
-    mcp_server = build_odin_tools() if is_odin else build_agent_tools(agent.name)
+    mcp_server = build_odin_tools(agent.id) if is_odin else build_agent_tools(agent.name, agent.id)
     model_name = conversation.model_override or agent.default_model
     model = resolve_model(model_name)
 
@@ -930,6 +1009,268 @@ async def _create_checkpoint(
             is_checkpoint=True,
         )
         logger.info("Checkpoint created for conversation %s", conversation_id)
+
+
+# ---------------------------------------------------------------------------
+# Context estimation
+# ---------------------------------------------------------------------------
+
+
+def _estimate_conversation_context(
+    db: Session, conversation_id: str, pending_message: str
+) -> int:
+    """Estimate total context tokens for a conversation.
+
+    Sum of: system prompt estimate + all messages + pending message.
+    Uses estimate_tokens() (4 chars ~ 1 token).
+    """
+    from backend.openloop.agents.context_assembler import estimate_tokens
+
+    conversation = conversation_service.get_conversation(db, conversation_id)
+    agent = agent_service.get_agent(db, conversation.agent_id)
+
+    # Estimate system prompt size (read_only to avoid inflating access counters)
+    system_tokens = estimate_tokens(
+        context_assembler.assemble_context(
+            db, agent_id=agent.id, space_id=conversation.space_id, read_only=True
+        )
+    )
+
+    # Sum all message tokens
+    messages = conversation_service.get_messages(db, conversation_id)
+    message_tokens = sum(estimate_tokens(m.content) for m in messages)
+
+    # Pending message
+    pending_tokens = estimate_tokens(pending_message)
+
+    return system_tokens + message_tokens + pending_tokens
+
+
+# ---------------------------------------------------------------------------
+# Observation masking — conversation compression
+# ---------------------------------------------------------------------------
+
+
+async def _compress_conversation(db: Session, *, conversation_id: str) -> None:
+    """Compress older conversation turns while keeping recent ones verbatim.
+
+    Observation masking strategy:
+    1. Keep the most recent RECENT_TURNS_VERBATIM user+assistant exchange pairs verbatim
+    2. Summarize older exchanges into a compact block
+    3. Store the summary as a checkpoint
+    4. Run verify_compaction() on the compressed content
+    """
+    from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
+    state = _active_sessions.get(conversation_id)
+    if not state or not state.sdk_session_id:
+        return
+
+    # Get all messages for the conversation
+    messages = conversation_service.get_messages(db, conversation_id)
+    if not messages:
+        return
+
+    # Identify exchanges: pairs of (user message, assistant response)
+    exchanges: list[list] = []
+    current_exchange: list = []
+    for msg in messages:
+        if msg.role == "user":
+            # Start a new exchange
+            if current_exchange:
+                exchanges.append(current_exchange)
+            current_exchange = [msg]
+        elif msg.role == "assistant" and current_exchange:
+            current_exchange.append(msg)
+            exchanges.append(current_exchange)
+            current_exchange = []
+
+    # Don't forget a trailing partial exchange (user message with no response yet)
+    if current_exchange:
+        exchanges.append(current_exchange)
+
+    # If not enough exchanges to compress, return early
+    if len(exchanges) <= RECENT_TURNS_VERBATIM:
+        logger.debug(
+            "Only %d exchanges for conversation %s — nothing to compress",
+            len(exchanges),
+            conversation_id,
+        )
+        return
+
+    # Split: older exchanges to compress vs recent to keep verbatim
+    older_exchanges = exchanges[:-RECENT_TURNS_VERBATIM]
+    # recent_exchanges stay in the SDK's context as-is
+
+    # Collect older message content into a single text block
+    older_lines: list[str] = []
+    for exchange in older_exchanges:
+        for msg in exchange:
+            older_lines.append(f"{msg.role}: {msg.content}")
+
+    older_content_text = "\n\n".join(older_lines)
+
+    if not older_content_text.strip():
+        return
+
+    # Use the SDK to generate a summary of the older content
+    conversation = conversation_service.get_conversation(db, conversation_id)
+    agent = agent_service.get_agent(db, conversation.agent_id)
+    is_odin = agent.name.lower() == "odin"
+    mcp_server = build_odin_tools(agent.id) if is_odin else build_agent_tools(agent.name, agent.id)
+    model_name = conversation.model_override or agent.default_model
+    model = resolve_model(model_name)
+
+    hooks = _build_hooks_dict(conversation.agent_id, conversation_id)
+
+    compress_prompt = (
+        "Summarize the following older conversation exchanges into a compact "
+        "block. Preserve all key facts, decisions, action items, and user "
+        "preferences. Be thorough but concise.\n\n"
+        f"---\n{older_content_text}\n---"
+    )
+
+    summary_text = ""
+    try:
+        async for event in query(
+            prompt=compress_prompt,
+            resume=state.sdk_session_id,
+            options=ClaudeAgentOptions(
+                model=model,
+                mcp_servers=[mcp_server],
+                hooks=hooks,
+            ),
+        ):
+            if isinstance(event, ResultMessage):
+                summary_text = event.result or ""
+                # Update session_id if changed
+                if event.session_id and event.session_id != state.sdk_session_id:
+                    state.sdk_session_id = event.session_id
+                    conversation_service.update_conversation(
+                        db, conversation_id, sdk_session_id=event.session_id
+                    )
+    except (Exception, ExceptionGroup) as exc:
+        logger.warning(
+            "Conversation compression failed for %s: %s",
+            conversation_id,
+            exc,
+        )
+        return
+
+    if summary_text:
+        conversation_service.add_summary(
+            db,
+            conversation_id=conversation_id,
+            summary=summary_text,
+            is_checkpoint=True,
+        )
+        logger.info(
+            "Compressed %d older exchanges for conversation %s",
+            len(older_exchanges),
+            conversation_id,
+        )
+
+        # Post-compression verification
+        await verify_compaction(
+            db,
+            conversation_id=conversation_id,
+            compressed_content=older_content_text,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Post-compression verification
+# ---------------------------------------------------------------------------
+
+# Patterns that indicate decision-like or value-like lines worth checking
+_DECISION_PATTERNS = re.compile(
+    r"\b(decided|chose|will use|agreed on|selected|confirmed|approved|switched to)\b",
+    re.IGNORECASE,
+)
+_VALUE_PATTERNS = re.compile(
+    r"(?:^|\n)\s*\w[\w\s]*(?:is|:|=)\s+\S",
+    re.IGNORECASE,
+)
+
+
+async def verify_compaction(
+    db: Session,
+    *,
+    conversation_id: str,
+    compressed_content: str,
+) -> None:
+    """Post-compaction verification: check that key facts from compressed content exist in memory.
+
+    Non-blocking — logs warnings but doesn't hold up the conversation.
+    Uses keyword/pattern extraction, NOT an LLM call.
+    """
+    # Extract key phrases from the compressed content
+    key_phrases: list[str] = []
+
+    for line in compressed_content.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+
+        # Lines that look like decisions
+        if _DECISION_PATTERNS.search(line):
+            # Extract a short phrase around the decision keyword
+            phrase = line[:120].strip()
+            if phrase:
+                key_phrases.append(phrase)
+
+        # Lines with specific values (key: value or key = value patterns)
+        elif _VALUE_PATTERNS.search(line):
+            phrase = line[:120].strip()
+            if phrase:
+                key_phrases.append(phrase)
+
+    if not key_phrases:
+        return
+
+    # Check each phrase against active memory entries
+    conversation = conversation_service.get_conversation(db, conversation_id)
+    space_id = conversation.space_id
+
+    # Determine which namespaces to search
+    namespaces = ["global"]
+    if space_id:
+        namespaces.append(f"space:{space_id}")
+
+    # Load all active memory entries from relevant namespaces
+    all_memory_values: list[str] = []
+    for ns in namespaces:
+        entries = memory_service.list_entries(db, namespace=ns, limit=10000)
+        for entry in entries:
+            all_memory_values.append(entry.value.lower())
+            all_memory_values.append(entry.key.lower())
+
+    # Check each key phrase for a rough match in memory
+    gaps: list[str] = []
+    for phrase in key_phrases:
+        phrase_lower = phrase.lower()
+        # Extract significant words (4+ chars) from the phrase
+        words = [w for w in re.findall(r"\b\w{4,}\b", phrase_lower)]
+        if not words:
+            continue
+
+        # Check if at least half the significant words appear in any memory entry
+        found = False
+        for mem_value in all_memory_values:
+            matches = sum(1 for w in words if w in mem_value)
+            if matches >= max(1, len(words) // 2):
+                found = True
+                break
+
+        if not found:
+            gaps.append(phrase)
+
+    for gap in gaps[:5]:  # Cap at 5 warnings to avoid log spam
+        logger.warning(
+            "Post-compaction gap: '%s' not found in memory for conversation %s",
+            gap[:100],
+            conversation_id,
+        )
 
 
 # ---------------------------------------------------------------------------

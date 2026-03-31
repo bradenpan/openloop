@@ -54,6 +54,7 @@ class SummaryCreate(BaseModel):
     decisions: list[str] | None = None
     open_questions: list[str] | None = None
     is_checkpoint: bool = False
+    is_meta_summary: bool = False
 
 
 class SummaryResponse(BaseModel):
@@ -66,4 +67,6 @@ class SummaryResponse(BaseModel):
     decisions: list | None
     open_questions: list | None
     is_checkpoint: bool
+    is_meta_summary: bool
+    consolidated_into: str | None
     created_at: datetime

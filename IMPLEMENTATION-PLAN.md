@@ -116,6 +116,8 @@ Naming conventions:
 Create all SQLAlchemy models from architecture doc (19 tables):
 - `spaces`, `todos`, `items`, `item_events`, `agents`, `agent_spaces`, `agent_permissions`, `data_sources`, `conversations`, `conversation_messages`, `conversation_summaries`, `memory_entries`, `documents`, `document_items`, `permission_requests`, `notifications`, `automations`, `automation_runs`, `background_tasks`
 
+Note: `background_tasks.status` enum includes "queued" (for tasks waiting on concurrency limits) in addition to "running", "completed", "failed", "cancelled". Define in `contract/enums.py`.
+
 Create initial Alembic migration. Create `database.py` (engine, SessionLocal, get_db).
 
 **Database configuration (set up here, not deferred):**
@@ -353,7 +355,7 @@ The core session lifecycle (happy path):
 **Depends on:** 2.3a
 
 Extended session manager capabilities:
-- `delegate_background(agent_id, instruction, space_id, item_id?)` — start session without SSE streaming, log activity to background_tasks, notify on completion
+- `delegate_background(agent_id, instruction, space_id, item_id?)` — simple fire-and-forget version: start session without SSE streaming, log activity to background_tasks, notify on completion. **Note: Task 5.2b replaces this with the managed turn loop (discrete turns with steering checkpoints). This Phase 2 version is intentionally simple — it gets background delegation working without the turn loop complexity.**
 - `reopen_conversation(conversation_id)` — attempt `resume=sdk_session_id`. If resume fails, start new session with conversation summary + recent messages as context.
 - Crash recovery on startup: scan for `status='active'` conversations, mark as `interrupted`, create notification
 - Concurrency control: max 5 interactive sessions, max 2 automation sessions, user conversations priority over automations. Queue when limit hit.
@@ -589,7 +591,7 @@ Playwright tests:
 
 - Add columns to `memory_entries`: `importance` (float, default 0.5), `access_count` (int, default 0), `last_accessed` (datetime, nullable), `valid_from` (datetime, default created_at), `valid_until` (datetime, nullable), `archived_at` (datetime, nullable), `category` (string, nullable)
 - Add columns to `conversation_summaries`: `is_meta_summary` (boolean, default false), `consolidated_into` (FK → conversation_summaries, nullable)
-- Create `behavioral_rules` table: id, agent_id (FK), rule (text), source_conversation_id (FK, nullable), confidence (float, default 0.5), apply_count (int, default 0), last_applied (datetime, nullable), is_active (boolean, default true), created_at, updated_at
+- Create `behavioral_rules` table: id, agent_id (FK), rule (text), source_type (string — "correction" | "validation"), source_conversation_id (FK, nullable), confidence (float, default 0.5 — asymmetric updates: +0.1 on confirmation, -0.2 on override), apply_count (int, default 0), last_applied (datetime, nullable), is_active (boolean, default true), created_at, updated_at
 - Add columns to `background_tasks`: `current_step` (int, nullable), `total_steps` (int, nullable), `step_results` (JSON, nullable), `parent_task_id` (FK → background_tasks, nullable)
 - Alembic migration
 - Update ORM models in `models.py`
@@ -621,7 +623,7 @@ Rewrite `memory_service.py` to support the new memory architecture:
 - Keep backward-compatible `upsert_entry()` for non-agent callers (seed script, API routes)
 
 New service modules:
-- `behavioral_rule_service.py` — CRUD, confidence update (increase/decrease), apply tracking (increment apply_count, set last_applied), auto-demotion (is_active=false when confidence < 0.3 after 10+ sessions), list active rules ranked by confidence
+- `behavioral_rule_service.py` — CRUD, `confirm_rule(rule_id)` (+0.1 confidence, capped at 1.0), `override_rule(rule_id)` (-0.2 confidence, asymmetric), apply tracking (increment apply_count, set last_applied), auto-demotion (is_active=false when confidence < 0.3 after 10+ sessions), list active rules ranked by confidence
 **Acceptance criteria:** Write-time dedup correctly identifies ADD/UPDATE/DELETE/NOOP. Temporal supersession preserves old fact with valid_until. Cap enforcement archives lowest-scored entry. Scoring formula returns correct rankings. Behavioral rules track confidence correctly. All existing memory service tests still pass.
 
 **Architecture doc reference:** Context Pruning and Memory Lifecycle Strategy (Tier 1: Semantic Memory), Flow 7 (Write-Time Fact Management)
@@ -638,13 +640,17 @@ Replace existing memory MCP tools in `mcp_tools.py`:
 - Add: `update_fact(fact_id, new_content)` — explicit update of a known fact
 - Add: `recall_facts(query?, namespace?, category?, date_range?)` — scored retrieval, returns facts with scores. Omit namespace for cross-namespace search.
 - Add: `delete_fact(fact_id, reason)` — marks as superseded (sets valid_until=now)
-- Add: `save_rule(rule, source_context?)` — creates behavioral_rule with confidence 0.5
+- Add: `save_rule(rule, source_type?, source_context?)` — creates behavioral_rule with confidence 0.5; source_type: "correction" | "validation"
+- Add: `confirm_rule(rule_id)` — calls `behavioral_rule_service.confirm_rule()`, increases confidence by +0.1
+- Add: `override_rule(rule_id)` — calls `behavioral_rule_service.override_rule()`, decreases confidence by -0.2
 - Add: `list_rules(agent_id?)` — returns active rules for the agent
 Update agent system prompts (in context assembler or agent configs) with instructions to:
 - Use `save_fact` proactively when learning important information
-- Use `save_rule` when the user corrects behavior and says to remember it
+- Use `save_rule` when the user corrects behavior (source_type="correction") or confirms a non-obvious approach worked well (source_type="validation")
+- Use `confirm_rule` when the user validates a rule's recommendation was correct
+- Use `override_rule` when the user contradicts an existing rule — the agent can see its active rules in context and should recognize when a user response conflicts with one
 
-**Acceptance criteria:** All new tools callable and produce correct results. Old read_memory/write_memory removed. Agent system prompts include memory management instructions. Error handling (try/except, db rollback, is_error on failure) follows existing patterns.
+**Acceptance criteria:** All new tools callable and produce correct results. Old read_memory/write_memory removed. `confirm_rule` increases confidence by +0.1; `override_rule` decreases by -0.2. Agent system prompts include memory management instructions (including when to confirm/override rules). Error handling (try/except, db rollback, is_error on failure) follows existing patterns.
 
 **Architecture doc reference:** MCP Tools section (Memory operations, Behavioral rule operations)
 
@@ -694,12 +700,19 @@ Add three safety mechanisms to `session_manager.py`:
    - Compression: call flush_memory() first, then apply observation masking (below)
 
 3. **Observation masking** — compression strategy:
-   - Keep the most recent 2-3 complete exchanges (user message + agent response) verbatim
+   - Keep the most recent 5-10 complete exchanges (user message + agent response) verbatim (configurable — default 7 as a named constant in session manager)
    - Summarize older exchanges into a compact block (use the agent or a lightweight summary call)
    - Cut at turn boundaries only — never split a tool-call sequence
    - Store the compressed summary as a checkpoint in conversation_summaries
 
-**Acceptance criteria:** flush_memory() runs before every close and every checkpoint. Proactive check triggers compression before LLM call when needed. Observation masking preserves recent turns verbatim. Compression happens at clean turn boundaries. All existing session manager tests still pass.
+4. **`verify_compaction(compressed_content)`** — post-compaction safety check:
+   - Extract key phrases from the compressed content (decisions, specific values, preferences) using keyword/pattern extraction — NOT an LLM call
+   - Check each against persistent memory (memory_entries where valid_until IS NULL)
+   - If gaps found: log a warning with the missed content. Optionally trigger a targeted `save_fact` for clearly missed facts
+   - Non-blocking — do not hold up the conversation for verification
+   - Wire into `send_message()`: call after compression completes, before proceeding with query()
+
+**Acceptance criteria:** flush_memory() runs before every close and every checkpoint. Proactive check triggers compression before LLM call when needed. Observation masking preserves recent turns verbatim. Post-compaction verification runs after compression. Compression happens at clean turn boundaries. All existing session manager tests still pass.
 
 **Architecture doc reference:** Session Manager operations (flush_memory, send_message proactive check), Flow 5 (updated close flow), Flow 9 (Proactive Budget Enforcement)
 
@@ -712,9 +725,10 @@ Add three safety mechanisms to `session_manager.py`:
 - **Cap enforcement tests**: fill namespace to cap → save one more → verify lowest-scored entry archived. Verify archived entries excluded from context assembly but still queryable.
 - **Scoring formula tests**: create facts with varying importance/access/age → verify ranking order matches expected scores.
 - **Context ordering tests**: assemble context → verify identity at top, rules after identity, board state at bottom, facts/summaries in middle.
-- **Procedural memory tests**: save rule → assemble context → verify rule in system prompt section. Test confidence increase/decrease. Test auto-demotion after threshold.
+- **Procedural memory tests**: save rule → assemble context → verify rule in system prompt section. Test `confirm_rule` increases confidence by +0.1 (capped at 1.0). Test `override_rule` decreases confidence by -0.2 (asymmetric). Test auto-demotion after threshold (confidence < 0.3 after 10+ sessions). Test both source_types ("correction", "validation").
 - **Flush pipeline tests**: start conversation → discuss facts → trigger flush → verify facts saved to memory before summary generated. Test in both close and checkpoint paths.
 - **Proactive budget tests**: create a session with large context → send message → verify compression triggered before LLM call, not after. Verify recent turns kept verbatim.
+- **Post-compaction verification tests**: compress context where flush deliberately misses a fact → verify `verify_compaction()` detects the gap and logs a warning. Verify non-blocking (conversation proceeds even if gaps found).
 - **Backward compatibility**: verify existing API routes for memory still work (they use the service layer, which maintains backward-compatible functions).
 
 **Acceptance criteria:** All tests pass. No regressions in existing Phase 1-2 test suites.
@@ -843,19 +857,21 @@ Upgrade MCP search tools to use FTS5 and support cross-space search:
 
 **Acceptance criteria:** delegate_task creates background task, sub-agent executes, results flow back. Step tracking shows progress. Parent-child hierarchy queryable. Stale/stuck detection creates notifications.
 
-### Task 5.2b: Mid-Task Steering
+### Task 5.2b: Mid-Task Steering (Managed Turn Loop)
 **Agent:** 1 agent
-**Complexity:** Medium
+**Complexity:** Large (rewrites delegate_background from Phase 2's fire-and-forget into managed turn loop, plus adds steering queue)
 **Depends on:** 5.2a
 
 - `steer(conversation_id, message)` operation on SessionManager:
   - Add message to conversation's steering queue (max 10 pending messages)
-  - At next tool-call boundary: current tool completes, remaining queued tools skipped, steering message injected as next user turn
-  - Works for both interactive and background sessions
+  - Managed turn loop in `delegate_background()` checks queue between turns
+  - At next turn boundary: steering message used as next user input in `query(resume=session_id)`
+  - Works within SDK's existing query/resume mechanism — no mid-tool-call injection
 - `POST /api/v1/conversations/{id}/steer` API endpoint
 - SSE event: `steering_received` confirms message was queued
+- Background agent system prompts include incremental-work instructions
 
-**Acceptance criteria:** Steering message queued during tool execution. Agent receives message after current tool completes. Remaining tools in batch skipped. Agent adjusts course based on steering message. Works for both foreground and background sessions.
+**Acceptance criteria:** Steering message queued via API. Managed turn loop picks up message at next turn boundary. Agent receives message as next user input via query(resume). Agent adjusts course based on steering message. Auto-continuation works when steering queue is empty (no user involvement needed).
 
 ### Task 5.2c: Delegation UI
 **Agent:** 1 agent using `frontend-design` skill

@@ -264,17 +264,18 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 │  │      history + pending message). If >70%:    │
 │  │      a. Run flush_memory() first             │
 │  │      b. Compress older turns (observation    │
-│  │         masking: keep recent 2-3 exchanges   │
+│  │         masking: keep recent 5-10 exchanges  │
 │  │         verbatim, summarize the rest)         │
-│  │      c. Compress at turn boundaries only —   │
+│  │      c. Post-compaction verification: check  │
+│  │         key facts from compressed section    │
+│  │         exist in persistent memory           │
+│  │      d. Compress at turn boundaries only —   │
 │  │         never split tool-call sequences      │
 │  │   3. Call SDK query(resume=session_id)        │
 │  │   4. Stream response chunks to SSE           │
 │  │   5. Process tool calls through Permission   │
 │  │      Enforcer                                │
-│  │   6. Check steering queue — if messages       │
-│  │      pending, process after current turn      │
-│  │   7. Store message + response in DB          │
+│  │   6. Store message + response in DB          │
 │  │                                              │
 │  ├── close_session()                            │
 │  │   1. Run flush_memory() — agent saves any    │
@@ -298,28 +299,56 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 │  │   Called by: close_session() and              │
 │  │   send_message() before compression.          │
 │  │                                              │
+│  ├── verify_compaction(compressed_content)       │
+│  │   Post-compaction safety check.               │
+│  │   1. Scan compressed content for fact-like    │
+│  │      statements (decisions, preferences,      │
+│  │      specific values)                         │
+│  │   2. Check each against persistent memory     │
+│  │   3. If gaps found: log warning, optionally   │
+│  │      trigger a targeted save for missed facts │
+│  │   Lightweight — not a full re-extraction,     │
+│  │   just a spot check for obvious gaps.         │
+│  │   Called by: send_message() after compression.│
+│  │                                              │
 │  ├── steer(conversation_id, message)            │
 │  │   Mid-task course correction.                │
 │  │   1. Add message to conversation's steering  │
 │  │      queue (max 10 pending messages)          │
-│  │   2. At next tool-call boundary:              │
-│  │      a. Current tool completes normally       │
-│  │      b. Remaining queued tools are skipped    │
-│  │      c. Steering message injected as next     │
-│  │         user message                          │
-│  │      d. Agent processes and adjusts course    │
-│  │   Works for both interactive and background   │
-│  │   sessions. Background steering via SSE       │
-│  │   message input on task monitoring panel.     │
+│  │   2. The managed turn loop (in                │
+│  │      delegate_background) checks this queue   │
+│  │      between turns. At the next turn          │
+│  │      boundary:                                │
+│  │      a. Current turn completes normally       │
+│  │      b. Steering message used as the next     │
+│  │         user message in query(resume=...)     │
+│  │      c. Agent processes and adjusts course    │
+│  │   Works within SDK's existing query/resume    │
+│  │   mechanism — no mid-tool-call injection.     │
+│  │   Background steering via message input on    │
+│  │   the task monitoring panel.                  │
 │  │                                              │
 │  ├── delegate_background()                      │
-│  │   1. Start session without SSE streaming     │
-│  │   2. Agent works autonomously                │
-│  │   3. Log activity to DB for monitoring       │
-│  │   4. Track step progress (current_step,       │
-│  │      total_steps, step_results on task)       │
-│  │   5. On completion: write results to task,   │
+│  │   Managed turn loop — agent works in         │
+│  │   discrete turns with steering checkpoints.  │
+│  │   1. Start session, create background_task   │
+│  │   2. Enter turn loop:                        │
+│  │      a. query(resume=session_id, message=    │
+│  │         steering_queue.pop() or "continue")  │
+│  │      b. Agent completes one turn of work     │
+│  │      c. Log activity, update step progress   │
+│  │         (current_step, step_results on task) │
+│  │      d. Stream activity to SSE for monitoring│
+│  │      e. Check: agent reported completion?    │
+│  │         → exit loop                          │
+│  │      f. Check steering queue for user msgs   │
+│  │      g. Loop back to (a)                     │
+│  │   3. On completion: write results to task,   │
 │  │      notify via SSE event                    │
+│  │   Agent system prompts include: "Work        │
+│  │   incrementally. Complete one meaningful step │
+│  │   per turn. Report what you did and what you │
+│  │   plan to do next."                          │
 │  │                                              │
 │  └── monitor_context_usage()                    │
 │      Runs after each agent response as backup.  │
@@ -388,7 +417,9 @@ recall_facts(query?, namespace?, category?, date_range?) # scored retrieval (imp
 delete_fact(fact_id, reason)                            # marks as superseded with valid_until timestamp
 
 # Behavioral rule operations
-save_rule(rule, source_context?)                       # creates procedural memory entry with confidence 0.5
+save_rule(rule, source_type?, source_context?)           # creates procedural memory entry with confidence 0.5; source_type: "correction" | "validation"
+confirm_rule(rule_id)                                    # increases confidence by +0.1 (capped at 1.0) — agent calls when user confirms a rule was correct
+override_rule(rule_id)                                   # decreases confidence by -0.2 (asymmetric) — agent calls when user overrides a rule
 list_rules(agent_id?)                                  # returns active rules for the agent
 
 # Document operations
@@ -887,7 +918,7 @@ background_tasks
 ├── item_id (FK → items, nullable)
 ├── parent_task_id (FK → background_tasks, nullable — for sub-task hierarchies)
 ├── instruction (text)
-├── status ("running" | "completed" | "failed" | "cancelled")
+├── status ("queued" | "running" | "completed" | "failed" | "cancelled")
 ├── current_step (integer, nullable — for multi-step tracking)
 ├── total_steps (integer, nullable)
 ├── step_results (JSON array, nullable — [{step, status, summary}] for completed steps)
@@ -896,12 +927,13 @@ background_tasks
 ├── completed_at (nullable)
 └── error (text, nullable)
 
-behavioral_rules (procedural memory — learned from user corrections)
+behavioral_rules (procedural memory — learned from corrections and validated approaches)
 ├── id (UUID, PK)
 ├── agent_id (FK → agents, indexed)
 ├── rule (text — the behavioral instruction, e.g., "Always check CRM before drafting follow-ups")
+├── source_type (string — "correction" | "validation" — whether this came from fixing a mistake or confirming a good approach)
 ├── source_conversation_id (FK → conversations, nullable — where this rule was learned)
-├── confidence (float, default 0.5 — increases on confirmation, decreases on override)
+├── confidence (float, default 0.5 — asymmetric updates: +0.1 on confirmation, -0.2 on override)
 ├── apply_count (integer, default 0 — how many times injected into context)
 ├── last_applied (datetime, nullable — last time injected into a session)
 ├── is_active (boolean, default true — false when demoted due to low confidence/usage)
@@ -1194,14 +1226,21 @@ If namespace is at cap (50 entries):
   → Still searchable via recall_facts tool
 ```
 
-### Flow 8: Mid-Task Steering
+### Flow 8: Mid-Task Steering (Managed Turn Loop)
 
 ```
 User delegates: "Research competitor X's pricing strategy"
-  → Background task created, agent starts working
+  → Background task created, agent starts working in managed turn loop
   │
   ▼
-Agent is executing tool calls: WebSearch("competitor X pricing"), Read(file), ...
+Turn 1: Agent receives instruction, plans approach, starts research
+  → query() returns after turn completes
+  → Session Manager: steering queue empty → auto-continue
+  │
+  ▼
+Turn 2: Agent executes WebSearch("competitor X pricing"), reads results
+  → query(resume=session_id) returns after turn completes
+  → Session Manager: steering queue empty → auto-continue
   │
   ▼
 User sees activity log, realizes agent is researching wrong company
@@ -1212,15 +1251,20 @@ Frontend: POST /api/v1/conversations/{id}/steer
   → Message added to conversation's steering queue
   │
   ▼
-At next tool-call boundary (current tool finishes):
-  → Session Manager checks steering queue
-  → Remaining queued tools for this turn are skipped
-  → Steering message injected as next user message
+Turn 3 completes (agent finishes current turn of work normally):
+  → Session Manager checks steering queue → message found
+  → query(resume=session_id, message="Wrong company — I mean X Corp, the SaaS one")
   │
   ▼
-Agent receives: "Wrong company — I mean X Corp, the SaaS one"
-  → Adjusts course, continues research with correct target
-  → Partial results from earlier tools are preserved
+Turn 4: Agent receives correction, adjusts course, continues with correct target
+  → All prior results preserved (they're in session history)
+  → Session Manager: steering queue empty → auto-continue
+  → Agent works to completion
+
+
+Note: The user experiences this as seamless background work with an optional correction.
+The auto-continuation between turns is invisible — no user interaction unless they
+choose to steer. Latency between turns is minimal (the next query() fires immediately).
 ```
 
 ### Flow 9: Proactive Budget Enforcement (during send_message)
@@ -1238,9 +1282,10 @@ Backend: SessionManager.send_message()
       │
       ▼
       1. flush_memory(): agent saves unsaved facts to persistent memory
-      2. Observation masking: keep recent 2-3 exchanges verbatim
+      2. Observation masking: keep recent 5-10 exchanges verbatim
       3. Summarize older exchanges (cut at turn boundaries only)
-      4. Store checkpoint summary in conversation_summaries
+      4. Post-compaction verification: spot-check that key facts survived
+      5. Store checkpoint summary in conversation_summaries
       │
       ▼
       Proceed with query() using compressed context
@@ -1296,11 +1341,12 @@ Board state is always fresh — generated from the database, not stored. But a s
 
 ### Tier 4: Procedural Memory — Behavioral Rules (behavioral_rules)
 
-Behavioral rules accumulate from user corrections. Growth is slow (~5-10 per agent over months) but without lifecycle management, agents could accumulate contradictory rules.
+Behavioral rules accumulate from two sources: user corrections ("don't do X", "always check Y first") and validated approaches (user confirms a non-obvious choice worked well, or accepts an unusual approach without pushback). Growth is slow (~5-10 per agent over months) but without lifecycle management, agents could accumulate contradictory rules.
 
 **Lifecycle mechanisms:**
 - **Per-agent cap:** 30 active rules per agent. When cap is hit, lowest-confidence rule is deactivated.
-- **Confidence tracking:** Rules start at confidence 0.5. Confirmed by user → confidence increases toward 1.0. Overridden by user → confidence decreases. Rules below confidence 0.3 after 10+ sessions are auto-deactivated (`is_active = false`).
+- **Asymmetric confidence tracking:** Rules start at confidence 0.5. Confirmed by user → confidence increases by a standard increment (e.g., +0.1, capped at 1.0). Overridden by user → confidence decreases at **2x the rate** (e.g., -0.2). This asymmetry ensures that stale or wrong rules erode quickly while good rules build trust gradually. Rules below confidence 0.3 after 10+ sessions are auto-deactivated (`is_active = false`).
+- **Source tracking:** Rules carry a `source_type` ("correction" or "validation") so the system knows whether the rule came from fixing a mistake or confirming a good approach.
 - **Application tracking:** `apply_count` and `last_applied` track how often and how recently a rule was used. Rules not applied in 10+ sessions with low confidence are auto-deactivated.
 - **Token budget:** Fixed allocation of 500 tokens within the system prompt section (beginning of context, highest attention).
 
@@ -1311,7 +1357,8 @@ This is the raw message history within an active SDK session.
 **Pruning mechanisms:**
 - **Proactive budget enforcement:** Before each LLM call, the Session Manager estimates total context size. If it exceeds 70% of the context window, compression is triggered before the call — not as error recovery after the fact.
 - **Mandatory pre-compaction flush:** Before any compression, the `flush_memory()` operation runs: the agent is prompted to save unsaved facts to persistent memory. This prevents information loss during the inherently lossy summarization step.
-- **Observation masking:** During compression, the most recent 2-3 complete exchanges (user message + agent response) are kept verbatim. Only older exchanges are summarized. This preserves the immediate working context. JetBrains research found this approach gives a 2.6% task completion improvement while being 52% cheaper than full summarization.
+- **Observation masking:** During compression, the most recent 5-10 complete exchanges (user message + agent response, configurable — default 7) are kept verbatim. Only older exchanges are summarized. This preserves the immediate working context. JetBrains research found that 10 turns gave the best balance — a 2.6% task completion improvement while being 52% cheaper than full summarization. Shorter windows (5) may be used for simple Q&A; longer windows (10) for complex multi-step work.
+- **Post-compaction verification:** After compression, spot-check that key facts from the compressed section exist in persistent memory. If gaps are found, log a warning and optionally trigger a targeted save. This catches cases where the flush missed something critical.
 - **Turn-boundary compression:** Compression always cuts at user-message boundaries — never in the middle of a tool-call sequence. This preserves conversation coherence.
 - **User-initiated close:** When context becomes unwieldy, the user closes the conversation. Flush + final summary is generated. New conversation starts with summary context.
 - **Notification at 90%:** System suggests closing and starting fresh when context is nearly full.
@@ -1408,7 +1455,7 @@ Restore = replace the SQLite file with a backup copy and restart the backend. Co
 3. **Context that survives** — four-tier memory (semantic, episodic, working, procedural) + scored retrieval + attention-optimized assembly. New agents in a space automatically know what happened before, how to behave, and what's important.
 4. **Granular permissions** — every tool call goes through the PermissionEnforcer. Per-agent, per-resource, per-operation. In-conversation and background approval flows.
 5. **Odin front door** — always-visible Haiku-powered chat. Handles simple actions directly (~1-2s), routes complex work to space agents.
-6. **Background delegation** — agents work asynchronously, results flow back to the board/conversation. Progress monitoring via SSE.
+6. **Background delegation** — agents work asynchronously via managed turn loop (session manager auto-continues between turns, checks steering queue at each boundary). Results flow back to the board/conversation. Progress monitoring via SSE. User can steer mid-task without restart.
 7. **Progressive autonomy** — permission matrix supports Always/Approval/Never per operation. Flip gates as trust increases.
 8. **Future remote access** — API-first design. Every operation is an API call. Discord/Slack/mobile clients plug in without rearchitecting.
 9. **Clean agent creation** — Agent Builder designs agents through conversation. Permission matrix set at creation time.

@@ -70,9 +70,19 @@ _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
     "move_item": ("openloop-board", Operation.EDIT),
     "get_item": ("openloop-board", Operation.READ),
     "list_items": ("openloop-board", Operation.READ),
-    # Memory tools (9-10)
+    # Memory tools (9-10, legacy)
     "read_memory": ("openloop-memory", Operation.READ),
     "write_memory": ("openloop-memory", Operation.CREATE),
+    # Memory tools (Phase 3b: enhanced)
+    "save_fact": ("openloop-memory", Operation.CREATE),
+    "update_fact": ("openloop-memory", Operation.EDIT),
+    "recall_facts": ("openloop-memory", Operation.READ),
+    "delete_fact": ("openloop-memory", Operation.DELETE),
+    # Behavioral rule tools (Phase 3b)
+    "save_rule": ("openloop-memory", Operation.CREATE),
+    "confirm_rule": ("openloop-memory", Operation.EDIT),
+    "override_rule": ("openloop-memory", Operation.EDIT),
+    "list_rules": ("openloop-memory", Operation.READ),
     # Document tools (11-13)
     "read_document": ("openloop-docs", Operation.READ),
     "list_documents": ("openloop-docs", Operation.READ),
@@ -271,41 +281,23 @@ async def check_permission(
 # ---------------------------------------------------------------------------
 
 
-APPROVAL_TIMEOUT_SECONDS = 300  # 5 minutes
-
-
-async def _poll_for_approval(
-    db: Session, request_id: str, *, timeout: float = APPROVAL_TIMEOUT_SECONDS
-) -> str:
+async def _poll_for_approval(db: Session, request_id: str) -> str:
     """Poll DB every 2 seconds until the permission request is resolved.
 
     Returns the resolved status string ("approved" or "denied").
-    Auto-denies after *timeout* seconds if the user has not acted.
+    No timeout — agents wait indefinitely for the user to act, per spec.
+    If the request row is deleted, treats as denied.
     """
-    elapsed = 0.0
     poll_interval = 2.0
-    while elapsed < timeout:
-        # Expire cached state so we get fresh data from DB
+    while True:
         db.expire_all()
         req = db.query(PermissionRequest).filter(PermissionRequest.id == request_id).first()
-        if req and req.status != PermissionRequestStatus.PENDING:
+        if req is None:
+            logger.warning("Permission request %s was deleted during polling — denying", request_id)
+            return PermissionRequestStatus.DENIED
+        if req.status != PermissionRequestStatus.PENDING:
             return req.status
         await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
-
-    # Timeout reached — auto-deny
-    logger.warning(
-        "Approval request %s timed out after %.0f seconds — auto-denying",
-        request_id,
-        timeout,
-    )
-    db.expire_all()
-    req = db.query(PermissionRequest).filter(PermissionRequest.id == request_id).first()
-    if req and req.status == PermissionRequestStatus.PENDING:
-        req.status = PermissionRequestStatus.DENIED
-        req.resolved_by = "system"
-        db.commit()
-    return PermissionRequestStatus.DENIED
 
 
 # ---------------------------------------------------------------------------
@@ -360,5 +352,5 @@ def build_permission_hook(agent_id: str, conversation_id: str | None):
                 reason=f"Permission denied: {operation} on {resource} for agent {agent_id}"
             )
 
-    matcher = HookMatcher(matcher="*", timeout=300)
+    matcher = HookMatcher(matcher="*")
     return matcher, hook

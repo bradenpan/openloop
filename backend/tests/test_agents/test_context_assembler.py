@@ -108,7 +108,7 @@ def test_basic_space_assembly(db_session: Session):
     assert "## Board State" in result
     assert "Feature A" in result
     assert "Feature B" in result
-    assert "## Previous Conversations" in result
+    assert "## Recent Conversations" in result
     assert "Discussed project roadmap" in result
     assert "Decision: Use FastAPI" in result
     assert "## Space Facts" in result
@@ -134,7 +134,7 @@ def test_empty_space(db_session: Session):
     # None of the data sections should be present
     assert "## Current To-dos" not in result
     assert "## Board State" not in result
-    assert "## Previous Conversations" not in result
+    assert "## Recent Conversations" not in result
     assert "## Space Facts" not in result
     assert "## Global Facts" not in result
     assert "## Available Tools" not in result
@@ -273,7 +273,7 @@ def test_summaries_budget_truncation(db_session: Session):
 
     result = assemble_context(db_session, agent_id=agent.id, space_id=space.id)
 
-    assert "## Previous Conversations" in result
+    assert "## Recent Conversations" in result
     assert "... (truncated)" in result
 
 

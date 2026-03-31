@@ -418,11 +418,19 @@ class ConversationSummary(Base):
     decisions: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     open_questions: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     is_checkpoint: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Phase 3b: summary consolidation
+    is_meta_summary: Mapped[bool] = mapped_column(Boolean, default=False)
+    consolidated_into: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("conversation_summaries.id"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     # Relationships
     conversation: Mapped["Conversation"] = relationship("Conversation", back_populates="summaries")
     space: Mapped["Space | None"] = relationship("Space", back_populates="conversation_summaries")
+    consolidated_into_summary: Mapped["ConversationSummary | None"] = relationship(
+        "ConversationSummary", remote_side="ConversationSummary.id", lazy="select"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -440,8 +448,49 @@ class MemoryEntry(Base):
     value: Mapped[str] = mapped_column(Text, nullable=False)
     tags: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     source: Mapped[str] = mapped_column(String, default="user")
+    # Phase 3b: scored retrieval fields
+    importance: Mapped[float] = mapped_column(Float, default=0.5)
+    access_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_accessed: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Phase 3b: temporal fact management
+    valid_from: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    valid_until: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    # Phase 3b: lifecycle management
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    category: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# 12b. behavioral_rules (procedural memory)
+# ---------------------------------------------------------------------------
+
+
+class BehavioralRule(Base):
+    __tablename__ = "behavioral_rules"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("agents.id"), nullable=False, index=True
+    )
+    rule: Mapped[str] = mapped_column(Text, nullable=False)
+    source_type: Mapped[str] = mapped_column(String, nullable=False)
+    source_conversation_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("conversations.id"), nullable=True
+    )
+    confidence: Mapped[float] = mapped_column(Float, default=0.5)
+    apply_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_applied: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+    # Relationships
+    agent: Mapped["Agent"] = relationship("Agent", lazy="select")
+    source_conversation: Mapped["Conversation | None"] = relationship(
+        "Conversation", foreign_keys=[source_conversation_id], lazy="select"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +654,13 @@ class BackgroundTask(Base):
     instruction: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String, default="queued")
     result_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Phase 3b: workflow tracking
+    current_step: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    total_steps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    step_results: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
+    parent_task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("background_tasks.id"), nullable=True
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -616,3 +672,6 @@ class BackgroundTask(Base):
     conversation: Mapped["Conversation | None"] = relationship("Conversation", lazy="select")
     space: Mapped["Space | None"] = relationship("Space", lazy="select")
     item: Mapped["Item | None"] = relationship("Item", lazy="select")
+    parent_task: Mapped["BackgroundTask | None"] = relationship(
+        "BackgroundTask", remote_side="BackgroundTask.id", lazy="select"
+    )
