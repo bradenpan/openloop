@@ -45,10 +45,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     start_task_monitor()
 
+    # Start automation scheduler
+    from backend.openloop.agents.automation_scheduler import (
+        start_automation_scheduler,
+        stop_automation_scheduler,
+    )
+
+    start_automation_scheduler()
+
     yield
 
     # Shutdown logic
     stop_task_monitor()
+    stop_automation_scheduler()
 
 
 app = FastAPI(
@@ -67,6 +76,7 @@ app.add_middleware(
 
 # --- Routers ---
 from backend.openloop.api.routes.agents import router as agents_router  # noqa: E402
+from backend.openloop.api.routes.automations import router as automations_router  # noqa: E402
 from backend.openloop.api.routes.conversations import router as conversations_router  # noqa: E402
 from backend.openloop.api.routes.data_sources import router as data_sources_router  # noqa: E402
 from backend.openloop.api.routes.documents import router as documents_router  # noqa: E402
@@ -87,6 +97,7 @@ from backend.openloop.api.routes.spaces import router as spaces_router  # noqa: 
 # capture the literal path "running" if it were registered first.
 app.include_router(running_router)
 app.include_router(agents_router)
+app.include_router(automations_router)
 app.include_router(conversations_router)
 app.include_router(data_sources_router)
 app.include_router(events_router)

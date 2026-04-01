@@ -572,6 +572,9 @@ class Notification(Base):
     conversation_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("conversations.id", ondelete="CASCADE"), nullable=True
     )
+    automation_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("automations.id", ondelete="SET NULL"), nullable=True
+    )
     is_read: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 

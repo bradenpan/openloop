@@ -82,6 +82,14 @@ export function Sidebar() {
           Agents
         </NavLink>
         <NavLink
+          to="/automations"
+          className={({ isActive }) =>
+            `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-muted hover:bg-raised hover:text-foreground'}`
+          }
+        >
+          Automations
+        </NavLink>
+        <NavLink
           to="/settings"
           className={({ isActive }) =>
             `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-muted hover:bg-raised hover:text-foreground'}`

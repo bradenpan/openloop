@@ -8,6 +8,12 @@ from backend.openloop.services import notification_service
 router = APIRouter(prefix="/api/v1/notifications", tags=["notifications"])
 
 
+@router.post("/mark-all-read")
+def mark_all_read(db: Session = Depends(get_db)) -> dict:
+    count = notification_service.mark_all_read(db)
+    return {"marked_read": count}
+
+
 @router.get("", response_model=list[NotificationResponse])
 def list_notifications(
     is_read: bool | None = Query(None),

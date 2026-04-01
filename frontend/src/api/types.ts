@@ -129,6 +129,77 @@ export interface paths {
         patch: operations["resolve_permission_request_api_v1_agents_permission_requests__request_id__patch"];
         trace?: never;
     };
+    "/api/v1/automations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Automations */
+        get: operations["list_automations_api_v1_automations_get"];
+        put?: never;
+        /** Create Automation */
+        post: operations["create_automation_api_v1_automations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/automations/{automation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Automation */
+        get: operations["get_automation_api_v1_automations__automation_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Automation */
+        delete: operations["delete_automation_api_v1_automations__automation_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Automation */
+        patch: operations["update_automation_api_v1_automations__automation_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/automations/{automation_id}/trigger": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Trigger Automation */
+        post: operations["trigger_automation_api_v1_automations__automation_id__trigger_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/automations/{automation_id}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Runs */
+        get: operations["list_runs_api_v1_automations__automation_id__runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conversations": {
         parameters: {
             query?: never;
@@ -176,6 +247,28 @@ export interface paths {
         put?: never;
         /** Send Message */
         post: operations["send_message_api_v1_conversations__conversation_id__messages_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/conversations/{conversation_id}/steer": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Steer Conversation
+         * @description Send a steering message to a running background task.
+         *
+         *     The message is queued and picked up at the next turn boundary.
+         */
+        post: operations["steer_conversation_api_v1_conversations__conversation_id__steer_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -642,6 +735,23 @@ export interface paths {
         patch: operations["update_entry_api_v1_memory__entry_id__patch"];
         trace?: never;
     };
+    "/api/v1/notifications/mark-all-read": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark All Read */
+        post: operations["mark_all_read_api_v1_notifications_mark_all_read_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications": {
         parameters: {
             query?: never;
@@ -953,6 +1063,121 @@ export interface components {
             mcp_tools?: string[] | null;
             /** Status */
             status?: string | null;
+        };
+        /** AutomationCreate */
+        AutomationCreate: {
+            /** Name */
+            name: string;
+            /** Description */
+            description?: string | null;
+            /** Agent Id */
+            agent_id: string;
+            /** Instruction */
+            instruction: string;
+            /** Trigger Type */
+            trigger_type: string;
+            /** Cron Expression */
+            cron_expression?: string | null;
+            /** Space Id */
+            space_id?: string | null;
+            /** Model Override */
+            model_override?: string | null;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+        };
+        /** AutomationResponse */
+        AutomationResponse: {
+            /** Id */
+            id: string;
+            /** Name */
+            name: string;
+            /** Description */
+            description: string | null;
+            /** Space Id */
+            space_id: string | null;
+            /** Agent Id */
+            agent_id: string;
+            /** Instruction */
+            instruction: string;
+            /** Trigger Type */
+            trigger_type: string;
+            /** Cron Expression */
+            cron_expression: string | null;
+            /** Event Source */
+            event_source: string | null;
+            /** Event Filter */
+            event_filter: {
+                [key: string]: unknown;
+            } | null;
+            /** Model Override */
+            model_override: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Last Run At */
+            last_run_at: string | null;
+            /** Last Run Status */
+            last_run_status: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /**
+             * Runs
+             * @default []
+             */
+            runs: components["schemas"]["AutomationRunResponse"][];
+        };
+        /** AutomationRunResponse */
+        AutomationRunResponse: {
+            /** Id */
+            id: string;
+            /** Automation Id */
+            automation_id: string;
+            /** Background Task Id */
+            background_task_id: string | null;
+            /** Status */
+            status: string;
+            /** Result Summary */
+            result_summary: string | null;
+            /** Error */
+            error: string | null;
+            /**
+             * Started At
+             * Format: date-time
+             */
+            started_at: string;
+            /** Completed At */
+            completed_at: string | null;
+        };
+        /** AutomationUpdate */
+        AutomationUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Agent Id */
+            agent_id?: string | null;
+            /** Instruction */
+            instruction?: string | null;
+            /** Trigger Type */
+            trigger_type?: string | null;
+            /** Cron Expression */
+            cron_expression?: string | null;
+            /** Space Id */
+            space_id?: string | null;
+            /** Model Override */
+            model_override?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
         };
         /** Body_upload_document_api_v1_documents_upload_post */
         Body_upload_document_api_v1_documents_upload_post: {
@@ -1472,6 +1697,8 @@ export interface components {
             space_id: string | null;
             /** Conversation Id */
             conversation_id: string | null;
+            /** Automation Id */
+            automation_id: string | null;
             /** Is Read */
             is_read: boolean;
             /**
@@ -1639,6 +1866,11 @@ export interface components {
                 [key: string]: unknown;
             }[] | null;
         };
+        /** SteerRequest */
+        SteerRequest: {
+            /** Message */
+            message: string;
+        };
         /** SummaryResponse */
         SummaryResponse: {
             /** Id */
@@ -1664,6 +1896,10 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** TriggerResponse */
+        TriggerResponse: {
+            run: components["schemas"]["AutomationRunResponse"];
         };
         /** ValidationError */
         ValidationError: {
@@ -2056,6 +2292,232 @@ export interface operations {
             };
         };
     };
+    list_automations_api_v1_automations_get: {
+        parameters: {
+            query?: {
+                enabled?: boolean | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_automation_api_v1_automations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutomationCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_automation_api_v1_automations__automation_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                automation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_automation_api_v1_automations__automation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                automation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_automation_api_v1_automations__automation_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                automation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutomationUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    trigger_automation_api_v1_automations__automation_id__trigger_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                automation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TriggerResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_runs_api_v1_automations__automation_id__runs_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path: {
+                automation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutomationRunResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_conversations_api_v1_conversations_get: {
         parameters: {
             query?: {
@@ -2207,6 +2669,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MessageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    steer_conversation_api_v1_conversations__conversation_id__steer_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SteerRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
@@ -3416,6 +3913,28 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    mark_all_read_api_v1_notifications_mark_all_read_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
                 };
             };
         };

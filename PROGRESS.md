@@ -213,16 +213,71 @@ All 5 tasks done per IMPLEMENTATION-PLAN.md (with architectural revisions agreed
 - Plan described agent creation as possible through both web UI (quick path) and Claude Code (full path). Revised to single full-creation path only — all agent creation goes through the Agent Builder inside OpenLoop. No "quick" half-baked agents.
 - Existing skills (eng-manager, frontend-design, webapp-testing, research-web, file-editor, skill-creator) designed to be registered as OpenLoop agents via `scripts/register_skills.py`.
 
+## Phase 6: Automations — COMPLETE
+
+All 4 tasks done per IMPLEMENTATION-PLAN.md. Scheduled agent runs with dashboard, notification panel, and pre-built templates.
+
+**Task 6.1 (Automation Backend):** `AutomationService` — full CRUD, run history tracking (`create_run`, `complete_run`, `list_runs`), missed-run detection via `croniter` (uses `automation.created_at` as anchor, not arbitrary epoch). `AutomationScheduler` — asyncio background loop (60s interval, same pattern as `task_monitor`), cron expression matching, fires automations as background tasks via `delegate_background`. Concurrency: max 2 concurrent automation sessions, skips cycle when active user conversations exist. Missed-run detection on startup creates `AUTOMATION_MISSED` notifications with dedup (no duplicate notifications on repeated restarts). Run lifecycle fully wired: `delegate_background` accepts `automation_run_id`, `_run_background_task` calls `complete_run` on both success and failure paths. `model_override` flows through `delegate_background` → `_run_background_task` → `resolve_model`. 7 API endpoints at `/api/v1/automations` (create, list, detail+runs, update, delete, manual trigger, run history). Alembic migration adds `automation_id` FK to `notifications` table. `mark-all-read` endpoint added to notifications API.
+
+**Task 6.2 (Automation Dashboard + Notification Panel):** Automations page — own sidebar item (same level as Agents). List view with animated status dots (same pattern as BackgroundTaskCard), schedule in plain English, last run status badge, enable/disable toggle with error handling. Detail slide-over panel with config display, run history (paginated, "View all" loads more), "Run now" with inline confirmation, edit/delete. Create/edit modal with cron presets (Daily/Weekly/Monthly/Custom), hour + minute pickers, plain-English preview, agent picker, space picker, model override. Cross-field cron validation on both Create and Update schemas. Notification panel — "Unread Notifications" in Home stat bar now clickable, opens slide-over panel with notification list. Each notification shows type badge, title, body, time-ago. Click marks read and routes: `automation_failure`/`automation_missed` → `/automations`, `pending_approval` → `/space/{space_id}`, others → space or stay on Home. "Mark all read" button. Accessible: form labels with htmlFor/id pairs, toggle aria-labels, panel has accessible name.
+
+**Task 6.3 (Pre-built Templates):** Three automation templates registered via `scripts/register_automation_templates.py` (idempotent, wired as `make register-automations`). Shared "Automation Agent" (model: sonnet). Templates: "Daily Task Review" (daily 8am, scans overdue + stuck tasks), "Stale Work Check" (weekly Monday 9am, items untouched 7+ days), "Follow-up Reminder" (daily 8am, CRM records with past-due `next_follow_up`). All pre-configured, disabled by default. Instructions use `get_cross_space_tasks`, `list_items`, `get_linked_items`, and `write_memory` for results.
+
+**Task 6.4 (Tests):** 60 new backend tests — 28 service tests (CRUD, run lifecycle, missed-run detection, concurrency counting), 22 API tests (all endpoints, pagination, trigger with mocked async, mark-all-read), 10 scheduler tests (`_is_due` logic, missed-run queries, running count). E2E Playwright tests in `tests/e2e/test_automations.py`.
+
+**Code review (4 rounds — Sonnet initial, then 3 rounds of Opus):**
+
+*Round 1 (Sonnet) — 10 issues found and fixed:*
+1. `asyncio.create_task` called in sync context — made `trigger_automation` async
+2. Resource leak in `_fire()` error branch — added try/finally
+3. Stale concurrency counter in scheduler loop — re-query DB each iteration
+4. `automation_missed` not in NotificationType enum — added to `contract/enums.py`
+5. No cron expression validation — added `croniter.is_valid()` field validator
+6. trigger_type/status bare strings — replaced with enum constants
+7. `get_missed_runs` year-2000 epoch — changed to `automation.created_at`
+8. Missing logger in `_fire()` error handler — added `logger.error` with exc_info
+9. Lazy imports in scheduler hot path — moved to module level
+10. Missing `ConfigDict(from_attributes=True)` on Create/Update schemas — added
+
+*Round 2 (Opus) — 2 critical + 8 important issues found and fixed:*
+1. **CRITICAL:** AutomationRun records never completed — wired `automation_run_id` through `delegate_background` → `_run_background_task` → `complete_run` on both success/failure paths
+2. **CRITICAL:** Frontend sent `trigger_type: 'schedule'` (not in enum) — changed to `'cron'`
+3. Notification panel navigated to non-existent `/conversations/` route — changed to `/space/{space_id}`
+4. Can't clear optional fields in edit mode (`undefined` vs `null`) — PATCH body uses `null`
+5. DetailPanel missing key prop — added `key={selectedId}` to force remount
+6. Custom cron stale expression after preset changes — syncs from current form state
+7. `model_override` field ignored — flows through delegate_background to resolve_model
+8. Duplicate missed-run notifications — dedup query before creation
+9. N+1 lazy loading in list endpoint — manual response construction
+10. No error state for automations list query — added error card
+
+*Round 3 (Opus) — 2 issues found and fixed:*
+1. `status="success"` should be `"completed"` (matching BackgroundTaskStatus enum)
+2. Dirty DB session in error handler — added `db.rollback()` before cleanup operations
+
+*Round 4 (Opus) — 6 should-fix items found and fixed:*
+1. `AutomationUpdate` missing cross-field validation for cron — added `model_validator` using `model_fields_set`
+2. Tests used `"manual"` trigger_type not in enum — changed to `"event"`
+3. Tests used `status="success"` — changed to `"completed"`
+4. Notification panel missing accessible name — passed `title="Notifications"` to Panel
+5. Time picker only showed whole hours — added minute dropdown (00/15/30/45)
+6. `describeCron` produced odd text for dow=7 — added `% 7` modulo
+
+**Deviations from plan:**
+- Plan specified automation failures appearing as a dedicated section in Home attention items. Implementation uses the notification system instead — failures create notifications, and the new notification panel (clickable from the "Unread Notifications" stat) routes to the automations page. Functionally equivalent, architecturally cleaner.
+- Notification panel and `mark-all-read` endpoint were not in the Phase 6 spec but were added to support the attention items integration requirement. General-purpose infrastructure, not automation-specific.
+- Template instructions use `write_memory` instead of `create_notification` because no `create_notification` MCP tool exists for agents. Automation results stored as memory entries.
+
 ## Current State
 
-- **798 backend tests passing** (776 prior + 24 new Phase 5 tests), lint clean
-- **39 frontend Playwright tests passing**
-- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection
-- Frontend: dashboard, space view (widget-based layout), conversation panel, agent management, search modal, document panel + viewer, layout editor, task list with stage dropdown, background task monitoring with steering, 3 palettes
+- **858 backend tests passing** (798 prior + 60 new Phase 6 tests), lint clean
+- **39 frontend Playwright tests passing** + E2E automation tests
+- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure
+- Frontend: dashboard, space view (widget-based layout), conversation panel, agent management, search modal, document panel + viewer, layout editor, task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, 3 palettes
 
-## Phases 6–7: Not Started
+## Phase 7: Not Started
 
-See IMPLEMENTATION-PLAN.md for full breakdown. Phase 6 (Automations) is next. Can overlap with Phase 5 completion.
+See IMPLEMENTATION-PLAN.md for full breakdown. Phase 7 (Polish, Backup, Integration) is next.
 
 ---
 

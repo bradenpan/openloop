@@ -12,6 +12,7 @@ def create_notification(
     body: str | None = None,
     space_id: str | None = None,
     conversation_id: str | None = None,
+    automation_id: str | None = None,
 ) -> Notification:
     """Create a notification."""
     notif = Notification(
@@ -20,6 +21,7 @@ def create_notification(
         body=body,
         space_id=space_id,
         conversation_id=conversation_id,
+        automation_id=automation_id,
     )
     db.add(notif)
     db.commit()
@@ -50,6 +52,17 @@ def mark_read(db: Session, notification_id: str) -> Notification:
     db.commit()
     db.refresh(notif)
     return notif
+
+
+def mark_all_read(db: Session) -> int:
+    """Mark all unread notifications as read. Returns the count of notifications updated."""
+    count = (
+        db.query(Notification)
+        .filter(Notification.is_read == False)  # noqa: E712
+        .update({"is_read": True})
+    )
+    db.commit()
+    return count
 
 
 def unread_count(db: Session) -> int:

@@ -56,6 +56,7 @@ class NotificationType(StrEnum):
     TASK_COMPLETED = "task_completed"
     TASK_FAILED = "task_failed"
     AUTOMATION_FAILED = "automation_failed"
+    AUTOMATION_MISSED = "automation_missed"
     CONTEXT_WARNING = "context_warning"
     SYSTEM = "system"
 

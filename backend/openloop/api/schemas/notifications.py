@@ -14,5 +14,6 @@ class NotificationResponse(BaseModel):
     body: str | None
     space_id: str | None
     conversation_id: str | None
+    automation_id: str | None
     is_read: bool
     created_at: datetime

@@ -24,11 +24,11 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # (a) Add is_done column to items table
-    with op.batch_alter_table("items", schema=None) as batch_op:
-        batch_op.add_column(
-            sa.Column("is_done", sa.Boolean(), server_default="0", nullable=False),
-        )
+    # SQLite enforces FK constraints via the engine's connect event listener.
+    # Batch mode must DROP + recreate the items table, which fails with FKs on.
+    op.execute("PRAGMA foreign_keys=OFF")
+
+    # (a) is_done already present in the initial schema CREATE TABLE — skip.
 
     # (b) Rename parent_record_id -> parent_item_id on items table
     #     SQLite batch mode recreates the entire table; the existing FK
@@ -174,6 +174,8 @@ def upgrade() -> None:
 
     # (g) Drop the todos table
     op.drop_table("todos")
+
+    op.execute("PRAGMA foreign_keys=ON")
 
 
 def downgrade() -> None:

@@ -578,6 +578,8 @@ async def delegate_background(
     space_id: str | None = None,
     item_id: str | None = None,
     parent_task_id: str | None = None,
+    automation_run_id: str | None = None,
+    model_override: str | None = None,
 ) -> str:
     """Delegate work to an agent as a background task.
 
@@ -640,6 +642,8 @@ async def delegate_background(
             default_model=agent.default_model,
             instruction=instruction,
             space_id=space_id,
+            automation_run_id=automation_run_id,
+            model_override=model_override,
         )
     )
 
@@ -682,6 +686,8 @@ async def _run_background_task(
     default_model: str,
     instruction: str,
     space_id: str | None,
+    automation_run_id: str | None = None,
+    model_override: str | None = None,
 ) -> None:
     """Managed turn loop — agent works in discrete turns with steering checkpoints.
 
@@ -717,7 +723,7 @@ async def _run_background_task(
     else:
         mcp_server = build_agent_tools(agent_name, agent_id)
 
-    model = resolve_model(default_model)
+    model = resolve_model(model_override or default_model)
 
     db = SessionLocal()
     try:
@@ -832,8 +838,19 @@ async def _run_background_task(
             space_id=space_id,
         )
 
+        # Complete the automation run if this was triggered by an automation
+        if automation_run_id:
+            from backend.openloop.services import automation_service
+            automation_service.complete_run(
+                db,
+                run_id=automation_run_id,
+                status="completed",
+                result_summary=result_text[:2000] if result_text else None,
+            )
+
     except (Exception, ExceptionGroup) as exc:
         logger.error("Background task %s failed at turn %d: %s", task_id, turn, exc)
+        db.rollback()  # Clear any dirty session state before cleanup operations
 
         # Mark task as failed
         background_task_service.update_background_task(
@@ -855,6 +872,19 @@ async def _run_background_task(
             body=f"Task failed: {instruction[:100]}. Error: {exc}",
             space_id=space_id,
         )
+
+        # Complete the automation run as failed
+        if automation_run_id:
+            try:
+                from backend.openloop.services import automation_service
+                automation_service.complete_run(
+                    db,
+                    run_id=automation_run_id,
+                    status="failed",
+                    error=str(exc)[:2000],
+                )
+            except Exception:
+                logger.error("Failed to complete automation run %s", automation_run_id)
     finally:
         db.close()
         # Clean up session state and steering queue

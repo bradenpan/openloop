@@ -1,4 +1,4 @@
-.PHONY: dev dev-backend dev-frontend test lint lint-fix migrate seed generate-types backup backup-gdrive
+.PHONY: dev dev-backend dev-frontend test lint lint-fix migrate seed generate-types backup backup-gdrive register-automations
 
 dev:
 	@echo "Starting backend and frontend..."
@@ -36,3 +36,6 @@ backup:
 
 backup-gdrive:
 	@echo "TODO: Backup to Google Drive"
+
+register-automations:
+	python -m scripts.register_automation_templates
