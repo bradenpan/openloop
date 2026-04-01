@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from backend.openloop.agents.event_bus import event_bus
@@ -9,6 +9,7 @@ from backend.openloop.api.schemas import (
     ConversationResponse,
     MessageCreate,
     MessageResponse,
+    SteerRequest,
     SummaryResponse,
 )
 from backend.openloop.database import get_db
@@ -100,6 +101,23 @@ async def send_message(
 def get_messages(conversation_id: str, db: Session = Depends(get_db)) -> list[MessageResponse]:
     msgs = conversation_service.get_messages(db, conversation_id)
     return [MessageResponse.model_validate(m) for m in msgs]
+
+
+@router.post("/{conversation_id}/steer")
+async def steer_conversation(conversation_id: str, body: SteerRequest):
+    """Send a steering message to a running background task.
+
+    The message is queued and picked up at the next turn boundary.
+    """
+    from backend.openloop.agents import session_manager
+
+    success = await session_manager.steer(conversation_id, body.message)
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail="Conversation not found, not a background task, or steering queue full",
+        )
+    return {"status": "queued", "conversation_id": conversation_id}
 
 
 @router.post("/{conversation_id}/close", response_model=ConversationResponse)

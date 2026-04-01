@@ -100,6 +100,10 @@ _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
     "get_conversation_messages": ("openloop-conversations", Operation.READ),
     # Delegation (19)
     "delegate_task": ("openloop-delegation", Operation.EXECUTE),
+    "update_task_progress": ("openloop-delegation", Operation.EDIT),
+    # Agent Builder tools
+    "register_agent": ("openloop-agents", Operation.CREATE),
+    "test_agent": ("openloop-delegation", Operation.EXECUTE),
     # Odin-only tools (20-25)
     "list_spaces": ("openloop-spaces", Operation.READ),
     "list_agents": ("openloop-agents", Operation.READ),

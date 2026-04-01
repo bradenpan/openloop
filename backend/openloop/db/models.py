@@ -263,6 +263,7 @@ class Agent(Base):
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     default_model: Mapped[str] = mapped_column(String, default="sonnet")
+    skill_path: Mapped[str | None] = mapped_column(String, nullable=True)
     tools: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     mcp_tools: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     status: Mapped[str] = mapped_column(String, default="active")

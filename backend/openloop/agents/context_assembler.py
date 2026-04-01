@@ -262,17 +262,64 @@ def _assemble_odin_context(db: Session, agent: Agent, read_only: bool = False) -
 # ---------------------------------------------------------------------------
 
 
+def _load_skill_prompt(skill_path: str) -> str | None:
+    """Load a system prompt from a SKILL.md file, stripping YAML frontmatter.
+
+    skill_path is relative to the project root, e.g. 'agents/skills/eng-manager'.
+    Returns the markdown content after frontmatter, or None if file not found.
+    """
+    import os
+
+    # Validate skill_path to prevent directory traversal
+    if ".." in skill_path or skill_path.startswith("/") or skill_path.startswith("\\"):
+        return None
+
+    # Resolve relative to project root (3 levels up from this file)
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    skill_md = os.path.join(project_root, skill_path, "SKILL.md")
+
+    # Verify the resolved path is still under the project root
+    real_path = os.path.realpath(skill_md)
+    if not real_path.startswith(os.path.realpath(project_root)):
+        return None
+
+    if not os.path.exists(skill_md):
+        return None
+
+    with open(skill_md, encoding="utf-8") as f:
+        content = f.read()
+
+    # Strip YAML frontmatter (everything between first pair of --- lines)
+    if content.startswith("---"):
+        end = content.find("---", 3)
+        if end != -1:
+            content = content[end + 3:].lstrip("\n")
+
+    return content
+
+
 def _build_agent_identity(agent: Agent) -> str:
     """Build the agent identity section from the agent model.
 
+    If the agent has a skill_path, loads the system prompt from SKILL.md.
+    Otherwise falls back to agent.system_prompt column.
     Includes memory management instructions within the identity budget.
     """
     lines = [f"## Agent: {agent.name}"]
     if agent.description:
         lines.append(agent.description)
-    if agent.system_prompt:
+
+    # Resolve system prompt: skill_path takes priority over system_prompt column
+    prompt = None
+    if agent.skill_path:
+        prompt = _load_skill_prompt(agent.skill_path)
+    if prompt is None and agent.system_prompt:
+        prompt = agent.system_prompt
+
+    if prompt:
         lines.append("")
-        lines.append(agent.system_prompt)
+        lines.append(prompt)
+
     lines.append("")
     lines.append(_MEMORY_INSTRUCTIONS)
     return "\n".join(lines)

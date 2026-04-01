@@ -12,6 +12,7 @@ def create_agent(
     name: str,
     description: str | None = None,
     system_prompt: str | None = None,
+    skill_path: str | None = None,
     default_model: str = "sonnet",
     tools: list | None = None,
     mcp_tools: list | None = None,
@@ -26,6 +27,7 @@ def create_agent(
         name=name,
         description=description,
         system_prompt=system_prompt,
+        skill_path=skill_path,
         default_model=default_model,
         tools=tools,
         mcp_tools=mcp_tools,
@@ -53,6 +55,14 @@ def get_agent(db: Session, agent_id: str) -> Agent:
     return agent
 
 
+def get_agent_by_name(db: Session, name: str) -> Agent:
+    """Get an agent by name, or 404."""
+    agent = db.query(Agent).filter(Agent.name == name).first()
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"Agent '{name}' not found")
+    return agent
+
+
 def list_agents(
     db: Session,
     *,
@@ -71,6 +81,7 @@ def update_agent(db: Session, agent_id: str, **kwargs) -> Agent:
         "description",
         "system_prompt",
         "default_model",
+        "skill_path",
         "tools",
         "mcp_tools",
         "status",

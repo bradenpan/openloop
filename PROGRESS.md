@@ -187,16 +187,42 @@ All 5 tasks done per IMPLEMENTATION-PLAN.md. Todos collapsed into items; views (
 **Deviations from plan:**
 - Plan called for removing todo tools and adding `complete_item`. Instead, created `create_task`/`complete_task`/`list_tasks` as convenience wrappers (clearer agent UX) alongside the generic item tools. `complete_item` functionality covered by `complete_task`.
 
+## Phase 5: Agent Builder + Sub-agents + Steering — COMPLETE
+
+All 5 tasks done per IMPLEMENTATION-PLAN.md (with architectural revisions agreed during planning). Conversational agent creation, sub-agent delegation with managed turn loop, and mid-task steering.
+
+**Pre-flight (Schema):** Alembic migration adds `skill_path` column to `agents` table. Step tracking columns (`current_step`, `total_steps`, `step_results`, `parent_task_id`) already existed from Phase 3b schema. Updated `background_task_service` updatable set to include step fields.
+
+**Task 5.2a (Delegation + Workflow Tracking):** Implemented `delegate_task` MCP tool (replaced Phase 2 placeholder). New `update_task_progress` MCP tool for agents to report step-by-step progress. Added `get_agent_by_name()` to agent service. Parent-child task linking via `parent_task_id` with `list_child_tasks()` query. New `task_monitor.py` — asyncio background loop (60s interval) detecting stale (queued >10min) and stuck (running >30min) tasks, creates notifications. Wired into app lifespan startup/shutdown. Dedup logic prevents repeated notifications for the same task.
+
+**Task 5.1 (Agent Builder + Skill Registration):** Hybrid agent definition model — DB stores runtime config (permissions, spaces, model), system prompt loaded from SKILL.md on disk when `skill_path` is set, falls back to `system_prompt` column. `_load_skill_prompt()` in context assembler reads SKILL.md, strips YAML frontmatter. Agent Builder skill created at `agents/skills/agent-builder/SKILL.md` — follows skill-creator methodology: interview user → draft SKILL.md → test via delegation → iterate → register. Two exclusive MCP tools: `register_agent` (creates/updates DB record with skill_path), `test_agent` (delegates a test conversation to the draft agent). `build_agent_builder_tools()` creates Agent Builder's tool server (standard + exclusive tools). SessionManager detects Agent Builder by name and uses the dedicated tool builder. Odin system prompt updated to route agent creation requests to Agent Builder. `scripts/register_skills.py` scans `agents/skills/` and registers all existing skills as agents.
+
+**Task 5.2b (Mid-Task Steering):** Rewrote `_run_background_task` from single fire-and-forget `query()` call into a managed turn loop. Agent works in discrete turns (max 20), checks steering queue between turns, signals completion with `TASK_COMPLETE`. In-memory steering queue (`_steering_queues` dict, max 10 messages per conversation). `steer()` function queues messages and publishes `steering_received` SSE event. New `POST /api/v1/conversations/{id}/steer` endpoint with `SteerRequest` schema. Background agent system prompts include incremental-work instructions. Step progress updated and SSE `background_progress` event published after each turn.
+
+**Task 5.2c (Delegation UI):** New `BackgroundTaskCard` component — compact card with status dot (green=running with ping animation, yellow=stale, red=failed, blue=completed), agent name, step label, slim progress bar, elapsed time. Expanded view shows numbered step history with timestamps and steering text input. Recursive rendering for child tasks (indented). New `BackgroundTaskPanel` — polls running endpoint every 5s, subscribes to SSE `background_progress` events for real-time step updates, caches progress in module-level Map. Integrated into Home.tsx replacing the static ActiveAgents component. Added `SSEBackgroundProgressEvent` interface and `background_progress` to SSE event types.
+
+**Task 5.3 (Tests):** 24 new tests covering: step tracking accumulation, parent-child task creation and querying, stale/stuck detection (with backdated timestamps), no false positives on completed/fresh tasks, agent get-by-name, skill_path on create/update, steer endpoint (404 for missing session, 422 for bad schema), MCP tool update_task_progress (success + bad input), delegate_task (agent not found), skill_path resolution (_load_skill_prompt reads SKILL.md, strips frontmatter, returns None for missing), context assembler identity (skill_path takes priority over system_prompt column, fallback works).
+
+**Code review (2 issues found and fixed):**
+1. Path traversal vulnerability in `register_agent` and `_load_skill_prompt` — added skill_name validation (rejects `..`, `/`, `\`) and `os.path.realpath` check to ensure resolved path stays under project root
+2. HTTPException imported inside exception handler in conversations route — moved to module-level import
+
+**Deviations from plan:**
+- Plan had Tasks 5.1 and 5.2a running in parallel. Revised dependency: 5.2a runs first (delegation is foundation), then 5.1 and 5.2b in parallel. Agent Builder needs `delegate_task` to test draft agents.
+- Plan described Agent Builder as using custom MCP tools to write DB records. Revised to hybrid model: Agent Builder creates skill files (SKILL.md) on disk using standard file tools, tests via `delegate_task`, then registers in DB via `register_agent` MCP tool. This integrates the skill-creator methodology and keeps agent definitions in git.
+- Plan described agent creation as possible through both web UI (quick path) and Claude Code (full path). Revised to single full-creation path only — all agent creation goes through the Agent Builder inside OpenLoop. No "quick" half-baked agents.
+- Existing skills (eng-manager, frontend-design, webapp-testing, research-web, file-editor, skill-creator) designed to be registered as OpenLoop agents via `scripts/register_skills.py`.
+
 ## Current State
 
-- **776 backend tests passing** (781 prior − deleted todo tests + new item/link tests), lint clean
+- **798 backend tests passing** (776 prior + 24 new Phase 5 tests), lint clean
 - **39 frontend Playwright tests passing**
-- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links
-- Frontend: dashboard, space view (widget-based layout), conversation panel, agent management, search modal, document panel + viewer, layout editor, task list with stage dropdown, 3 palettes
+- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection
+- Frontend: dashboard, space view (widget-based layout), conversation panel, agent management, search modal, document panel + viewer, layout editor, task list with stage dropdown, background task monitoring with steering, 3 palettes
 
-## Phases 5–7: Not Started
+## Phases 6–7: Not Started
 
-See IMPLEMENTATION-PLAN.md for full breakdown. Phase 5 (Agent Builder, Sub-agents, Steering) is next.
+See IMPLEMENTATION-PLAN.md for full breakdown. Phase 6 (Automations) is next. Can overlap with Phase 5 completion.
 
 ---
 

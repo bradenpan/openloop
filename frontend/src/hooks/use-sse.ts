@@ -51,6 +51,15 @@ export interface SSEBackgroundUpdateEvent {
   progress: number | null;
 }
 
+export interface SSEBackgroundProgressEvent {
+  type: 'background_progress';
+  conversation_id: string;
+  task_id: string;
+  turn: number;
+  completed: boolean;
+  summary: string;
+}
+
 export interface SSEErrorEvent {
   type: 'error';
   conversation_id: string | null;
@@ -65,6 +74,7 @@ export type SSEEvent =
   | SSENotificationEvent
   | SSERouteEvent
   | SSEBackgroundUpdateEvent
+  | SSEBackgroundProgressEvent
   | SSEErrorEvent;
 
 export type SSEStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -97,7 +107,7 @@ const BASE_RETRY_DELAY = 1_000;
 
 const EVENT_TYPES = [
   'token', 'tool_call', 'tool_result', 'approval_request',
-  'notification', 'route', 'background_update', 'error',
+  'notification', 'route', 'background_update', 'background_progress', 'error',
 ];
 
 function dispatch(event: SSEEvent) {

@@ -40,8 +40,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     finally:
         db.close()
 
+    # Start background task monitor (stale/stuck detection)
+    from backend.openloop.agents.task_monitor import start_task_monitor, stop_task_monitor
+
+    start_task_monitor()
+
     yield
+
     # Shutdown logic
+    stop_task_monitor()
 
 
 app = FastAPI(

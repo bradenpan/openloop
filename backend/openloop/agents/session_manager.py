@@ -122,6 +122,12 @@ class SessionState:
 _active_sessions: dict[str, SessionState] = {}
 _conversation_locks: dict[str, asyncio.Lock] = {}
 
+# ---------------------------------------------------------------------------
+# Steering queues (Phase 5 — mid-task course correction)
+# ---------------------------------------------------------------------------
+_steering_queues: dict[str, list[str]] = {}
+MAX_STEERING_MESSAGES = 10
+
 
 # ---------------------------------------------------------------------------
 # Concurrency helpers
@@ -192,9 +198,16 @@ async def start_session(
         conversation_id=conversation_id,
     )
 
-    # Build MCP tools — Odin gets extra tools
+    # Build MCP tools — Odin and Agent Builder get extra tools
     is_odin = agent.name.lower() == "odin"
-    mcp_server = build_odin_tools(agent.id) if is_odin else build_agent_tools(agent.name, agent.id)
+    is_agent_builder = agent.name.lower() in ("agent-builder", "agent builder")
+    if is_odin:
+        mcp_server = build_odin_tools(agent.id)
+    elif is_agent_builder:
+        from backend.openloop.agents.mcp_tools import build_agent_builder_tools
+        mcp_server = build_agent_builder_tools(agent.name, agent.id)
+    else:
+        mcp_server = build_agent_tools(agent.name, agent.id)
 
     # Determine model
     model_name = conversation.model_override or agent.default_model
@@ -338,7 +351,14 @@ async def _send_message_inner(
     # Load agent for model + MCP tools
     agent = agent_service.get_agent(db, state.agent_id)
     is_odin = agent.name.lower() == "odin"
-    mcp_server = build_odin_tools(agent.id) if is_odin else build_agent_tools(agent.name, agent.id)
+    is_agent_builder = agent.name.lower() in ("agent-builder", "agent builder")
+    if is_odin:
+        mcp_server = build_odin_tools(agent.id)
+    elif is_agent_builder:
+        from backend.openloop.agents.mcp_tools import build_agent_builder_tools
+        mcp_server = build_agent_builder_tools(agent.name, agent.id)
+    else:
+        mcp_server = build_agent_tools(agent.name, agent.id)
 
     conversation = conversation_service.get_conversation(db, conversation_id)
     model_name = conversation.model_override or agent.default_model
@@ -557,6 +577,7 @@ async def delegate_background(
     instruction: str,
     space_id: str | None = None,
     item_id: str | None = None,
+    parent_task_id: str | None = None,
 ) -> str:
     """Delegate work to an agent as a background task.
 
@@ -574,6 +595,7 @@ async def delegate_background(
         instruction=instruction,
         space_id=space_id,
         item_id=item_id,
+        parent_task_id=parent_task_id,
         status="running",
     )
 
@@ -624,6 +646,33 @@ async def delegate_background(
     return task.id
 
 
+async def steer(conversation_id: str, message: str) -> bool:
+    """Queue a steering message for a running background task.
+
+    The managed turn loop picks this up at the next turn boundary.
+    Returns True if queued successfully.
+    """
+    from backend.openloop.agents.event_bus import event_bus
+
+    state = _active_sessions.get(conversation_id)
+    if not state or state.status != "background":
+        return False
+
+    queue = _steering_queues.setdefault(conversation_id, [])
+    if len(queue) >= MAX_STEERING_MESSAGES:
+        return False
+
+    queue.append(message)
+
+    await event_bus.publish_to(conversation_id, {
+        "type": "steering_received",
+        "conversation_id": conversation_id,
+        "message": message,
+    })
+    logger.info("Steering message queued for conversation %s", conversation_id)
+    return True
+
+
 async def _run_background_task(
     *,
     task_id: str,
@@ -634,17 +683,40 @@ async def _run_background_task(
     instruction: str,
     space_id: str | None,
 ) -> None:
-    """Execute a background task. Runs as an asyncio task.
+    """Managed turn loop — agent works in discrete turns with steering checkpoints.
+
+    Instead of a single fire-and-forget query(), the agent works in turns:
+    1. First turn: send the instruction
+    2. Each subsequent turn: check steering queue, then continue or steer
+    3. Agent signals completion with TASK_COMPLETE in its response
+    4. Progress is tracked per-turn via background_task step updates
 
     Creates its own DB session because the request-scoped session that spawned
     this task will already be closed.
     """
     from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
+    from backend.openloop.agents.event_bus import event_bus
     from backend.openloop.database import SessionLocal
 
+    CONTINUATION_PROMPT = (
+        "Continue working on your task. Report what you accomplished in this step "
+        "and what you'll do next. Say TASK_COMPLETE when the entire task is finished."
+    )
+    MAX_TURNS = 20
+
     is_odin = agent_name.lower() == "odin"
-    mcp_server = build_odin_tools(agent_id) if is_odin else build_agent_tools(agent_name, agent_id)
+    is_agent_builder = agent_name.lower() in ("agent-builder", "agent builder")
+
+    if is_odin:
+        mcp_server = build_odin_tools(agent_id)
+    elif is_agent_builder:
+        # Agent Builder gets extra tools (register_agent, test_agent)
+        from backend.openloop.agents.mcp_tools import build_agent_builder_tools
+        mcp_server = build_agent_builder_tools(agent_name, agent_id)
+    else:
+        mcp_server = build_agent_tools(agent_name, agent_id)
+
     model = resolve_model(default_model)
 
     db = SessionLocal()
@@ -657,40 +729,97 @@ async def _run_background_task(
             conversation_id=conversation_id,
         )
 
-        full_prompt = f"{system_prompt}\n\n---\n\nTask: {instruction}"
+        full_prompt = (
+            f"{system_prompt}\n\n---\n\n"
+            f"Task: {instruction}\n\n"
+            "Work incrementally. Complete one meaningful step per turn. "
+            "Report what you did and what you plan to do next. "
+            "Say TASK_COMPLETE when the entire task is finished."
+        )
 
         # Build permission hooks
         hooks = _build_hooks_dict(agent_id, conversation_id)
 
         sdk_session_id: str | None = None
         result_text = ""
+        turn = 0
+        completed = False
 
-        async for event in query(
-            prompt=full_prompt,
-            options=ClaudeAgentOptions(
-                model=model,
-                mcp_servers=[mcp_server],
-                hooks=hooks,
-            ),
-        ):
-            if isinstance(event, ResultMessage):
-                sdk_session_id = event.session_id
-                result_text = event.result or ""
+        while turn < MAX_TURNS and not completed:
+            turn += 1
 
-        # Update session tracking
-        state = _active_sessions.get(conversation_id)
-        if state:
-            state.sdk_session_id = sdk_session_id
+            # Determine what to send this turn
+            if turn == 1:
+                message = full_prompt
+            else:
+                # Check steering queue for user corrections
+                queue = _steering_queues.get(conversation_id, [])
+                if queue:
+                    message = queue.pop(0)
+                    logger.info("Steering message applied for task %s at turn %d", task_id, turn)
+                else:
+                    message = CONTINUATION_PROMPT
+
+            # Build query kwargs
+            query_kwargs: dict = {
+                "prompt": message,
+                "options": ClaudeAgentOptions(
+                    model=model,
+                    mcp_servers=[mcp_server],
+                    hooks=hooks,
+                ),
+            }
+            if sdk_session_id and turn > 1:
+                query_kwargs["resume"] = sdk_session_id
+
+            # Execute one turn
+            turn_result = ""
+            async for event in query(**query_kwargs):
+                if isinstance(event, ResultMessage):
+                    sdk_session_id = event.session_id
+                    turn_result = event.result or ""
+
+            result_text = turn_result
+
+            # Update session tracking
+            state = _active_sessions.get(conversation_id)
+            if state:
+                state.sdk_session_id = sdk_session_id
+                state.last_activity = datetime.now(UTC)
+
+            # Check for completion signal
+            if "TASK_COMPLETE" in (turn_result or "").upper():
+                completed = True
+
+            # Update step progress
+            background_task_service.update_task_progress(
+                db,
+                task_id=task_id,
+                current_step=turn,
+                total_steps=turn if completed else MAX_TURNS,
+                step_summary=turn_result[:500] if turn_result else f"Turn {turn}",
+            )
+
+            # Publish activity to SSE
+            await event_bus.publish_to(conversation_id, {
+                "type": "background_progress",
+                "conversation_id": conversation_id,
+                "task_id": task_id,
+                "turn": turn,
+                "completed": completed,
+                "summary": turn_result[:200] if turn_result else "",
+            })
 
         # Persist sdk_session_id
         conversation_service.update_conversation(db, conversation_id, sdk_session_id=sdk_session_id)
 
         # Mark task as completed
+        status_note = "" if completed else " (max turns reached)"
         background_task_service.update_background_task(
             db,
             task_id,
             status="completed",
-            result_summary=result_text[:2000] if result_text else None,
+            result_summary=(result_text[:2000] if result_text else None),
             completed_at=datetime.now(UTC),
         )
 
@@ -699,12 +828,12 @@ async def _run_background_task(
             db,
             type="task_completed",
             title="Background task completed",
-            body=f"Task completed: {instruction[:100]}",
+            body=f"Task completed{status_note}: {instruction[:100]}",
             space_id=space_id,
         )
 
     except (Exception, ExceptionGroup) as exc:
-        logger.error("Background task %s failed: %s", task_id, exc)
+        logger.error("Background task %s failed at turn %d: %s", task_id, turn, exc)
 
         # Mark task as failed
         background_task_service.update_background_task(
@@ -728,8 +857,9 @@ async def _run_background_task(
         )
     finally:
         db.close()
-        # Remove from active sessions
+        # Clean up session state and steering queue
         _active_sessions.pop(conversation_id, None)
+        _steering_queues.pop(conversation_id, None)
 
 
 # ---------------------------------------------------------------------------

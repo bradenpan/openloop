@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { $api } from '../api/hooks';
 import { AttentionItems } from '../components/home/attention-items';
-import { ActiveAgents } from '../components/home/active-agents';
+import { BackgroundTaskPanel } from '../components/home/background-task-panel';
 import { SpaceList } from '../components/home/space-list';
 import { TaskOverview } from '../components/home/todo-overview';
 import { ConversationList } from '../components/home/conversation-list';
@@ -47,11 +47,7 @@ export default function Home() {
         <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
           Active Agents
         </h2>
-        <ActiveAgents
-          conversations={conversations.data}
-          agents={agents.data}
-          isLoading={conversations.isLoading || agents.isLoading}
-        />
+        <BackgroundTaskPanel />
       </section>
 
       {/* 3. Spaces */}

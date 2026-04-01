@@ -12,12 +12,14 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
+from fastapi import HTTPException
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.openloop.database import SessionLocal
 from backend.openloop.services import (
     agent_service,
+    background_task_service,
     behavioral_rule_service,
     conversation_service,
     document_service,
@@ -1072,17 +1074,196 @@ async def get_conversation_messages(conversation_id: str, limit: str = "20", *, 
 
 
 # 19. delegate_task
-async def delegate_task(agent_name: str, instruction: str, space_id: str = "", *, _db=None) -> str:
-    """Delegate a task to another agent. (Not yet implemented — Phase 5.)"""
-    return _ok(
-        {
-            "status": "not_implemented",
-            "message": (
-                f"Delegation to agent '{agent_name}' is not yet implemented. "
-                "This feature is planned for Phase 5."
-            ),
-        }
-    )
+async def delegate_task(
+    agent_name: str, instruction: str, space_id: str = "", parent_task_id: str = "", *, _db=None
+) -> str:
+    """Delegate a task to another agent to run in the background.
+
+    Args:
+        agent_name: Name of the agent to delegate to.
+        instruction: What the agent should do.
+        space_id: Optional space context for the delegated work.
+        parent_task_id: Optional parent task ID for hierarchical tracking.
+    Returns:
+        JSON with the background task ID.
+    """
+    from backend.openloop.agents import session_manager
+
+    db = _get_db(_db)
+    try:
+        agent = agent_service.get_agent_by_name(db, agent_name)
+        task_id = await session_manager.delegate_background(
+            db,
+            agent_id=agent.id,
+            instruction=instruction,
+            space_id=space_id or None,
+            parent_task_id=parent_task_id or None,
+        )
+        return _ok({"task_id": task_id, "agent": agent_name, "status": "running"})
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except (Exception, ExceptionGroup) as exc:
+        return _err(f"Delegation failed: {exc}")
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 19b. update_task_progress
+async def update_task_progress(
+    task_id: str, step: str, total_steps: str, summary: str, *, _db=None
+) -> str:
+    """Report progress on a background task.
+
+    Args:
+        task_id: The background task ID to update.
+        step: Current step number (1-based).
+        total_steps: Total number of steps.
+        summary: Brief description of what this step accomplished.
+    """
+    db = _get_db(_db)
+    try:
+        background_task_service.update_task_progress(
+            db,
+            task_id=task_id,
+            current_step=int(step),
+            total_steps=int(total_steps),
+            step_summary=summary,
+        )
+        return _ok({"task_id": task_id, "step": int(step), "total_steps": int(total_steps)})
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except ValueError:
+        return _err("step and total_steps must be integers")
+    finally:
+        if _db is None:
+            db.close()
+
+
+# ---------------------------------------------------------------------------
+# Agent Builder-only tools
+# ---------------------------------------------------------------------------
+
+
+async def register_agent(
+    skill_name: str, model: str = "sonnet", space_names: str = "", description: str = "", *, _db=None
+) -> str:
+    """Register a skill-based agent in OpenLoop.
+
+    Creates or updates an agent DB record pointing to agents/skills/{skill_name}/SKILL.md.
+
+    Args:
+        skill_name: Directory name under agents/skills/ (e.g. 'recruiting')
+        model: Default model (haiku, sonnet, opus). Defaults to sonnet.
+        space_names: Comma-separated space names to link the agent to.
+        description: Agent description. If empty, extracted from SKILL.md frontmatter.
+    """
+    import os
+    import re
+
+    db = _get_db(_db)
+    try:
+        # Validate skill_name to prevent path traversal
+        if ".." in skill_name or "/" in skill_name or "\\" in skill_name:
+            return _err("Invalid skill name — must not contain path separators")
+
+        skill_path = f"agents/skills/{skill_name}"
+        # Verify SKILL.md exists
+        project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+        skill_md = os.path.join(project_root, skill_path, "SKILL.md")
+
+        # Verify resolved path stays under project root
+        real_path = os.path.realpath(skill_md)
+        if not real_path.startswith(os.path.realpath(project_root)):
+            return _err("Invalid skill path")
+
+        if not os.path.exists(skill_md):
+            return _err(f"SKILL.md not found at {skill_path}/SKILL.md")
+
+        # Parse frontmatter for name and description
+        with open(skill_md, encoding="utf-8") as f:
+            content = f.read()
+
+        fm_name = skill_name
+        fm_desc = description
+        if content.startswith("---"):
+            end = content.find("---", 3)
+            if end != -1:
+                frontmatter = content[3:end]
+                name_match = re.search(r"^name:\s*(.+)$", frontmatter, re.MULTILINE)
+                if name_match:
+                    fm_name = name_match.group(1).strip()
+                if not fm_desc:
+                    desc_match = re.search(r"^description:\s*\|?\s*\n([\s\S]*?)(?=\n\w|\Z)", frontmatter, re.MULTILINE)
+                    if desc_match:
+                        fm_desc = desc_match.group(1).strip()[:500]
+
+        # Check if agent already exists
+        existing = db.query(agent_service.Agent).filter(agent_service.Agent.name == fm_name).first()
+        if existing:
+            agent = agent_service.update_agent(
+                db, existing.id, skill_path=skill_path, default_model=model,
+                description=fm_desc or existing.description,
+            )
+        else:
+            agent = agent_service.create_agent(
+                db, name=fm_name, description=fm_desc, skill_path=skill_path, default_model=model,
+            )
+
+        # Link to spaces
+        if space_names:
+            for sname in space_names.split(","):
+                sname = sname.strip()
+                if sname:
+                    space = db.query(space_service.Space).filter(space_service.Space.name == sname).first()
+                    if space and space not in agent.spaces:
+                        agent.spaces.append(space)
+            db.commit()
+
+        return _ok({"agent_id": agent.id, "name": fm_name, "skill_path": skill_path, "status": "registered"})
+    except HTTPException as exc:
+        return _err(exc.detail)
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def test_agent(skill_name: str, test_prompt: str, space_id: str = "", *, _db=None) -> str:
+    """Test a draft agent by running a test conversation via delegation.
+
+    Args:
+        skill_name: The skill directory name under agents/skills/.
+        test_prompt: The test scenario to run against the draft agent.
+        space_id: Optional space context for the test.
+    """
+    from backend.openloop.agents import session_manager
+
+    db = _get_db(_db)
+    try:
+        # Find or create a temporary agent for testing
+        agent_name = skill_name
+        existing = db.query(agent_service.Agent).filter(agent_service.Agent.name == agent_name).first()
+        if not existing:
+            # Register it first
+            skill_path = f"agents/skills/{skill_name}"
+            existing = agent_service.create_agent(
+                db, name=agent_name, description=f"Test agent for {skill_name}", skill_path=skill_path,
+            )
+
+        task_id = await session_manager.delegate_background(
+            db,
+            agent_id=existing.id,
+            instruction=test_prompt,
+            space_id=space_id or None,
+        )
+        return _ok({"task_id": task_id, "agent": agent_name, "status": "test_running"})
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except (Exception, ExceptionGroup) as exc:
+        return _err(f"Test failed to start: {exc}")
+    finally:
+        if _db is None:
+            db.close()
 
 
 # ---------------------------------------------------------------------------
@@ -1636,6 +1817,7 @@ _STANDARD_TOOLS = {
     "search_summaries": search_summaries,
     "get_conversation_messages": get_conversation_messages,
     "delegate_task": delegate_task,
+    "update_task_progress": update_task_progress,
     "read_drive_file": read_drive_file,
     "list_drive_files": list_drive_files,
     "create_drive_file": create_drive_file,
@@ -1741,3 +1923,22 @@ def build_odin_tools(agent_id: str = ""):
     all_tools = {**_STANDARD_TOOLS, **_ODIN_TOOLS}
     tools = _make_decorated_tools(all_tools, "odin", agent_id)
     return create_sdk_mcp_server("openloop_odin", tools=tools)
+
+
+# Agent Builder-only tool registry
+_AGENT_BUILDER_TOOLS = {
+    "register_agent": register_agent,
+    "test_agent": test_agent,
+}
+
+
+def build_agent_builder_tools(agent_name: str, agent_id: str = ""):
+    """Build MCP tools for the Agent Builder agent.
+
+    Standard tools + register_agent + test_agent (exclusive to Agent Builder).
+    """
+    from claude_agent_sdk import create_sdk_mcp_server
+
+    all_tools = {**_STANDARD_TOOLS, **_AGENT_BUILDER_TOOLS}
+    tools = _make_decorated_tools(all_tools, agent_name, agent_id)
+    return create_sdk_mcp_server(f"openloop_{agent_name}", tools=tools)
