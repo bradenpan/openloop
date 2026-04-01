@@ -12,7 +12,7 @@ interface CreateSpaceModalProps {
 }
 
 const TEMPLATES: { value: SpaceTemplate; label: string; description: string }[] = [
-  { value: 'project', label: 'Project', description: 'Task board with stages, items, and todos' },
+  { value: 'project', label: 'Project', description: 'Task board with stages and items' },
   { value: 'crm', label: 'CRM', description: 'Contact and relationship tracking' },
   { value: 'knowledge_base', label: 'Knowledge Base', description: 'Documents and reference material' },
   { value: 'simple', label: 'Simple', description: 'Lightweight space for notes and conversations' },

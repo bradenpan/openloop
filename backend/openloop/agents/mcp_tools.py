@@ -21,12 +21,12 @@ from backend.openloop.services import (
     behavioral_rule_service,
     conversation_service,
     document_service,
+    item_link_service,
     item_service,
     layout_service,
     memory_service,
     search_service,
     space_service,
-    todo_service,
 )
 
 # ---------------------------------------------------------------------------
@@ -91,26 +91,28 @@ def _get_agent_space_ids(db: Session, agent_id: str) -> list[str] | None:
 # ---------------------------------------------------------------------------
 
 
-# 1. create_todo
-async def create_todo(
+# 1. create_task
+async def create_task(
     space_id: str, title: str, due_date: str = "", *, _db=None, _agent_name: str = "agent"
 ) -> str:
-    """Create a to-do in a space. due_date is optional ISO format (e.g. 2025-01-15)."""
+    """Create a task in a space. due_date is optional ISO format (e.g. 2025-01-15)."""
     db = _get_db(_db)
     try:
-        todo = todo_service.create_todo(
+        item = item_service.create_item(
             db,
             space_id=space_id,
             title=title,
+            item_type="task",
             due_date=_parse_date(due_date),
             created_by=_agent_name,
         )
         return _ok(
             {
-                "id": todo.id,
-                "title": todo.title,
-                "space_id": todo.space_id,
-                "due_date": todo.due_date.isoformat() if todo.due_date else None,
+                "id": item.id,
+                "title": item.title,
+                "space_id": item.space_id,
+                "is_done": item.is_done,
+                "due_date": item.due_date.isoformat() if item.due_date else None,
             }
         )
     except Exception as e:
@@ -121,13 +123,13 @@ async def create_todo(
             db.close()
 
 
-# 2. complete_todo
-async def complete_todo(todo_id: str, *, _db=None) -> str:
-    """Mark a to-do as done."""
+# 2. complete_task
+async def complete_task(item_id: str, *, _db=None) -> str:
+    """Mark a task as done."""
     db = _get_db(_db)
     try:
-        todo = todo_service.update_todo(db, todo_id, is_done=True)
-        return _ok({"id": todo.id, "title": todo.title, "is_done": True})
+        item = item_service.update_item(db, item_id, is_done=True)
+        return _ok({"id": item.id, "title": item.title, "is_done": True})
     except Exception as e:
         db.rollback()
         return _err(str(e))
@@ -136,14 +138,15 @@ async def complete_todo(todo_id: str, *, _db=None) -> str:
             db.close()
 
 
-# 3. list_todos
-async def list_todos(space_id: str = "", is_done: str = "", *, _db=None) -> str:
-    """List to-dos. Empty string = no filter. is_done: 'true'/'false'/''."""
+# 3. list_tasks
+async def list_tasks(space_id: str = "", is_done: str = "", *, _db=None) -> str:
+    """List tasks. Empty string = no filter. is_done: 'true'/'false'/''."""
     db = _get_db(_db)
     try:
-        todos = todo_service.list_todos(
+        items = item_service.list_items(
             db,
             space_id=space_id or None,
+            item_type="task",
             is_done=_parse_bool(is_done),
         )
         return _ok(
@@ -153,9 +156,10 @@ async def list_todos(space_id: str = "", is_done: str = "", *, _db=None) -> str:
                     "title": t.title,
                     "is_done": t.is_done,
                     "space_id": t.space_id,
+                    "stage": t.stage,
                     "due_date": t.due_date.isoformat() if t.due_date else None,
                 }
-                for t in todos
+                for t in items
             ]
         )
     except Exception as e:
@@ -173,6 +177,7 @@ async def create_item(
     item_type: str = "task",
     stage: str = "",
     description: str = "",
+    is_done: str = "false",
     *,
     _db=None,
     _agent_name: str = "agent",
@@ -187,6 +192,7 @@ async def create_item(
             item_type=item_type or "task",
             stage=stage or None,
             description=description or None,
+            is_done=_parse_bool(is_done) or False,
             created_by=_agent_name,
         )
         return _ok(
@@ -288,9 +294,9 @@ async def get_item(item_id: str, *, _db=None) -> str:
 
 # 8. list_items
 async def list_items(
-    space_id: str = "", stage: str = "", item_type: str = "", limit: str = "20", *, _db=None
+    space_id: str = "", stage: str = "", item_type: str = "", is_done: str = "", limit: str = "20", *, _db=None
 ) -> str:
-    """List board items with optional filters."""
+    """List board items with optional filters. is_done: 'true'/'false'/'' (empty = no filter)."""
     db = _get_db(_db)
     try:
         limit_int = _parse_int(limit, 20)
@@ -299,6 +305,7 @@ async def list_items(
             space_id=space_id or None,
             stage=stage or None,
             item_type=item_type or None,
+            is_done=_parse_bool(is_done),
         )
         # Apply limit
         items = items[:limit_int]
@@ -846,14 +853,16 @@ async def get_board_state(space_id: str, *, _db=None) -> str:
             db.close()
 
 
-# 15. get_todo_state
-async def get_todo_state(space_id: str = "", *, _db=None) -> str:
-    """Get summary of to-dos: counts by status, overdue items."""
+# 15. get_task_state
+async def get_task_state(space_id: str = "", *, _db=None) -> str:
+    """Get summary of tasks: counts by status, overdue items."""
     db = _get_db(_db)
     try:
-        all_todos = todo_service.list_todos(db, space_id=space_id or None, limit=10000)
-        done = [t for t in all_todos if t.is_done]
-        pending = [t for t in all_todos if not t.is_done]
+        all_tasks = item_service.list_items(
+            db, space_id=space_id or None, item_type="task", archived=False, limit=200
+        )
+        done = [t for t in all_tasks if t.is_done]
+        pending = [t for t in all_tasks if not t.is_done]
         now = datetime.now(UTC)
         overdue = [
             {
@@ -867,7 +876,7 @@ async def get_todo_state(space_id: str = "", *, _db=None) -> str:
         ]
         return _ok(
             {
-                "total": len(all_todos),
+                "total": len(all_tasks),
                 "done": len(done),
                 "pending": len(pending),
                 "overdue_count": len(overdue),
@@ -1208,9 +1217,9 @@ async def get_attention_items(*, _db=None) -> str:
             for p in pending
         ]
 
-        # Overdue to-dos
+        # Overdue tasks
         now = datetime.now(UTC)
-        all_todos = todo_service.list_todos(db, is_done=False, limit=10000)
+        all_tasks = item_service.list_items(db, item_type="task", is_done=False, archived=False, limit=200)
         overdue = [
             {
                 "id": t.id,
@@ -1218,7 +1227,7 @@ async def get_attention_items(*, _db=None) -> str:
                 "space_id": t.space_id,
                 "due_date": t.due_date.isoformat(),
             }
-            for t in all_todos
+            for t in all_tasks
             if t.due_date and t.due_date < now
         ]
 
@@ -1232,14 +1241,14 @@ async def get_attention_items(*, _db=None) -> str:
                 "space_id": t.space_id,
                 "due_date": t.due_date.isoformat(),
             }
-            for t in all_todos
+            for t in all_tasks
             if t.due_date and today_start <= t.due_date <= today_end
         ]
 
         return _ok(
             {
                 "pending_approvals": pending_approvals,
-                "overdue_todos": overdue,
+                "overdue_tasks": overdue,
                 "due_today": due_today,
             }
         )
@@ -1251,12 +1260,12 @@ async def get_attention_items(*, _db=None) -> str:
             db.close()
 
 
-# 25. get_cross_space_todos
-async def get_cross_space_todos(is_done: str = "", *, _db=None) -> str:
-    """Get to-dos across all spaces."""
+# 25. get_cross_space_tasks
+async def get_cross_space_tasks(is_done: str = "", *, _db=None) -> str:
+    """Get tasks across all spaces."""
     db = _get_db(_db)
     try:
-        todos = todo_service.list_todos(db, is_done=_parse_bool(is_done))
+        items = item_service.list_items(db, item_type="task", is_done=_parse_bool(is_done))
         return _ok(
             [
                 {
@@ -1264,9 +1273,10 @@ async def get_cross_space_todos(is_done: str = "", *, _db=None) -> str:
                     "title": t.title,
                     "is_done": t.is_done,
                     "space_id": t.space_id,
+                    "stage": t.stage,
                     "due_date": t.due_date.isoformat() if t.due_date else None,
                 }
-                for t in todos
+                for t in items
             ]
         )
     except Exception as e:
@@ -1496,14 +1506,111 @@ async def set_space_layout(space_id: str, widgets: str, *, _db=None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Item link tools (34-36)
+# ---------------------------------------------------------------------------
+
+
+# 34. link_items
+async def link_items(
+    source_item_id: str, target_item_id: str, link_type: str = "related_to", *, _db=None
+) -> str:
+    """Create an association between two items."""
+    db = _get_db(_db)
+    try:
+        link = item_link_service.create_link(
+            db,
+            source_item_id=source_item_id,
+            target_item_id=target_item_id,
+            link_type=link_type or "related_to",
+        )
+        return _ok(
+            {
+                "id": link.id,
+                "source_item_id": link.source_item_id,
+                "target_item_id": link.target_item_id,
+                "link_type": link.link_type,
+            }
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 35. unlink_items
+async def unlink_items(link_id: str, *, _db=None) -> str:
+    """Remove an association between items by link ID."""
+    db = _get_db(_db)
+    try:
+        item_link_service.delete_link(db, link_id)
+        return _ok({"deleted": link_id})
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 36. get_linked_items
+async def get_linked_items(item_id: str, link_type: str = "", *, _db=None) -> str:
+    """Get all items linked to this item (bidirectional)."""
+    db = _get_db(_db)
+    try:
+        links = item_link_service.list_links_for_item(
+            db, item_id, link_type=link_type or None
+        )
+        result = []
+        for link in links:
+            # Resolve the "other" item in the link
+            other_id = link.target_item_id if link.source_item_id == item_id else link.source_item_id
+            other = item_service.get_item(db, other_id)
+            result.append(
+                {
+                    "link_id": link.id,
+                    "link_type": link.link_type,
+                    "item_id": other.id,
+                    "title": other.title,
+                    "item_type": other.item_type,
+                    "stage": other.stage,
+                    "is_done": other.is_done,
+                }
+            )
+        return _ok(result)
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 37. archive_item
+async def archive_item(item_id: str, *, _db=None, _agent_name: str = "agent") -> str:
+    """Archive an item (hidden from active views, still searchable)."""
+    db = _get_db(_db)
+    try:
+        item = item_service.archive_item(db, item_id, triggered_by=_agent_name)
+        return _ok({"id": item.id, "title": item.title, "archived": True})
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# ---------------------------------------------------------------------------
 # Builder functions
 # ---------------------------------------------------------------------------
 
 # Tool registry: maps tool name -> function
 _STANDARD_TOOLS = {
-    "create_todo": create_todo,
-    "complete_todo": complete_todo,
-    "list_todos": list_todos,
+    "create_task": create_task,
+    "complete_task": complete_task,
+    "list_tasks": list_tasks,
     "create_item": create_item,
     "update_item": update_item,
     "move_item": move_item,
@@ -1523,7 +1630,7 @@ _STANDARD_TOOLS = {
     "list_documents": list_documents,
     "create_document": create_document,
     "get_board_state": get_board_state,
-    "get_todo_state": get_todo_state,
+    "get_task_state": get_task_state,
     "get_conversation_summaries": get_conversation_summaries,
     "search_conversations": search_conversations,
     "search_summaries": search_summaries,
@@ -1537,6 +1644,10 @@ _STANDARD_TOOLS = {
     "update_widget": update_widget,
     "remove_widget": remove_widget,
     "set_space_layout": set_space_layout,
+    "link_items": link_items,
+    "unlink_items": unlink_items,
+    "get_linked_items": get_linked_items,
+    "archive_item": archive_item,
 }
 
 _ODIN_TOOLS = {
@@ -1545,7 +1656,7 @@ _ODIN_TOOLS = {
     "open_conversation": open_conversation,
     "navigate_to_space": navigate_to_space,
     "get_attention_items": get_attention_items,
-    "get_cross_space_todos": get_cross_space_todos,
+    "get_cross_space_tasks": get_cross_space_tasks,
 }
 
 

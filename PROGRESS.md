@@ -164,17 +164,39 @@ All 5 tasks done per IMPLEMENTATION-PLAN.md. Widget-based space layouts replacin
 **Deviations from plan:**
 - None — executed as specified in IMPLEMENTATION-PLAN.md
 
+## Phase 4c: Unified Item Model — COMPLETE
+
+All 5 tasks done per IMPLEMENTATION-PLAN.md. Todos collapsed into items; views (list/kanban/table) are presentation, not data model.
+
+**Task 4c.1 (Schema Migration):** Alembic migration adds `is_done` to items, renames `parent_record_id` → `parent_item_id`, creates `item_links` table (many-to-many with unique constraint). Backfills `board_columns` on Simple/Knowledge spaces. Migrates all todos → items (type='task'), converts todo record_id links → item_links rows, drops `todos` table. New `LinkType` enum, `ItemLink` ORM model.
+
+**Task 4c.2 (Backend Refactor):** Deleted `todo_service.py`, todo routes, todo schemas. Updated `item_service`: lightweight creation (title + space_id minimum), `toggle_done()` with bidirectional stage sync (tasks only — records excluded), `is_done` filter on `list_items`, `get_record_with_children` returns linked items via `ItemLink` joins. New `item_link_service.py` (create/delete/list, bidirectional queries). Home dashboard queries items instead of todos.
+
+**Task 4c.3 (MCP Tools + Context Assembler):** Removed 3 todo tools. Added 7 new tools: `create_task`, `complete_task`, `list_tasks`, `link_items`, `unlink_items`, `get_linked_items`, `archive_item`. Renamed `get_todo_state` → `get_task_state`, `get_cross_space_todos` → `get_cross_space_tasks`. Context assembler and Odin service updated. Permission enforcer updated.
+
+**Task 4c.4 (Frontend):** Types regenerated. TodoPanel → TaskListPanel with inline stage dropdown and done-item toggle. Kanban "Done" column hideable. Home dashboard uses `open_task_count`. Seed script creates tasks via `item_service`. All todo references removed from frontend.
+
+**Task 4c.5 (Tests):** Deleted todo test files. Added tests for is_done toggle, stage sync, lightweight creation, link CRUD, new MCP tools. 776 tests passing.
+
+**Code review (2 pre-existing issues found and fixed):**
+1. `search_summaries` missing from `ODIN_MCP_TOOLS` — added
+2. `search_summaries` missing from `_MCP_TOOL_MAP` in permission enforcer — added
+
+**Design decision:** All spaces now have `board_columns` (never null). Simple/Knowledge templates get `["todo", "in_progress", "done"]` with `board_enabled=True`, `default_view="list"`. Eliminated all conditional null-checking for board_columns.
+
+**Deviations from plan:**
+- Plan called for removing todo tools and adding `complete_item`. Instead, created `create_task`/`complete_task`/`list_tasks` as convenience wrappers (clearer agent UX) alongside the generic item tools. `complete_item` functionality covered by `complete_task`.
+
 ## Current State
 
-- **781 backend tests passing** (750 prior + 31 new), lint clean
+- **776 backend tests passing** (781 prior − deleted todo tests + new item/link tests), lint clean
 - **39 frontend Playwright tests passing**
-- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts
-- Frontend: dashboard, space view (widget-based layout), conversation panel, agent management, search modal, document panel + viewer, layout editor, 3 palettes
-- Integration check (3.7) resolved
+- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links
+- Frontend: dashboard, space view (widget-based layout), conversation panel, agent management, search modal, document panel + viewer, layout editor, task list with stage dropdown, 3 palettes
 
 ## Phases 5–7: Not Started
 
-See IMPLEMENTATION-PLAN.md for full breakdown. Phase 5 (Agent Builder, Sub-agents, Steering) is next. Phases 4b, 5, 6 can overlap.
+See IMPLEMENTATION-PLAN.md for full breakdown. Phase 5 (Agent Builder, Sub-agents, Steering) is next.
 
 ---
 
@@ -189,3 +211,5 @@ See IMPLEMENTATION-PLAN.md for full breakdown. Phase 5 (Agent Builder, Sub-agent
 7. **MCP tool name matching uses dynamic prefix extraction** — handles `mcp__openloop_{agentName}__toolName` pattern.
 8. **Approval polling has no timeout** — agents wait indefinitely per spec (5-minute auto-deny removed in Phase 3b).
 9. **All list endpoints paginated** — default limit=50, max 200. Internal callers (context assembler, crash recovery) pass limit=10000.
+10. **All spaces have board_columns** — Simple/Knowledge spaces get `["todo", "in_progress", "done"]`. Eliminates null-checking branches everywhere.
+11. **Todos are items** — no separate table. Tasks (item_type='task') have is_done with bidirectional stage sync. Records ignore sync.

@@ -94,7 +94,7 @@ export function OdinBar() {
         <div className="border-b border-border px-4 py-3 max-h-80 overflow-auto">
           {messages.length === 0 && !streamingContent && (
             <p className="text-sm text-muted italic">
-              Ask Odin anything — create todos, navigate spaces, or get help.
+              Ask Odin anything — create tasks, navigate spaces, or get help.
             </p>
           )}
           {messages.map((msg, i) => (

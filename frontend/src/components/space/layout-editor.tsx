@@ -18,7 +18,7 @@ interface WidgetMeta {
 }
 
 const WIDGET_CATALOG: WidgetMeta[] = [
-  { type: 'todo_panel', label: 'To-Do Panel', description: 'Lightweight task checklist', icon: '☑' },
+  { type: 'todo_panel', label: 'Task Panel', description: 'Lightweight task checklist', icon: '☑' },
   { type: 'kanban_board', label: 'Kanban Board', description: 'Drag-and-drop stage board', icon: '▦' },
   { type: 'data_table', label: 'Data Table', description: 'Sortable, filterable data grid', icon: '⊞' },
   { type: 'conversations', label: 'Conversations', description: 'Chat sidebar with agents', icon: '💬' },

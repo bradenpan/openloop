@@ -553,7 +553,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/items/{record_id}/link-todo": {
+    "/api/v1/items/{item_id}/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Item Links */
+        get: operations["list_item_links_api_v1_items__item_id__links_get"];
+        put?: never;
+        /** Create Item Link */
+        post: operations["create_item_link_api_v1_items__item_id__links_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/items/{item_id}/links/{link_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -562,9 +580,9 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Link Todo To Record */
-        post: operations["link_todo_to_record_api_v1_items__record_id__link_todo_post"];
-        delete?: never;
+        post?: never;
+        /** Delete Item Link */
+        delete: operations["delete_item_link_api_v1_items__item_id__links__link_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -827,60 +845,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/todos": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List Todos */
-        get: operations["list_todos_api_v1_todos_get"];
-        put?: never;
-        /** Create Todo */
-        post: operations["create_todo_api_v1_todos_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/todos/{todo_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get Todo */
-        get: operations["get_todo_api_v1_todos__todo_id__get"];
-        put?: never;
-        post?: never;
-        /** Delete Todo */
-        delete: operations["delete_todo_api_v1_todos__todo_id__delete"];
-        options?: never;
-        head?: never;
-        /** Update Todo */
-        patch: operations["update_todo_api_v1_todos__todo_id__patch"];
-        trace?: never;
-    };
-    "/api/v1/todos/{todo_id}/promote": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Promote Todo */
-        post: operations["promote_todo_api_v1_todos__todo_id__promote_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -1039,8 +1003,8 @@ export interface components {
         DashboardResponse: {
             /** Total Spaces */
             total_spaces: number;
-            /** Open Todo Count */
-            open_todo_count: number;
+            /** Open Task Count */
+            open_task_count: number;
             /** Pending Approvals */
             pending_approvals: number;
             /** Active Conversations */
@@ -1109,7 +1073,7 @@ export interface components {
          * DefaultView
          * @enum {string}
          */
-        DefaultView: "board" | "table";
+        DefaultView: "board" | "table" | "list";
         /** DocumentCreate */
         DocumentCreate: {
             /** Space Id */
@@ -1238,13 +1202,18 @@ export interface components {
             due_date?: string | null;
             /** Assigned Agent Id */
             assigned_agent_id?: string | null;
-            /** Parent Record Id */
-            parent_record_id?: string | null;
+            /** Parent Item Id */
+            parent_item_id?: string | null;
             /**
              * Is Agent Task
              * @default false
              */
             is_agent_task: boolean;
+            /**
+             * Is Done
+             * @default false
+             */
+            is_done: boolean;
         };
         /** ItemEventResponse */
         ItemEventResponse: {
@@ -1266,6 +1235,32 @@ export interface components {
              */
             created_at: string;
         };
+        /** ItemLinkCreate */
+        ItemLinkCreate: {
+            /** Target Item Id */
+            target_item_id: string;
+            /**
+             * Link Type
+             * @default related_to
+             */
+            link_type: string;
+        };
+        /** ItemLinkResponse */
+        ItemLinkResponse: {
+            /** Id */
+            id: string;
+            /** Source Item Id */
+            source_item_id: string;
+            /** Target Item Id */
+            target_item_id: string;
+            /** Link Type */
+            link_type: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
         /** ItemMove */
         ItemMove: {
             /** Stage */
@@ -1281,6 +1276,8 @@ export interface components {
             item_type: string;
             /** Is Agent Task */
             is_agent_task: boolean;
+            /** Is Done */
+            is_done: boolean;
             /** Title */
             title: string;
             /** Description */
@@ -1295,8 +1292,8 @@ export interface components {
             custom_fields: {
                 [key: string]: unknown;
             } | null;
-            /** Parent Record Id */
-            parent_record_id: string | null;
+            /** Parent Item Id */
+            parent_item_id: string | null;
             /** Assigned Agent Id */
             assigned_agent_id: string | null;
             /** Due Date */
@@ -1341,10 +1338,12 @@ export interface components {
             due_date?: string | null;
             /** Assigned Agent Id */
             assigned_agent_id?: string | null;
-            /** Parent Record Id */
-            parent_record_id?: string | null;
+            /** Parent Item Id */
+            parent_item_id?: string | null;
             /** Is Agent Task */
             is_agent_task?: boolean | null;
+            /** Is Done */
+            is_done?: boolean | null;
         };
         /** LayoutBulkReplace */
         LayoutBulkReplace: {
@@ -1355,11 +1354,6 @@ export interface components {
         LayoutResponse: {
             /** Widgets */
             widgets: components["schemas"]["WidgetResponse"][];
-        };
-        /** LinkTodoRequest */
-        LinkTodoRequest: {
-            /** Todo Id */
-            todo_id: string;
         };
         /** MemoryCreate */
         MemoryCreate: {
@@ -1540,8 +1534,8 @@ export interface components {
             record: components["schemas"]["ItemResponse"];
             /** Child Records */
             child_records: components["schemas"]["ItemResponse"][];
-            /** Linked Todos */
-            linked_todos: components["schemas"]["TodoResponse"][];
+            /** Linked Items */
+            linked_items: components["schemas"]["ItemResponse"][];
         };
         /** ScanResponse */
         ScanResponse: {
@@ -1670,64 +1664,6 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
-        };
-        /** TodoCreate */
-        TodoCreate: {
-            /** Space Id */
-            space_id: string;
-            /** Title */
-            title: string;
-            /** Due Date */
-            due_date?: string | null;
-        };
-        /** TodoPromote */
-        TodoPromote: {
-            /** Stage */
-            stage?: string | null;
-        };
-        /** TodoResponse */
-        TodoResponse: {
-            /** Id */
-            id: string;
-            /** Space Id */
-            space_id: string;
-            /** Title */
-            title: string;
-            /** Is Done */
-            is_done: boolean;
-            /** Due Date */
-            due_date: string | null;
-            /** Sort Position */
-            sort_position: number;
-            /** Created By */
-            created_by: string;
-            /** Source Conversation Id */
-            source_conversation_id: string | null;
-            /** Promoted To Item Id */
-            promoted_to_item_id: string | null;
-            /** Record Id */
-            record_id: string | null;
-            /**
-             * Created At
-             * Format: date-time
-             */
-            created_at: string;
-            /**
-             * Updated At
-             * Format: date-time
-             */
-            updated_at: string;
-        };
-        /** TodoUpdate */
-        TodoUpdate: {
-            /** Title */
-            title?: string | null;
-            /** Is Done */
-            is_done?: boolean | null;
-            /** Due Date */
-            due_date?: string | null;
-            /** Sort Position */
-            sort_position?: number | null;
         };
         /** ValidationError */
         ValidationError: {
@@ -2963,7 +2899,8 @@ export interface operations {
                 space_id?: string | null;
                 stage?: string | null;
                 item_type?: string | null;
-                parent_record_id?: string | null;
+                parent_item_id?: string | null;
+                is_done?: boolean | null;
                 archived?: boolean;
                 sort_by?: string | null;
                 sort_order?: string;
@@ -3192,20 +3129,18 @@ export interface operations {
             };
         };
     };
-    link_todo_to_record_api_v1_items__record_id__link_todo_post: {
+    list_item_links_api_v1_items__item_id__links_get: {
         parameters: {
-            query?: never;
+            query?: {
+                link_type?: string | null;
+            };
             header?: never;
             path: {
-                record_id: string;
+                item_id: string;
             };
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["LinkTodoRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
             200: {
@@ -3213,8 +3148,73 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TodoResponse"];
+                    "application/json": components["schemas"]["ItemLinkResponse"][];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_item_link_api_v1_items__item_id__links_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ItemLinkCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ItemLinkResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_item_link_api_v1_items__item_id__links__link_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                item_id: string;
+                link_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -3923,203 +3923,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_todos_api_v1_todos_get: {
-        parameters: {
-            query?: {
-                space_id?: string | null;
-                is_done?: boolean | null;
-                limit?: number;
-                offset?: number;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TodoResponse"][];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    create_todo_api_v1_todos_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TodoCreate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TodoResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_todo_api_v1_todos__todo_id__get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                todo_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TodoResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_todo_api_v1_todos__todo_id__delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                todo_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_todo_api_v1_todos__todo_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                todo_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TodoUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TodoResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    promote_todo_api_v1_todos__todo_id__promote_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                todo_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["TodoPromote"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ItemResponse"];
                 };
             };
             /** @description Validation Error */

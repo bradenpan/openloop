@@ -18,14 +18,14 @@ _TEMPLATE_DEFAULTS: dict[str, dict] = {
         "board_columns": ["lead", "contacted", "qualifying", "negotiation", "closed"],
     },
     "knowledge_base": {
-        "board_enabled": False,
-        "default_view": None,
-        "board_columns": None,
+        "board_enabled": True,
+        "default_view": "list",
+        "board_columns": ["todo", "in_progress", "done"],
     },
     "simple": {
-        "board_enabled": False,
-        "default_view": None,
-        "board_columns": None,
+        "board_enabled": True,
+        "default_view": "list",
+        "board_columns": ["todo", "in_progress", "done"],
     },
 }
 

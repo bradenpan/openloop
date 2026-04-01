@@ -4,7 +4,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from backend.openloop.services import item_service, space_service, todo_service
+from backend.openloop.services import item_link_service, item_service, space_service
 
 
 def _make_space(db: Session, name: str = "Test Space", template: str = "project"):
@@ -83,10 +83,10 @@ def test_update_item_validates_custom_fields(db_session: Session, caplog):
     assert "Unknown custom field 'nonexistent'" in caplog.text
 
 
-# ---- list_items with parent_record_id ----
+# ---- list_items with parent_item_id ----
 
 
-def test_list_items_filter_by_parent_record_id(db_session: Session):
+def test_list_items_filter_by_parent_item_id(db_session: Session):
     space = _make_crm_space(db_session)
     parent = item_service.create_item(
         db_session, space_id=space.id, title="Parent Record", item_type="record"
@@ -95,13 +95,13 @@ def test_list_items_filter_by_parent_record_id(db_session: Session):
         db_session,
         space_id=space.id,
         title="Child Task",
-        parent_record_id=parent.id,
+        parent_item_id=parent.id,
     )
     other = item_service.create_item(
         db_session, space_id=space.id, title="Unrelated"
     )
 
-    children = item_service.list_items(db_session, parent_record_id=parent.id)
+    children = item_service.list_items(db_session, parent_item_id=parent.id)
     assert len(children) == 1
     assert children[0].id == child.id
 
@@ -161,13 +161,13 @@ def test_get_record_with_children(db_session: Session):
         db_session,
         space_id=space.id,
         title="Sub-task 1",
-        parent_record_id=record.id,
+        parent_item_id=record.id,
     )
     child2 = item_service.create_item(
         db_session,
         space_id=space.id,
         title="Sub-task 2",
-        parent_record_id=record.id,
+        parent_item_id=record.id,
     )
 
     result = item_service.get_record_with_children(db_session, record.id)
@@ -187,13 +187,13 @@ def test_get_record_with_children_excludes_archived(db_session: Session):
         db_session,
         space_id=space.id,
         title="Active Child",
-        parent_record_id=record.id,
+        parent_item_id=record.id,
     )
     archived_child = item_service.create_item(
         db_session,
         space_id=space.id,
         title="Archived Child",
-        parent_record_id=record.id,
+        parent_item_id=record.id,
     )
     item_service.archive_item(db_session, archived_child.id)
 
@@ -202,54 +202,26 @@ def test_get_record_with_children_excludes_archived(db_session: Session):
     assert result["child_records"][0].id == child.id
 
 
-def test_get_record_with_children_includes_linked_todos(db_session: Session):
+def test_get_record_with_children_includes_linked_items(db_session: Session):
     space = _make_crm_space(db_session)
     record = item_service.create_item(
         db_session, space_id=space.id, title="Record", item_type="record"
     )
-    todo = todo_service.create_todo(db_session, space_id=space.id, title="Follow up")
-    item_service.link_todo_to_record(db_session, todo.id, record.id)
+    task = item_service.create_item(
+        db_session, space_id=space.id, title="Follow up", item_type="task"
+    )
+    item_link_service.create_link(
+        db_session, source_item_id=record.id, target_item_id=task.id
+    )
 
     result = item_service.get_record_with_children(db_session, record.id)
-    assert len(result["linked_todos"]) == 1
-    assert result["linked_todos"][0].id == todo.id
+    assert len(result["linked_items"]) == 1
+    assert result["linked_items"][0].id == task.id
 
 
 def test_get_record_with_children_not_found(db_session: Session):
     with pytest.raises(HTTPException) as exc_info:
         item_service.get_record_with_children(db_session, "nonexistent")
-    assert exc_info.value.status_code == 404
-
-
-# ---- link_todo_to_record ----
-
-
-def test_link_todo_to_record(db_session: Session):
-    space = _make_crm_space(db_session)
-    record = item_service.create_item(
-        db_session, space_id=space.id, title="Record", item_type="record"
-    )
-    todo = todo_service.create_todo(db_session, space_id=space.id, title="Call client")
-
-    linked = item_service.link_todo_to_record(db_session, todo.id, record.id)
-    assert linked.record_id == record.id
-
-
-def test_link_todo_to_record_not_found_record(db_session: Session):
-    space = _make_space(db_session)
-    todo = todo_service.create_todo(db_session, space_id=space.id, title="Orphan")
-    with pytest.raises(HTTPException) as exc_info:
-        item_service.link_todo_to_record(db_session, todo.id, "nonexistent")
-    assert exc_info.value.status_code == 404
-
-
-def test_link_todo_to_record_not_found_todo(db_session: Session):
-    space = _make_crm_space(db_session)
-    record = item_service.create_item(
-        db_session, space_id=space.id, title="Record", item_type="record"
-    )
-    with pytest.raises(HTTPException) as exc_info:
-        item_service.link_todo_to_record(db_session, "nonexistent", record.id)
     assert exc_info.value.status_code == 404
 
 

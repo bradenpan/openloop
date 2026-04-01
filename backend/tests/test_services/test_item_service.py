@@ -251,3 +251,122 @@ def test_archive_item_not_found(db_session: Session):
     with pytest.raises(HTTPException) as exc_info:
         item_service.archive_item(db_session, "nonexistent-id")
     assert exc_info.value.status_code == 404
+
+
+# ---- is_done parameter and toggle_done ----
+
+
+def test_create_item_with_is_done(db_session: Session):
+    space = _make_space(db_session)
+    item = item_service.create_item(
+        db_session, space_id=space.id, title="Already Done", is_done=True
+    )
+    assert item.is_done is True
+
+
+def test_create_item_default_is_done_false(db_session: Session):
+    space = _make_space(db_session)
+    item = item_service.create_item(db_session, space_id=space.id, title="Fresh")
+    assert item.is_done is False
+
+
+def test_toggle_done(db_session: Session):
+    space = _make_space(db_session)
+    item = item_service.create_item(db_session, space_id=space.id, title="Toggle Me")
+    assert item.is_done is False
+
+    toggled = item_service.toggle_done(db_session, item.id)
+    assert toggled.is_done is True
+
+    toggled_back = item_service.toggle_done(db_session, item.id)
+    assert toggled_back.is_done is False
+
+
+def test_toggle_done_stage_sync_task(db_session: Session):
+    """Toggling a task to done should move it to the done stage."""
+    space = _make_space(db_session)
+    item = item_service.create_item(db_session, space_id=space.id, title="Task Sync")
+    original_stage = item.stage
+    assert original_stage != "done"
+
+    toggled = item_service.toggle_done(db_session, item.id)
+    assert toggled.is_done is True
+    assert toggled.stage == "done"
+
+    # Toggle back should return to first column
+    toggled_back = item_service.toggle_done(db_session, item.id)
+    assert toggled_back.is_done is False
+    assert toggled_back.stage == space.board_columns[0]
+
+
+def test_is_done_stage_sync_via_update(db_session: Session):
+    """Setting is_done=True via update_item should move task to done stage."""
+    space = _make_space(db_session)
+    item = item_service.create_item(db_session, space_id=space.id, title="Update Sync")
+    updated = item_service.update_item(db_session, item.id, is_done=True)
+    assert updated.is_done is True
+    assert updated.stage == "done"
+
+
+def test_move_to_done_sets_is_done_true(db_session: Session):
+    """Moving a task to the done column should set is_done=True."""
+    space = _make_space(db_session)
+    item = item_service.create_item(db_session, space_id=space.id, title="Move Sync")
+    assert item.is_done is False
+
+    moved = item_service.move_item(db_session, item.id, "done")
+    assert moved.stage == "done"
+    assert moved.is_done is True
+
+
+def test_move_from_done_sets_is_done_false(db_session: Session):
+    """Moving a task away from done column should set is_done=False."""
+    space = _make_space(db_session)
+    item = item_service.create_item(db_session, space_id=space.id, title="Undone")
+    item_service.move_item(db_session, item.id, "done")
+
+    moved_back = item_service.move_item(db_session, item.id, "in_progress")
+    assert moved_back.stage == "in_progress"
+    assert moved_back.is_done is False
+
+
+def test_record_no_stage_sync_on_is_done(db_session: Session):
+    """Records should NOT trigger stage sync when is_done changes."""
+    space = _make_space(db_session, template="crm")
+    record = item_service.create_item(
+        db_session, space_id=space.id, title="Record", item_type="record"
+    )
+    last_col = space.board_columns[-1]  # "closed" for CRM template
+
+    # Move record to last column — records should NOT get is_done sync
+    moved = item_service.move_item(db_session, record.id, last_col)
+    assert moved.stage == last_col
+    assert moved.is_done is False  # Records don't sync is_done
+
+
+def test_list_items_filter_by_is_done(db_session: Session):
+    space = _make_space(db_session)
+    item_service.create_item(db_session, space_id=space.id, title="Open Task")
+    done_item = item_service.create_item(db_session, space_id=space.id, title="Done Task")
+    item_service.update_item(db_session, done_item.id, is_done=True)
+
+    open_items = item_service.list_items(db_session, is_done=False)
+    assert len(open_items) == 1
+    assert open_items[0].title == "Open Task"
+
+    done_items = item_service.list_items(db_session, is_done=True)
+    assert len(done_items) == 1
+    assert done_items[0].title == "Done Task"
+
+
+def test_lightweight_creation_defaults(db_session: Session):
+    """Creating with just title + space_id should default everything else."""
+    space = _make_space(db_session)
+    item = item_service.create_item(db_session, space_id=space.id, title="Quick Task")
+    assert item.item_type == "task"
+    assert item.is_done is False
+    assert item.archived is False
+    assert item.description is None
+    assert item.priority is None
+    assert item.stage == space.board_columns[0]
+    assert item.created_by == "user"

@@ -6,7 +6,7 @@ def test_dashboard_empty(client: TestClient):
     assert resp.status_code == 200
     data = resp.json()
     assert data["total_spaces"] == 0
-    assert data["open_todo_count"] == 0
+    assert data["open_task_count"] == 0
     assert data["pending_approvals"] == 0
     assert data["active_conversations"] == 0
     assert data["unread_notifications"] == 0
@@ -20,17 +20,16 @@ def test_dashboard_with_spaces(client: TestClient):
     assert resp.json()["total_spaces"] == 2
 
 
-def test_dashboard_with_todos(client: TestClient):
+def test_dashboard_with_tasks(client: TestClient):
     space_resp = client.post("/api/v1/spaces", json={"name": "S1", "template": "project"})
     space_id = space_resp.json()["id"]
-    client.post("/api/v1/todos", json={"space_id": space_id, "title": "Open 1"})
-    client.post("/api/v1/todos", json={"space_id": space_id, "title": "Open 2"})
+    client.post("/api/v1/items", json={"space_id": space_id, "title": "Open 1"})
+    client.post("/api/v1/items", json={"space_id": space_id, "title": "Open 2"})
     # Mark one as done
-    done_resp = client.post("/api/v1/todos", json={"space_id": space_id, "title": "Done"})
-    client.patch(f"/api/v1/todos/{done_resp.json()['id']}", json={"is_done": True})
+    client.post("/api/v1/items", json={"space_id": space_id, "title": "Done", "is_done": True})
     resp = client.get("/api/v1/home/dashboard")
     assert resp.status_code == 200
-    assert resp.json()["open_todo_count"] == 2
+    assert resp.json()["open_task_count"] == 2
 
 
 def test_dashboard_with_conversations(client: TestClient):

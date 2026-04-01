@@ -1,10 +1,14 @@
-from pathlib import Path
 
 from fastapi import APIRouter, Depends, Query, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
-from backend.openloop.api.schemas import DocumentCreate, DocumentResponse, DocumentUpdate, ScanResponse
+from backend.openloop.api.schemas import (
+    DocumentCreate,
+    DocumentResponse,
+    DocumentUpdate,
+    ScanResponse,
+)
 from backend.openloop.database import get_db
 from backend.openloop.services import document_service
 

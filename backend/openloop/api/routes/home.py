@@ -3,13 +3,13 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from backend.openloop.database import get_db
-from backend.openloop.db.models import Conversation, PermissionRequest, Space, Todo
+from backend.openloop.db.models import Conversation, Item, PermissionRequest, Space
 from backend.openloop.services import notification_service
 
 
 class DashboardResponse(BaseModel):
     total_spaces: int
-    open_todo_count: int
+    open_task_count: int
     pending_approvals: int
     active_conversations: int
     unread_notifications: int
@@ -21,9 +21,13 @@ router = APIRouter(prefix="/api/v1/home", tags=["home"])
 @router.get("/dashboard", response_model=DashboardResponse)
 def get_dashboard(db: Session = Depends(get_db)) -> DashboardResponse:
     total_spaces = db.query(Space).count()
-    open_todos = (
-        db.query(Todo)
-        .filter(Todo.is_done == False, Todo.promoted_to_item_id == None)  # noqa: E711, E712
+    open_tasks = (
+        db.query(Item)
+        .filter(
+            Item.item_type == "task",
+            Item.is_done == False,  # noqa: E712
+            Item.archived == False,  # noqa: E712
+        )
         .count()
     )
     pending = db.query(PermissionRequest).filter(PermissionRequest.status == "pending").count()
@@ -32,7 +36,7 @@ def get_dashboard(db: Session = Depends(get_db)) -> DashboardResponse:
 
     return DashboardResponse(
         total_spaces=total_spaces,
-        open_todo_count=open_todos,
+        open_task_count=open_tasks,
         pending_approvals=pending,
         active_conversations=active_convs,
         unread_notifications=unread,

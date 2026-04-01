@@ -74,6 +74,7 @@ class SSEEventType(StrEnum):
 class DefaultView(StrEnum):
     BOARD = "board"
     TABLE = "table"
+    LIST = "list"
 
 
 class PermissionRequestStatus(StrEnum):
@@ -110,6 +111,10 @@ class DedupDecision(StrEnum):
     UPDATE = "update"
     DELETE = "delete"
     NOOP = "noop"
+
+
+class LinkType(StrEnum):
+    RELATED_TO = "related_to"
 
 
 class WidgetType(StrEnum):

@@ -18,7 +18,6 @@ from backend.openloop.services import (
     space_service,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -78,10 +77,10 @@ class TestAttentionOptimizedOrdering:
             db_session, namespace="global", key="global-fact", value="global value"
         )
 
-        # Create a todo (goes in END section)
-        from backend.openloop.services import todo_service
+        # Create a task (goes in END section)
+        from backend.openloop.services import item_service
 
-        todo_service.create_todo(db_session, space_id=space.id, title="Test todo")
+        item_service.create_item(db_session, space_id=space.id, title="Test task")
 
         result = assemble_context(db_session, agent_id=agent.id, space_id=space.id)
 
@@ -92,7 +91,7 @@ class TestAttentionOptimizedOrdering:
         summary_pos = result.index("## Recent Conversations")
         space_facts_pos = result.index("## Space Facts")
         global_facts_pos = result.index("## Global Facts")
-        todo_pos = result.index("## Current To-dos")
+        todo_pos = result.index("## Current Tasks")
 
         assert agent_pos < rules_pos < tools_pos
         assert tools_pos < summary_pos < space_facts_pos < global_facts_pos

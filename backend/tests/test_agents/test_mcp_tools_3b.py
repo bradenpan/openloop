@@ -13,6 +13,7 @@ import json
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from contract.enums import DedupDecision
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -31,8 +32,6 @@ from backend.openloop.services import (
     behavioral_rule_service,
     memory_service,
 )
-from contract.enums import DedupDecision
-
 
 # FTS5 setup needed for recall_facts query-based tests
 _FTS_MEMORY_SETUP = [

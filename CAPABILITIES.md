@@ -10,7 +10,7 @@ OpenLoop is a personal AI command center. It's where you manage all your work �
 
 The system has four core jobs:
 
-1. **Track all work** — to-dos, board tasks, CRM-style pipeline items. One place, not scattered across Trello, Excel, Notion, and terminal windows.
+1. **Track all work** — tasks, CRM-style pipeline items, records. One place, not scattered across Trello, Excel, Notion, and terminal windows.
 2. **Manage AI agents** — start conversations, delegate tasks, monitor progress, maintain context across sessions. Organized by space, not by terminal window.
 3. **Keep you prepared** — proactive briefings, meeting prep, follow-up reminders. The system looks at your calendar, email, and task board and makes sure nothing falls through the cracks.
 4. **Catch what you're missing** — scan email, board, and records for dropped balls, overdue follow-ups, unanswered threads, and items that need attention. Surface them proactively — don't wait to be asked. Eventually, this becomes a personal assistant that makes sure everything you need to get done for the day actually gets done.
@@ -33,14 +33,14 @@ Home is the top-level view above spaces. It provides (in priority order, top to 
 2. **Attention items** — the "act now" section. Pending approval requests, board tasks due today/overdue, agent results to review, automation failures. These are things that need you right now.
 3. **Active agents** — background agents currently running, with status indicators. The "what's happening" section.
 4. **Space list** — quick access to all spaces with activity indicators. The "go somewhere" section.
-5. **Cross-space to-do list** — all to-dos from all spaces, grouped by space. The reference section — scrollable, below the fold is fine.
+5. **Cross-space task list** — all open tasks from all spaces, grouped by space. The reference section — scrollable, below the fold is fine.
 
 Home is the screen you open in the morning. "What needs my attention?" Then you drill into specific spaces.
 
 **First-run experience:** When a user opens OpenLoop for the first time, Home shows:
-- An Odin welcome message with suggested first actions ("Try: 'add a to-do: call dentist'" or "Create your first space")
+- An Odin welcome message with suggested first actions ("Try: 'add a task: call dentist'" or "Create your first space")
 - A "Create your first space" card with template picker (Project, CRM, Knowledge Base, Simple)
-- Odin works immediately for basic to-dos — no agent setup needed on day one
+- Odin works immediately for basic tasks — no agent setup needed on day one
 
 ### Spaces
 
@@ -50,25 +50,25 @@ Examples:
 - **Recruiting** (CRM) — candidate records, pipeline tracking, interview notes, follow-up tasks
 - **OpenLoop** (project) — task board, code agent conversations, feature planning
 - **Health** (knowledge base) — bloodwork PDFs, Garmin data, doctor visit notes, health agent conversations
-- **Personal** (simple) — to-do list, personal tasks, no board needed
+- **Personal** (simple) — task list, personal tasks, no board needed
 - **Client X** (project) — deliverables, meeting notes, communication tracking
 
 Each space has:
 
-- **To-dos** (always) — lightweight checklist items. Every space has these. Title + done/not done. "Call dentist." "Upload bloodwork." "Email Sarah."
-- **Board** (optional) — Kanban columns or table view for heavier work items that move through stages. Not every space needs this.
+- **Items** (always) — all tracked work lives here. Items can be viewed as a simple checklist (list view), a Kanban board, or a table. Every space has items. The view determines presentation, not the data model.
+- **Board** (optional) — Kanban columns for items that move through stages. Not every space needs this — items in simple spaces work as a checklist without stages.
 - **Data sources** — connected data: Google Drive folders, git repos, API integrations (Garmin, bank feeds, calendar), manual uploads. Agents can read from connected sources.
 - **Agent conversations** — named, persistent chat threads with AI agents. Multiple can be active. Older ones can be closed and reopened. Agents always have context of what happened before.
 - **Memory** — facts, conversation summaries, and preferences specific to this space.
 - **Configuration** — which data sources are connected, which agents are available, space-specific settings
 
-Spaces are the primary organizational unit. When you open a space, you see its to-dos, its board (if enabled), its conversations, and its data.
+Spaces are the primary organizational unit. When you open a space, you see its items (as list, kanban, or table), its conversations, and its data.
 
 **Space templates** for quick creation:
-- **Project** — board enabled with default columns (Idea → Scoping → To Do → In Progress → Done), standard agent tools
+- **Project** — board enabled with default columns (Idea → Scoping → To Do → In Progress → Done), default Kanban view, standard agent tools
 - **CRM** — board enabled with table view default, record-oriented, custom fields
 - **Knowledge Base** — no board, data-focused, document-heavy, conversations for Q&A
-- **Simple** — no board, just to-dos and conversations
+- **Simple** — no board, items shown in list view (checklist style), conversations
 
 Templates are starting points — you can add/remove features after creation.
 
@@ -76,32 +76,41 @@ Templates are starting points — you can add/remove features after creation.
 
 ### Items
 
-There are two weights of tracked work:
+All tracked work is an **item**. Items have two types:
 
-**To-dos** — lightweight, checkbox-style. Every space has these. A to-do has a title, a done/not-done state, and an optional due date. That's it. If a to-do turns out to be more complex than expected, it can be "promoted" to a board item. **Default everything to to-dos.** When you add something, it's a to-do. No decision needed. If it needs more structure later, promote it.
+- **Tasks** — work to be done. Can be human tasks or agent tasks. Tasks have a title, done/not-done state, optional description, optional stage, optional due date, priority, and assigned agent. A task can be as lightweight as "Call dentist" (just a title and a checkbox) or as structured as a multi-stage deliverable with description, priority, and agent assignment. The same data, viewed differently depending on context.
+- **Records** — tracked entities (a person, a lead, a bug). Records have custom fields, attached notes, and linked tasks.
 
-**Board items** — heavier, multi-stage work that moves through a pipeline. Board items live on a space's Kanban board or table view. They have descriptions, stages, assigned agents, due dates, and attached conversations. Board items come in two kinds:
+**Views** determine how items are presented — the underlying data model is the same:
+- **List view** (to-do style) — shows tasks as a checklist: checkbox, title, stage dropdown (editable), due date. Done items hidden by default with toggle to show. Clicking a row opens the full item detail panel. This is the default for Simple spaces.
+- **Kanban view** — groups tasks by stage in draggable columns. "Done" column hideable. This is the default for Project spaces.
+- **Table view** — configurable columns, sortable/filterable rows. This is the default for CRM spaces.
 
-- **Tasks** — work to be done. Can be human tasks or agent tasks.
-- **Records** — tracked entities (a person, a lead, a bug). Records have custom fields, attached notes, and linked to-dos/tasks.
+**Item linking:** Items can be associated with each other via a many-to-many link system. A task can be linked to a contact record ("Call Sarah" linked to Sarah's record), linked to other related tasks, or both. Links are separate from hierarchy — an item can be a sub-task of a parent item (`parent_item_id`) AND linked to a contact record simultaneously.
 
-Agents can create and manage both to-dos and board items through their MCP tools.
+**Hierarchy:** Items support parent-child nesting via `parent_item_id`. Sub-tasks nest under parent tasks. Contact records can be children of company records. This is structural — it defines where items appear in tree views.
+
+**is_done ↔ stage sync (tasks only):** Checking a task done in list view moves it to the "done" stage on the kanban (if the space has a board). Dragging to the "done" column sets `is_done=true`. Moving out of "done" sets `is_done=false`. Unchecking `is_done` reverts stage to `"todo"` (the default stage). In simple spaces (no board), `is_done` toggles without affecting stage (which stays `null`). The sync applies only to tasks — records use stages for pipeline tracking (e.g., Lead → Qualified → Closed/Won) without `is_done` sync.
+
+**Default behavior:** When you add something, it's a task with minimal fields. No decision needed. If it needs more structure, add a description, set a stage, link it to a record. No "promotion" step — the data model supports the full range from the start.
+
+Agents can create and manage items through their MCP tools.
 
 ### Space Layouts
 
-Each space has a configurable layout — an arrangement of widgets that defines what the space shows and how. A widget is a self-contained UI component: a kanban board, a data table, a to-do list, a conversation sidebar, a chart, a stat card, a notes panel, or a data feed.
+Each space has a configurable layout — an arrangement of widgets that defines what the space shows and how. A widget is a self-contained UI component: a kanban board, a data table, a task list panel, a conversation sidebar, a chart, a stat card, a notes panel, or a data feed.
 
 Space templates provide sensible default layouts:
-- **Project** — to-do panel (left), kanban board (center), conversations (right)
-- **CRM** — to-do panel (left), data table (center), conversations (right)
+- **Project** — task list panel (left), kanban board (center), conversations (right)
+- **CRM** — task list panel (left), data table (center), conversations (right)
 - **Knowledge Base** — notes panel (center), conversations (right)
-- **Simple** — to-do panel (center), conversations (right)
+- **Simple** — task list panel (center), conversations (right)
 
 These defaults match the current fixed-view behavior. But layouts are editable — you can add, remove, rearrange, and configure widgets through a layout editor in space settings, or ask an agent to do it for you.
 
-**Agent-designed layouts:** Tell an agent "redesign this space to show my health data with charts and a bloodwork tracker" and the agent writes a new layout config — adding chart widgets connected to your Garmin data source, a table widget for bloodwork entries, and removing the kanban board you don't need. Agents have MCP tools to read and modify space layouts just like they have tools to create to-dos or move board items.
+**Agent-designed layouts:** Tell an agent "redesign this space to show my health data with charts and a bloodwork tracker" and the agent writes a new layout config — adding chart widgets connected to your Garmin data source, a table widget for bloodwork entries, and removing the kanban board you don't need. Agents have MCP tools to read and modify space layouts just like they have tools to create items or move tasks between stages.
 
-**Core widget types:** to-do panel, kanban board, data table, conversation sidebar. These are available at launch. **Extended widget types** (charts, stat cards, markdown notes, data feeds) are added later and depend on data source integrations to be meaningful.
+**Core widget types:** task list panel, kanban board, data table, conversation sidebar. These are available at launch. **Extended widget types** (charts, stat cards, markdown notes, data feeds) are added later and depend on data source integrations to be meaningful.
 
 Default board columns: **Idea → Scoping → To Do → In Progress → Done**.
 
@@ -110,13 +119,13 @@ Default board columns: **Idea → Scoping → To Do → In Progress → Done**.
 Odin is a system-level AI agent that serves as the universal entry point. There is no separate "command bar" — Odin's chat input is always visible at the top of the screen.
 
 You type whatever you want in natural language:
-- "Add a to-do: call dentist" → Odin creates it in the current space
-- "What's on my plate today?" → Odin summarizes your to-dos and attention items across all spaces
+- "Add a task: call dentist" → Odin creates it in the current space
+- "What's on my plate today?" → Odin summarizes your tasks and attention items across all spaces
 - "Open recruiting agent" → Odin opens a conversation with the Recruiting Agent
 - "I need to research competitor X for the product space" → Odin opens a conversation with an appropriate agent in the Product space
 - "Create an agent that can manage my health data" → Odin delegates to the Agent Builder
 
-Odin runs on **Haiku** by default for fast responses (~1-2 seconds). It handles simple actions directly (creating to-dos, answering board state questions, routing to conversations) and delegates complex work to space-scoped agents.
+Odin runs on **Haiku** by default for fast responses (~1-2 seconds). It handles simple actions directly (creating tasks, answering board state questions, routing to conversations) and delegates complex work to space-scoped agents.
 
 When you want to interact directly with a more capable model, you either:
 1. **Open a conversation** in a space (click New Conversation, pick agent, pick model) — one click, no Odin needed
@@ -141,12 +150,12 @@ A conversation is a persistent, named chat thread with an agent, scoped to a spa
 - Can be reopened or new conversations started — the agent gets the summary from prior conversations, not the full raw history. Full history remains accessible if the agent needs to look something up.
 - Can delegate work to sub-agents (e.g., the recruiting agent spins up a research sub-agent to build a candidate brief)
 - Can be steered mid-task — if an agent is working in the background and going down the wrong path, you can send a correction that gets picked up at the next turn boundary without restarting the entire task
-- Can create/update to-dos and board items as a side effect of the conversation
+- Can create/update items (tasks, records) as a side effect of the conversation
 - Multiple conversations can be active simultaneously within a space
 
 **Model selection:** Each agent has a default model (typically Sonnet). You can override the model per conversation (e.g., use Opus for a complex planning session). Odin may suggest upgrading when a task would benefit from a more capable model, but you always decide.
 
-The key insight: **conversations are where most work happens**. The board and to-do list track the state of work. Conversations are where work gets planned, discussed, and driven forward.
+The key insight: **conversations are where most work happens**. Items (list view, board, table) track the state of work. Conversations are where work gets planned, discussed, and driven forward.
 
 ### Permissions and Security
 
@@ -207,7 +216,7 @@ Each space has a knowledge base. Memory operates in four tiers, mapped from esta
 
    When a space accumulates 20+ unconsolidated summaries, the system automatically generates a meta-summary — a condensed overview covering months of history in one compact block. The individual summaries remain searchable but are replaced in context assembly by the meta-summary. This prevents agents from losing awareness of long-term project trajectory as history grows.
 
-3. **Working memory (board/to-do state)** — current state of items, recent changes, upcoming deadlines. Auto-generated from the database. Always fresh.
+3. **Working memory (item state)** — current state of items, recent changes, upcoming deadlines. Auto-generated from the database. Always fresh.
 
 4. **Procedural memory (behavioral rules)** — learned rules about how the agent should behave, captured from two sources: user corrections ("don't do X", "always check Y first") and validated approaches (user confirms a non-obvious choice worked well). "Always check the CRM before drafting follow-up emails." "User prefers bullet points over long paragraphs." "When formatting reports, include a summary section at the top." These rules are injected into the agent's context with high priority at the start of every conversation. Confidence updates are asymmetric: confirmations increase confidence by a standard increment, but contradictions decrease confidence at 2x the rate — it takes multiple confirmations to build trust, but a single clear override should significantly erode it. Rules below a confidence threshold after sustained non-use are deactivated. This is how agents improve over time — both corrections and validated successes stick across sessions.
 
@@ -245,9 +254,9 @@ Automations use the same agents, permissions, and MCP tools as manual conversati
 
 The proactive system is built on top of automations. Proactive behaviors are pre-configured automations that ship with the system:
 
-- **Morning briefing** — scheduled automation: Briefing Agent summarizes your day across all spaces (meetings, deadlines, to-dos, stale items).
+- **Morning briefing** — scheduled automation: Briefing Agent summarizes your day across all spaces (meetings, deadlines, open tasks, stale items).
 - **Meeting prep** — event-triggered automation: when a meeting is detected without a prep brief, dispatch a Prep Agent.
-- **Follow-up tracking** — scheduled automation: scan to-dos and records for overdue follow-ups, surface to Home.
+- **Follow-up tracking** — scheduled automation: scan tasks and records for overdue follow-ups, surface to Home.
 - **Stale work detection** — scheduled automation: flag board items that haven't moved in X days.
 - **Dropped ball detection** — scheduled automation: scan email and records for unanswered items.
 
@@ -267,14 +276,14 @@ When you open OpenLoop:
 2. **Attention items** — pending approvals, due-today tasks, agent results to review, automation failures. Act now.
 3. **Active agents** — background agents currently running, with status.
 4. **Space list** — quick access to all spaces with activity indicators.
-5. **Cross-space to-dos** — all to-dos from all spaces, grouped by space. Reference view, below the fold is fine.
+5. **Cross-space tasks** — all open tasks from all spaces, grouped by space. Reference view, below the fold is fine.
 
 ### Space View
 
 When you open a space:
 
-1. **To-dos** — always present. Lightweight checklist.
-2. **Board** (if enabled) — Kanban or table view for heavier items.
+1. **Items** — always present. Shown as list view (checklist), kanban, or table depending on space template and user preference.
+2. **Board** (if enabled) — Kanban stage columns for items that move through a pipeline.
 3. **Conversations** — list of active/recent agent conversations. Click to open. Start a new one.
 4. **Data** — documents, connected sources, uploaded files.
 
@@ -313,12 +322,12 @@ Accessible from Home or Settings. Shows:
 
 ### P0 — Must work at launch
 
-1. **Home dashboard** — cross-space to-do list, attention items, active agents, space list, Odin chat
+1. **Home dashboard** — cross-space task list, attention items, active agents, space list, Odin chat
 2. **Space management** — create spaces from templates (Project, CRM, Knowledge Base, Simple), configure data sources
-3. **To-dos** — lightweight checklist in every space. Cross-space aggregation on Home. Done/not-done.
-4. **Board with tasks** — create, move, edit, archive board items. Kanban drag-and-drop. Optional per space. Default columns: Idea → Scoping → To Do → In Progress → Done.
+3. **Unified items** — all tracked work (tasks and records) in a single data model. List view (checklist style), Kanban view, and Table view of the same data. Cross-space task aggregation on Home. is_done/stage bidirectional sync.
+4. **Board with stages** — create, move, edit, archive items. Kanban drag-and-drop. Optional per space. Default columns: Idea → Scoping → To Do → In Progress → Done. "Done" column hideable.
 5. **Odin (front door)** — always-visible chat input running on Haiku. Handles simple actions directly, routes complex work to space agents. Natural language, no memorized commands.
-6. **Agent conversations** — start a named conversation with an agent in a space context. Interactive chat with streaming responses. Agent has access to space data, memory, and board state. Can create/update to-dos and board items. Model selectable per conversation (default Sonnet, option for Opus).
+6. **Agent conversations** — start a named conversation with an agent in a space context. Interactive chat with streaming responses. Agent has access to space data, memory, and board state. Can create/update items (tasks, records) and manage item links. Model selectable per conversation (default Sonnet, option for Opus).
 7. **Agent delegation** — tell an agent to go work on a task in the background. Status indicator with expandable log. Results flow back.
 8. **Context management** — conversations maintain history. Closing generates a summary. Mandatory pre-compaction memory flush before any summarization (agent saves unsaved facts to persistent memory before context is compressed), followed by post-compaction verification (check that key facts from the compressed section exist in persistent memory). Proactive budget enforcement checks context size before each LLM call and compresses at clean turn boundaries when needed. Recent exchanges kept verbatim during compression (configurable window, default 5-10 exchanges) — only older history is summarized. Auto-checkpoint when context usage exceeds 70%. New conversations get summaries + facts + behavioral rules + board state. Context ordered for maximum model attention: high-priority at beginning/end, reference material in middle.
 9. **Agent memory tools** — agents have explicit tools to save, update, and delete facts. Agents actively curate their knowledge rather than passively receiving context. System prompts instruct agents to use these proactively. Write-time dedup prevents contradictory or duplicate entries.
@@ -327,7 +336,7 @@ Accessible from Home or Settings. Shows:
 ### P1 — Important, build soon after launch
 
 11. **Agent Builder** — specialized agent for creating new agents through conversational requirements gathering. Writes config and registers in system. Accessible via Odin. (At P0 launch, agents created via UI form. Agent Builder adds the conversational creation flow.)
-12. **Records (CRM-style items)** — tracked entities with custom fields and pipelines. Linked to-dos/tasks. Table view.
+12. **Records (CRM-style items)** — tracked entities with custom fields and pipelines. Linked tasks via item_links (many-to-many). Table view.
 13. **Table view** — alternative to Kanban for CRM-style spaces. Rows = records, columns = configurable fields.
 14. **Google Drive integration** — link Drive folders to spaces. Agents read/write documents. Indexed and searchable.
 15. **Documents/data management** — per-space document management with metadata, tags, search.
@@ -341,7 +350,7 @@ Accessible from Home or Settings. Shows:
 23. **Temporal fact management** — facts track when they became true and when they were superseded. Historical facts preserved for querying. Write-time comparison detects contradictions and supersedes old facts automatically.
 24. **Cross-space and deep search** — FTS5 full-text indexes on memory, messages, and summaries. Conversation and summary search across spaces (scoped to agent permissions). Replaces basic substring matching with ranked results.
 25. **Mid-task steering** — send a message to a running background agent to redirect it. Background delegation uses a managed turn loop: the session manager auto-continues between agent turns, checking a steering queue at each turn boundary. User corrections are picked up at the next turn boundary — no restart needed. Works within the Claude Agent SDK's existing `query()` + `resume` mechanism.
-26. **Widget-based space layouts** — spaces use a configurable widget layout instead of hardcoded views. Templates provide defaults. Layouts editable via settings panel and agent MCP tools. Core widgets: to-do panel, kanban board, data table, conversation sidebar. Agents can read, modify, and fully redesign space layouts.
+26. **Widget-based space layouts** — spaces use a configurable widget layout instead of hardcoded views. Templates provide defaults. Layouts editable via settings panel and agent MCP tools. Core widgets: task list panel, kanban board, data table, conversation sidebar. Agents can read, modify, and fully redesign space layouts.
 
 ### P2 — Valuable, build when core is solid
 
@@ -364,7 +373,7 @@ Accessible from Home or Settings. Shows:
 ### P3 — Future
 
 41. **Remote access** — interact via Discord, Slack, or web interface from any device.
-42. **Mobile access** — view to-dos, board, and conversations from phone.
+42. **Mobile access** — view tasks, board, and conversations from phone.
 43. **Multi-user** — share spaces, assign tasks to people.
 44. **Hybrid memory search** — vector embeddings + FTS5 keyword search with temporal decay and diversity reranking. Requires embedding infrastructure.
 
@@ -380,19 +389,20 @@ Accessible from Home or Settings. Shows:
 - CLI for power-user operations
 
 ### Changed
-- **Projects → Spaces** — broader concept. A space can be a project, a knowledge base, a CRM, or a simple to-do list. Not everything is a "project."
-- **Task types eliminated** — no more manual/quick/standard distinction. Items are to-dos (lightweight) or board items (tasks/records).
+- **Projects → Spaces** — broader concept. A space can be a project, a knowledge base, a CRM, or a simple task list. Not everything is a "project."
+- **Task types eliminated** — no more manual/quick/standard distinction. All tracked work is an item (task or record). Views (list, kanban, table) are presentation of the same data — no separate "to-do" entity.
 - **Odin becomes the front door** — always-visible AI chat input running on Haiku. Replaces the command bar and the old orchestrator. One interaction model, no memorized commands.
-- **To-dos are universal** — every space has a lightweight checklist. Board is optional. Cross-space to-do aggregation on Home.
-- **Board is optional per space** — knowledge-base spaces don't need Kanban columns.
+- **Items are universal** — every space has items, viewable as checklist (list view), kanban, or table. Board (stages) is optional. Cross-space task aggregation on Home.
+- **Board is optional per space** — knowledge-base and simple spaces show items in list view without stages.
 - **Model selection** — Haiku for Odin, Sonnet default for agents, Opus on demand. Per-agent defaults, per-conversation overrides.
 - **Conversations become first-class** — lifecycle management (open, close with summary, checkpoint, reopen with context).
 - **Data sources** — spaces connect to Google Drive, repos, and API integrations. Not just local files.
 - **Permission model rebuilt** — granular per-agent, per-resource, per-operation with three grant levels. Inline and notification approval flows.
-- **Home redesigned** — cross-space to-dos, attention items, Odin chat, active agents.
+- **Home redesigned** — cross-space task list, attention items, Odin chat, active agents.
 
 ### Removed
 - Manual/Quick/Standard task type distinction
+- Separate to-do entity (unified into items with views)
 - Command bar (replaced by Odin chat)
 - Fast path regex pattern matching (replaced by Odin on Haiku)
 - Structured output parsing (TaskResult JSON schema)
@@ -405,14 +415,14 @@ Accessible from Home or Settings. Shows:
 ## Resolved Decisions
 
 1. **Spaces, not projects** — broader abstraction. Templates for quick creation (Project, CRM, Knowledge Base, Simple).
-2. **Two item weights** — to-dos (lightweight, every space, default) and board items (heavier, optional board). Promotion path from to-do to board item. Default everything to to-dos.
+2. **Unified item model** — all tracked work is an item (task or record) in a single table. Views (list/kanban/table) are presentation, not data model. Items can be as lightweight as a checkbox title or as structured as a multi-stage deliverable. No separate "to-do" entity, no promotion step. Item linking via many-to-many `item_links` table for associating tasks with records, tasks with tasks, etc. Structural hierarchy via `parent_item_id` for sub-tasks and sub-records.
 3. **Odin as front door** — always-visible Haiku-powered chat. No separate command bar. One interaction model. Has its own memory namespace and session lifecycle.
 4. **Model stack** — Haiku for Odin, Sonnet for agents (default), Opus on demand. Per-conversation override.
 5. **Board is optional** — per-space setting. Knowledge bases don't need Kanban.
 6. **Agent creation** — UI form at P0. Agent Builder (conversational creation via Odin) at P1.
 7. **Document storage** — Google Drive as primary (P1), local as fallback. Metadata indexing for search. FTS5 for full-text search (P1).
 8. **Background monitoring** — status indicator + expandable log stream.
-9. **Cross-space visibility** — Home shows attention items first, then active agents, then space list, then to-dos. First-run experience with onboarding prompts.
+9. **Cross-space visibility** — Home shows attention items first, then active agents, then space list, then open tasks. First-run experience with onboarding prompts.
 10. **Remote access** — P3. Architecture is API-first.
 11. **Permissions model** — granular (resource x operation x grant level). Inline approval in active conversations, Attention Items on Home for background/automation. No timeout anywhere — agents wait indefinitely. Pending approvals always visible on Home dashboard with badge count.
 12. **Execution model** — Claude Max subscription via Claude Agent SDK. Upgrade to v0.1.51+. Use `query()` with `resume`, not `ClaudeSDKClient`.
@@ -420,7 +430,7 @@ Accessible from Home or Settings. Shows:
 14. **Manual daily backup** for P0. Automated daily backup is P1.
 15. **Automations** — cron-based (P1), event-based (P2). Proactive system is a set of pre-configured automations, not a separate layer. Automation dashboard for visibility. Max 2 concurrent automation sessions; user conversations take priority. Missed-run detection on startup.
 16. **Crash recovery** — on startup, interrupted conversations are detected and surfaced. User can reopen (attempts SDK resume) or close them.
-17. **Item provenance** — to-dos and board items track `source_conversation_id` so users can trace where work came from.
+17. **Item provenance** — items track `source_conversation_id` so users can trace where work came from.
 18. **SSE architecture** — single multiplexed endpoint (`/api/v1/events`) for all streaming. Frontend demultiplexes by source ID.
 19. **Four-tier memory** — semantic (facts), episodic (summaries), working (board state), procedural (behavioral rules). Procedural memory is injected into the system prompt section with high priority. Based on the CoALA cognitive memory framework adopted independently by Letta/MemGPT, LangMem, and CrewAI.
 20. **Agent-managed memory** — agents have explicit tools to save, update, and delete facts. System prompts instruct agents to use these proactively. Pre-compaction flush makes fact saving mandatory before any context compression.
@@ -431,7 +441,7 @@ Accessible from Home or Settings. Shows:
 25. **Cross-space search** — conversation and summary search tools accept optional `space_id`. Omitting it searches all spaces the agent has access to (scoped by `agent_spaces`). FTS5 replaces LIKE matching for all text search.
 26. **Mid-task steering** — background delegation uses a managed turn loop where the session manager auto-continues between agent turns. A steering queue accepts user corrections, which are injected at the next turn boundary via the SDK's `query(resume=session_id)` mechanism. No mid-tool-call injection required (the SDK doesn't support this). Agent system prompts instruct incremental work, creating natural turn boundaries for steering and progress tracking.
 27. **Workflow tracking** — background tasks track step-level progress with parent-child hierarchies. Failed tasks show where they stopped. Audit detects stale (>10min queued) and stuck (>30min running) tasks.
-28. **Space layouts** — widget-based, config-driven. Layout stored per space as an ordered list of widget configurations in a `space_widgets` table. Templates provide defaults that match the current fixed layouts. Agents have MCP tools to modify layouts. Core widgets (kanban, table, to-do, conversations) in P1. Extended widgets (charts, data feeds, stat cards) in P2 alongside data source integrations. Settings-panel layout editor first; drag-and-drop widget repositioning within the space view is a later enhancement.
+28. **Space layouts** — widget-based, config-driven. Layout stored per space as an ordered list of widget configurations in a `space_widgets` table. Templates provide defaults that match the current fixed layouts. Agents have MCP tools to modify layouts. Core widgets (kanban, table, task list, conversations) in P1. Extended widgets (charts, data feeds, stat cards) in P2 alongside data source integrations. Settings-panel layout editor first; drag-and-drop widget repositioning within the space view is a later enhancement.
 
 ---
 
@@ -440,7 +450,7 @@ Accessible from Home or Settings. Shows:
 1. **API-first** — every capability is accessible via API. Future clients plug in without rearchitecting.
 2. **Conversations are the core abstraction** — the system is built around persistent, context-rich conversations that produce work as a side effect.
 3. **Context is assembled, not manually fed** — agents get what they need automatically. Token budgets, relevance ranking, summarization, and on-demand search for historical context.
-4. **One interaction model** — Odin chat is the universal entry point. No memorized commands, no mode switching. Conversations for deep work. To-dos and boards for tracking.
+4. **One interaction model** — Odin chat is the universal entry point. No memorized commands, no mode switching. Conversations for deep work. Items (list, board, table) for tracking.
 5. **Progressive autonomy** — agents start supervised, earn trust, get more autonomy.
 6. **Storage is external** — Google Drive for documents, SQLite for structured data, repos for code, APIs for live data. OpenLoop is the orchestration layer.
 7. **Claude Max, not API** — all agent execution via Claude Agent SDK under Max subscription. Haiku for Odin, Sonnet/Opus for agents.

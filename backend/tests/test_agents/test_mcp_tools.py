@@ -10,14 +10,18 @@ import pytest
 from sqlalchemy.orm import Session
 
 from backend.openloop.agents.mcp_tools import (
-    complete_todo,
+    archive_item,
+    complete_task,
     create_item,
-    create_todo,
+    create_task,
     get_board_state,
+    get_linked_items,
+    link_items,
     list_spaces,
-    list_todos,
+    list_tasks,
     move_item,
     read_memory,
+    unlink_items,
     write_memory,
 )
 from backend.openloop.services import space_service
@@ -39,61 +43,71 @@ def _make_space(db: Session, name: str = "Test Space") -> str:
 
 
 # ---------------------------------------------------------------------------
-# To-do operations
+# Task operations
 # ---------------------------------------------------------------------------
 
 
-class TestCreateTodo:
+class TestCreateTask:
     @pytest.mark.asyncio
-    async def test_create_todo_basic(self, db_session: Session):
+    async def test_create_task_basic(self, db_session: Session):
         space_id = _make_space(db_session)
-        result = _parse(await create_todo(space_id, "Buy groceries", _db=db_session))
+        result = _parse(await create_task(space_id, "Buy groceries", _db=db_session))
         assert "result" in result
         assert result["result"]["title"] == "Buy groceries"
         assert result["result"]["space_id"] == space_id
         assert result["result"]["id"]
 
     @pytest.mark.asyncio
-    async def test_create_todo_with_due_date(self, db_session: Session):
+    async def test_create_task_with_due_date(self, db_session: Session):
         space_id = _make_space(db_session)
-        result = _parse(await create_todo(space_id, "Deadline task", "2025-06-15", _db=db_session))
+        result = _parse(await create_task(space_id, "Deadline task", "2025-06-15", _db=db_session))
         assert result["result"]["due_date"] == "2025-06-15T00:00:00"
 
     @pytest.mark.asyncio
-    async def test_create_todo_bad_space(self, db_session: Session):
-        result = _parse(await create_todo("nonexistent-id", "Orphan", _db=db_session))
+    async def test_create_task_bad_space(self, db_session: Session):
+        result = _parse(await create_task("nonexistent-id", "Orphan", _db=db_session))
         assert result["is_error"] is True
         assert "not found" in result["error"].lower()
 
 
-class TestListTodos:
+class TestCompleteTask:
     @pytest.mark.asyncio
-    async def test_list_todos_empty(self, db_session: Session):
+    async def test_complete_task(self, db_session: Session):
         space_id = _make_space(db_session)
-        result = _parse(await list_todos(space_id=space_id, _db=db_session))
+        r = _parse(await create_task(space_id, "Finish me", _db=db_session))
+        task_id = r["result"]["id"]
+        result = _parse(await complete_task(task_id, _db=db_session))
+        assert result["result"]["is_done"] is True
+
+
+class TestListTasks:
+    @pytest.mark.asyncio
+    async def test_list_tasks_empty(self, db_session: Session):
+        space_id = _make_space(db_session)
+        result = _parse(await list_tasks(space_id=space_id, _db=db_session))
         assert result["result"] == []
 
     @pytest.mark.asyncio
-    async def test_list_todos_with_items(self, db_session: Session):
+    async def test_list_tasks_with_items(self, db_session: Session):
         space_id = _make_space(db_session)
-        await create_todo(space_id, "Todo A", _db=db_session)
-        await create_todo(space_id, "Todo B", _db=db_session)
-        result = _parse(await list_todos(space_id=space_id, _db=db_session))
+        await create_task(space_id, "Task A", _db=db_session)
+        await create_task(space_id, "Task B", _db=db_session)
+        result = _parse(await list_tasks(space_id=space_id, _db=db_session))
         assert len(result["result"]) == 2
 
     @pytest.mark.asyncio
-    async def test_list_todos_filter_done(self, db_session: Session):
+    async def test_list_tasks_filter_done(self, db_session: Session):
         space_id = _make_space(db_session)
-        r = _parse(await create_todo(space_id, "Will be done", _db=db_session))
-        todo_id = r["result"]["id"]
-        await complete_todo(todo_id, _db=db_session)
+        r = _parse(await create_task(space_id, "Will be done", _db=db_session))
+        task_id = r["result"]["id"]
+        await complete_task(task_id, _db=db_session)
 
         # Only pending
-        result = _parse(await list_todos(space_id=space_id, is_done="false", _db=db_session))
+        result = _parse(await list_tasks(space_id=space_id, is_done="false", _db=db_session))
         assert len(result["result"]) == 0
 
         # Only done
-        result = _parse(await list_todos(space_id=space_id, is_done="true", _db=db_session))
+        result = _parse(await list_tasks(space_id=space_id, is_done="true", _db=db_session))
         assert len(result["result"]) == 1
         assert result["result"][0]["is_done"] is True
 
@@ -239,3 +253,117 @@ class TestListSpaces:
         assert len(result["result"]) == 2
         names = {s["name"] for s in result["result"]}
         assert names == {"Space A", "Space B"}
+
+
+# ---------------------------------------------------------------------------
+# Link and archive tools
+# ---------------------------------------------------------------------------
+
+
+class TestLinkItems:
+    @pytest.mark.asyncio
+    async def test_link_items(self, db_session: Session):
+        space_id = _make_space(db_session)
+        r1 = _parse(await create_item(space_id, "Item A", _db=db_session))
+        r2 = _parse(await create_item(space_id, "Item B", _db=db_session))
+
+        result = _parse(
+            await link_items(r1["result"]["id"], r2["result"]["id"], _db=db_session)
+        )
+        assert "result" in result
+        assert result["result"]["source_item_id"] == r1["result"]["id"]
+        assert result["result"]["target_item_id"] == r2["result"]["id"]
+        assert result["result"]["link_type"] == "related_to"
+
+    @pytest.mark.asyncio
+    async def test_link_items_custom_type(self, db_session: Session):
+        space_id = _make_space(db_session)
+        r1 = _parse(await create_item(space_id, "A", _db=db_session))
+        r2 = _parse(await create_item(space_id, "B", _db=db_session))
+
+        result = _parse(
+            await link_items(r1["result"]["id"], r2["result"]["id"], "blocks", _db=db_session)
+        )
+        assert result["result"]["link_type"] == "blocks"
+
+    @pytest.mark.asyncio
+    async def test_link_items_duplicate(self, db_session: Session):
+        space_id = _make_space(db_session)
+        r1 = _parse(await create_item(space_id, "A", _db=db_session))
+        r2 = _parse(await create_item(space_id, "B", _db=db_session))
+
+        await link_items(r1["result"]["id"], r2["result"]["id"], _db=db_session)
+        result = _parse(
+            await link_items(r1["result"]["id"], r2["result"]["id"], _db=db_session)
+        )
+        assert result["is_error"] is True
+
+
+class TestUnlinkItems:
+    @pytest.mark.asyncio
+    async def test_unlink_items(self, db_session: Session):
+        space_id = _make_space(db_session)
+        r1 = _parse(await create_item(space_id, "A", _db=db_session))
+        r2 = _parse(await create_item(space_id, "B", _db=db_session))
+
+        link_result = _parse(
+            await link_items(r1["result"]["id"], r2["result"]["id"], _db=db_session)
+        )
+        link_id = link_result["result"]["id"]
+
+        result = _parse(await unlink_items(link_id, _db=db_session))
+        assert result["result"]["deleted"] == link_id
+
+    @pytest.mark.asyncio
+    async def test_unlink_nonexistent(self, db_session: Session):
+        result = _parse(await unlink_items("bad-id", _db=db_session))
+        assert result["is_error"] is True
+
+
+class TestGetLinkedItems:
+    @pytest.mark.asyncio
+    async def test_get_linked_items(self, db_session: Session):
+        space_id = _make_space(db_session)
+        r1 = _parse(await create_item(space_id, "A", _db=db_session))
+        r2 = _parse(await create_item(space_id, "B", _db=db_session))
+
+        await link_items(r1["result"]["id"], r2["result"]["id"], _db=db_session)
+
+        result = _parse(await get_linked_items(r1["result"]["id"], _db=db_session))
+        assert len(result["result"]) == 1
+        assert result["result"][0]["item_id"] == r2["result"]["id"]
+        assert result["result"][0]["title"] == "B"
+
+    @pytest.mark.asyncio
+    async def test_get_linked_items_empty(self, db_session: Session):
+        space_id = _make_space(db_session)
+        r1 = _parse(await create_item(space_id, "Alone", _db=db_session))
+
+        result = _parse(await get_linked_items(r1["result"]["id"], _db=db_session))
+        assert result["result"] == []
+
+
+class TestArchiveItem:
+    @pytest.mark.asyncio
+    async def test_archive_item(self, db_session: Session):
+        space_id = _make_space(db_session)
+        r = _parse(await create_item(space_id, "To Archive", _db=db_session))
+        item_id = r["result"]["id"]
+
+        result = _parse(await archive_item(item_id, _db=db_session))
+        assert result["result"]["archived"] is True
+
+    @pytest.mark.asyncio
+    async def test_archive_item_already_archived(self, db_session: Session):
+        space_id = _make_space(db_session)
+        r = _parse(await create_item(space_id, "Already", _db=db_session))
+        item_id = r["result"]["id"]
+
+        await archive_item(item_id, _db=db_session)
+        result = _parse(await archive_item(item_id, _db=db_session))
+        assert result["is_error"] is True
+
+    @pytest.mark.asyncio
+    async def test_archive_item_not_found(self, db_session: Session):
+        result = _parse(await archive_item("nonexistent", _db=db_session))
+        assert result["is_error"] is True

@@ -184,7 +184,7 @@ export function PermissionMatrix({ agent }: PermissionMatrixProps) {
                     label="Add Resource Pattern"
                     value={newResource}
                     onChange={(e) => setNewResource(e.target.value)}
-                    placeholder="e.g. spaces.*, todos.*, items.*"
+                    placeholder="e.g. spaces.*, items.*, external/*"
                   />
                 </div>
                 <Button type="submit" size="sm" disabled={!newResource.trim() || isMutating}>

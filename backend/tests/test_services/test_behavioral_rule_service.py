@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from backend.openloop.services import agent_service, behavioral_rule_service
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

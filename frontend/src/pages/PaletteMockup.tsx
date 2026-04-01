@@ -189,7 +189,7 @@ function AppPreview({ c, font }: { c: Colors; font: string }) {
           {/* Stats row */}
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
             {[
-              { label: 'Open Todos', value: '12', color: c.accent },
+              { label: 'Open Tasks', value: '12', color: c.accent },
               { label: 'Active Agents', value: '2', color: c.success },
               { label: 'Pending Approvals', value: '1', color: c.warning },
             ].map((stat) => (
@@ -274,9 +274,9 @@ function AppPreview({ c, font }: { c: Colors; font: string }) {
             </div>
           </div>
 
-          {/* Todo list preview */}
+          {/* Task list preview */}
           <div style={{ marginTop: 20 }}>
-            <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 600, marginBottom: 8, textTransform: 'uppercase' as const, letterSpacing: '0.04em' }}>Todos</div>
+            <div style={{ fontSize: 12, color: c.textMuted, fontWeight: 600, marginBottom: 8, textTransform: 'uppercase' as const, letterSpacing: '0.04em' }}>Tasks</div>
             <div style={{ background: c.surface, border: `1px solid ${c.border}`, borderRadius: 8, overflow: 'hidden' }}>
               {[
                 { text: 'Review PR #42 — auth middleware', done: false, due: 'Today' },

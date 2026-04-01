@@ -24,14 +24,16 @@ def test_create_space_crm(db_session: Session):
 
 def test_create_space_knowledge_base(db_session: Session):
     space = space_service.create_space(db_session, name="Wiki", template="knowledge_base")
-    assert space.board_enabled is False
-    assert space.default_view is None
-    assert space.board_columns is None
+    assert space.board_enabled is True
+    assert space.default_view == "list"
+    assert space.board_columns == ["todo", "in_progress", "done"]
 
 
 def test_create_space_simple(db_session: Session):
     space = space_service.create_space(db_session, name="Personal", template="simple")
-    assert space.board_enabled is False
+    assert space.board_enabled is True
+    assert space.default_view == "list"
+    assert space.board_columns == ["todo", "in_progress", "done"]
 
 
 def test_create_space_with_description(db_session: Session):

@@ -1789,7 +1789,7 @@
             }
           },
           {
-            "name": "parent_record_id",
+            "name": "parent_item_id",
             "in": "query",
             "required": false,
             "schema": {
@@ -1801,7 +1801,23 @@
                   "type": "null"
                 }
               ],
-              "title": "Parent Record Id"
+              "title": "Parent Item Id"
+            }
+          },
+          {
+            "name": "is_done",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Is Done"
             }
           },
           {
@@ -2119,21 +2135,21 @@
         }
       }
     },
-    "/api/v1/items/{record_id}/link-todo": {
+    "/api/v1/items/{item_id}/links": {
       "post": {
         "tags": [
           "items"
         ],
-        "summary": "Link Todo To Record",
-        "operationId": "link_todo_to_record_api_v1_items__record_id__link_todo_post",
+        "summary": "Create Item Link",
+        "operationId": "create_item_link_api_v1_items__item_id__links_post",
         "parameters": [
           {
-            "name": "record_id",
+            "name": "item_id",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Record Id"
+              "title": "Item Id"
             }
           }
         ],
@@ -2142,21 +2158,125 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/LinkTodoRequest"
+                "$ref": "#/components/schemas/ItemLinkCreate"
               }
             }
           }
         },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ItemLinkResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "items"
+        ],
+        "summary": "List Item Links",
+        "operationId": "list_item_links_api_v1_items__item_id__links_get",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "link_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Link Type"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TodoResponse"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ItemLinkResponse"
+                  },
+                  "title": "Response List Item Links Api V1 Items  Item Id  Links Get"
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/items/{item_id}/links/{link_id}": {
+      "delete": {
+        "tags": [
+          "items"
+        ],
+        "summary": "Delete Item Link",
+        "operationId": "delete_item_link_api_v1_items__item_id__links__link_id__delete",
+        "parameters": [
+          {
+            "name": "item_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Item Id"
+            }
+          },
+          {
+            "name": "link_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Link Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -3279,313 +3399,6 @@
         }
       }
     },
-    "/api/v1/todos": {
-      "post": {
-        "tags": [
-          "todos"
-        ],
-        "summary": "Create Todo",
-        "operationId": "create_todo_api_v1_todos_post",
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TodoCreate"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TodoResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "get": {
-        "tags": [
-          "todos"
-        ],
-        "summary": "List Todos",
-        "operationId": "list_todos_api_v1_todos_get",
-        "parameters": [
-          {
-            "name": "space_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Space Id"
-            }
-          },
-          {
-            "name": "is_done",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "title": "Is Done"
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "maximum": 200,
-              "default": 50,
-              "title": "Limit"
-            }
-          },
-          {
-            "name": "offset",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "title": "Offset"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TodoResponse"
-                  },
-                  "title": "Response List Todos Api V1 Todos Get"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/todos/{todo_id}": {
-      "get": {
-        "tags": [
-          "todos"
-        ],
-        "summary": "Get Todo",
-        "operationId": "get_todo_api_v1_todos__todo_id__get",
-        "parameters": [
-          {
-            "name": "todo_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Todo Id"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TodoResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "patch": {
-        "tags": [
-          "todos"
-        ],
-        "summary": "Update Todo",
-        "operationId": "update_todo_api_v1_todos__todo_id__patch",
-        "parameters": [
-          {
-            "name": "todo_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Todo Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TodoUpdate"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/TodoResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "tags": [
-          "todos"
-        ],
-        "summary": "Delete Todo",
-        "operationId": "delete_todo_api_v1_todos__todo_id__delete",
-        "parameters": [
-          {
-            "name": "todo_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Todo Id"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Successful Response"
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/todos/{todo_id}/promote": {
-      "post": {
-        "tags": [
-          "todos"
-        ],
-        "summary": "Promote Todo",
-        "operationId": "promote_todo_api_v1_todos__todo_id__promote_post",
-        "parameters": [
-          {
-            "name": "todo_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Todo Id"
-            }
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/TodoPromote"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ItemResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -4080,9 +3893,9 @@
             "type": "integer",
             "title": "Total Spaces"
           },
-          "open_todo_count": {
+          "open_task_count": {
             "type": "integer",
-            "title": "Open Todo Count"
+            "title": "Open Task Count"
           },
           "pending_approvals": {
             "type": "integer",
@@ -4100,7 +3913,7 @@
         "type": "object",
         "required": [
           "total_spaces",
-          "open_todo_count",
+          "open_task_count",
           "pending_approvals",
           "active_conversations",
           "unread_notifications"
@@ -4278,7 +4091,8 @@
         "type": "string",
         "enum": [
           "board",
-          "table"
+          "table",
+          "list"
         ],
         "title": "DefaultView"
       },
@@ -4702,7 +4516,7 @@
             ],
             "title": "Assigned Agent Id"
           },
-          "parent_record_id": {
+          "parent_item_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -4711,11 +4525,16 @@
                 "type": "null"
               }
             ],
-            "title": "Parent Record Id"
+            "title": "Parent Item Id"
           },
           "is_agent_task": {
             "type": "boolean",
             "title": "Is Agent Task",
+            "default": false
+          },
+          "is_done": {
+            "type": "boolean",
+            "title": "Is Done",
             "default": false
           }
         },
@@ -4784,6 +4603,58 @@
         ],
         "title": "ItemEventResponse"
       },
+      "ItemLinkCreate": {
+        "properties": {
+          "target_item_id": {
+            "type": "string",
+            "title": "Target Item Id"
+          },
+          "link_type": {
+            "type": "string",
+            "title": "Link Type",
+            "default": "related_to"
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_item_id"
+        ],
+        "title": "ItemLinkCreate"
+      },
+      "ItemLinkResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "source_item_id": {
+            "type": "string",
+            "title": "Source Item Id"
+          },
+          "target_item_id": {
+            "type": "string",
+            "title": "Target Item Id"
+          },
+          "link_type": {
+            "type": "string",
+            "title": "Link Type"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "source_item_id",
+          "target_item_id",
+          "link_type",
+          "created_at"
+        ],
+        "title": "ItemLinkResponse"
+      },
       "ItemMove": {
         "properties": {
           "stage": {
@@ -4814,6 +4685,10 @@
           "is_agent_task": {
             "type": "boolean",
             "title": "Is Agent Task"
+          },
+          "is_done": {
+            "type": "boolean",
+            "title": "Is Done"
           },
           "title": {
             "type": "string",
@@ -4868,7 +4743,7 @@
             ],
             "title": "Custom Fields"
           },
-          "parent_record_id": {
+          "parent_item_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -4877,7 +4752,7 @@
                 "type": "null"
               }
             ],
-            "title": "Parent Record Id"
+            "title": "Parent Item Id"
           },
           "assigned_agent_id": {
             "anyOf": [
@@ -4938,13 +4813,14 @@
           "space_id",
           "item_type",
           "is_agent_task",
+          "is_done",
           "title",
           "description",
           "stage",
           "priority",
           "sort_position",
           "custom_fields",
-          "parent_record_id",
+          "parent_item_id",
           "assigned_agent_id",
           "due_date",
           "created_by",
@@ -5044,7 +4920,7 @@
             ],
             "title": "Assigned Agent Id"
           },
-          "parent_record_id": {
+          "parent_item_id": {
             "anyOf": [
               {
                 "type": "string"
@@ -5053,7 +4929,7 @@
                 "type": "null"
               }
             ],
-            "title": "Parent Record Id"
+            "title": "Parent Item Id"
           },
           "is_agent_task": {
             "anyOf": [
@@ -5065,6 +4941,17 @@
               }
             ],
             "title": "Is Agent Task"
+          },
+          "is_done": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Done"
           }
         },
         "type": "object",
@@ -5101,19 +4988,6 @@
           "widgets"
         ],
         "title": "LayoutResponse"
-      },
-      "LinkTodoRequest": {
-        "properties": {
-          "todo_id": {
-            "type": "string",
-            "title": "Todo Id"
-          }
-        },
-        "type": "object",
-        "required": [
-          "todo_id"
-        ],
-        "title": "LinkTodoRequest"
       },
       "MemoryCreate": {
         "properties": {
@@ -5643,19 +5517,19 @@
             "type": "array",
             "title": "Child Records"
           },
-          "linked_todos": {
+          "linked_items": {
             "items": {
-              "$ref": "#/components/schemas/TodoResponse"
+              "$ref": "#/components/schemas/ItemResponse"
             },
             "type": "array",
-            "title": "Linked Todos"
+            "title": "Linked Items"
           }
         },
         "type": "object",
         "required": [
           "record",
           "child_records",
-          "linked_todos"
+          "linked_items"
         ],
         "title": "RecordChildrenResponse"
       },
@@ -6078,203 +5952,6 @@
           "created_at"
         ],
         "title": "SummaryResponse"
-      },
-      "TodoCreate": {
-        "properties": {
-          "space_id": {
-            "type": "string",
-            "title": "Space Id"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "due_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Due Date"
-          }
-        },
-        "type": "object",
-        "required": [
-          "space_id",
-          "title"
-        ],
-        "title": "TodoCreate"
-      },
-      "TodoPromote": {
-        "properties": {
-          "stage": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Stage"
-          }
-        },
-        "type": "object",
-        "title": "TodoPromote"
-      },
-      "TodoResponse": {
-        "properties": {
-          "id": {
-            "type": "string",
-            "title": "Id"
-          },
-          "space_id": {
-            "type": "string",
-            "title": "Space Id"
-          },
-          "title": {
-            "type": "string",
-            "title": "Title"
-          },
-          "is_done": {
-            "type": "boolean",
-            "title": "Is Done"
-          },
-          "due_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Due Date"
-          },
-          "sort_position": {
-            "type": "number",
-            "title": "Sort Position"
-          },
-          "created_by": {
-            "type": "string",
-            "title": "Created By"
-          },
-          "source_conversation_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Conversation Id"
-          },
-          "promoted_to_item_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Promoted To Item Id"
-          },
-          "record_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Record Id"
-          },
-          "created_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Created At"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time",
-            "title": "Updated At"
-          }
-        },
-        "type": "object",
-        "required": [
-          "id",
-          "space_id",
-          "title",
-          "is_done",
-          "due_date",
-          "sort_position",
-          "created_by",
-          "source_conversation_id",
-          "promoted_to_item_id",
-          "record_id",
-          "created_at",
-          "updated_at"
-        ],
-        "title": "TodoResponse"
-      },
-      "TodoUpdate": {
-        "properties": {
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Title"
-          },
-          "is_done": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Is Done"
-          },
-          "due_date": {
-            "anyOf": [
-              {
-                "type": "string",
-                "format": "date-time"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Due Date"
-          },
-          "sort_position": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sort Position"
-          }
-        },
-        "type": "object",
-        "title": "TodoUpdate"
       },
       "ValidationError": {
         "properties": {

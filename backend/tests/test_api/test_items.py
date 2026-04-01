@@ -255,3 +255,116 @@ def test_get_item_events_after_archive(client: TestClient):
 def test_get_item_events_not_found(client: TestClient):
     resp = client.get("/api/v1/items/nonexistent/events")
     assert resp.status_code == 404
+
+
+# ---- is_done filter ----
+
+
+def test_list_items_filter_by_is_done(client: TestClient):
+    space = _create_space(client)
+    client.post("/api/v1/items", json={"space_id": space["id"], "title": "Open"})
+    create_resp = client.post(
+        "/api/v1/items",
+        json={"space_id": space["id"], "title": "Done", "is_done": True},
+    )
+    assert create_resp.status_code == 201
+
+    resp = client.get("/api/v1/items?is_done=false")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["title"] == "Open"
+
+    resp = client.get("/api/v1/items?is_done=true")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+    assert data[0]["title"] == "Done"
+
+
+def test_create_item_with_is_done(client: TestClient):
+    space = _create_space(client)
+    resp = client.post(
+        "/api/v1/items",
+        json={"space_id": space["id"], "title": "Pre-done", "is_done": True},
+    )
+    assert resp.status_code == 201
+    assert resp.json()["is_done"] is True
+
+
+# ---- Link endpoints ----
+
+
+def test_create_item_link(client: TestClient):
+    space = _create_space(client)
+    item1 = client.post("/api/v1/items", json={"space_id": space["id"], "title": "Item A"}).json()
+    item2 = client.post("/api/v1/items", json={"space_id": space["id"], "title": "Item B"}).json()
+
+    resp = client.post(
+        f"/api/v1/items/{item1['id']}/links",
+        json={"target_item_id": item2["id"]},
+    )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["source_item_id"] == item1["id"]
+    assert data["target_item_id"] == item2["id"]
+    assert data["link_type"] == "related_to"
+
+
+def test_list_item_links(client: TestClient):
+    space = _create_space(client)
+    item1 = client.post("/api/v1/items", json={"space_id": space["id"], "title": "Item A"}).json()
+    item2 = client.post("/api/v1/items", json={"space_id": space["id"], "title": "Item B"}).json()
+
+    client.post(
+        f"/api/v1/items/{item1['id']}/links",
+        json={"target_item_id": item2["id"]},
+    )
+
+    resp = client.get(f"/api/v1/items/{item1['id']}/links")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data) == 1
+
+    # Bidirectional: item2 should also see the link
+    resp = client.get(f"/api/v1/items/{item2['id']}/links")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 1
+
+
+def test_delete_item_link(client: TestClient):
+    space = _create_space(client)
+    item1 = client.post("/api/v1/items", json={"space_id": space["id"], "title": "Item A"}).json()
+    item2 = client.post("/api/v1/items", json={"space_id": space["id"], "title": "Item B"}).json()
+
+    link_resp = client.post(
+        f"/api/v1/items/{item1['id']}/links",
+        json={"target_item_id": item2["id"]},
+    )
+    link_id = link_resp.json()["id"]
+
+    resp = client.delete(f"/api/v1/items/{item1['id']}/links/{link_id}")
+    assert resp.status_code == 204
+
+    # Verify gone
+    resp = client.get(f"/api/v1/items/{item1['id']}/links")
+    assert resp.status_code == 200
+    assert len(resp.json()) == 0
+
+
+def test_create_item_link_duplicate(client: TestClient):
+    space = _create_space(client)
+    item1 = client.post("/api/v1/items", json={"space_id": space["id"], "title": "A"}).json()
+    item2 = client.post("/api/v1/items", json={"space_id": space["id"], "title": "B"}).json()
+
+    client.post(f"/api/v1/items/{item1['id']}/links", json={"target_item_id": item2["id"]})
+    resp = client.post(f"/api/v1/items/{item1['id']}/links", json={"target_item_id": item2["id"]})
+    assert resp.status_code == 409
+
+
+def test_create_item_link_self(client: TestClient):
+    space = _create_space(client)
+    item = client.post("/api/v1/items", json={"space_id": space["id"], "title": "Self"}).json()
+
+    resp = client.post(f"/api/v1/items/{item['id']}/links", json={"target_item_id": item["id"]})
+    assert resp.status_code == 422

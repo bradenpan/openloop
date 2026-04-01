@@ -4,15 +4,15 @@ from sqlalchemy.orm import Session
 from backend.openloop.api.schemas import (
     ItemCreate,
     ItemEventResponse,
+    ItemLinkCreate,
+    ItemLinkResponse,
     ItemMove,
     ItemResponse,
     ItemUpdate,
-    LinkTodoRequest,
     RecordChildrenResponse,
 )
-from backend.openloop.api.schemas.todos import TodoResponse
 from backend.openloop.database import get_db
-from backend.openloop.services import item_service
+from backend.openloop.services import item_link_service, item_service
 
 router = APIRouter(prefix="/api/v1/items", tags=["items"])
 
@@ -30,8 +30,9 @@ def create_item(body: ItemCreate, db: Session = Depends(get_db)) -> ItemResponse
         custom_fields=body.custom_fields,
         due_date=body.due_date,
         assigned_agent_id=body.assigned_agent_id,
-        parent_record_id=body.parent_record_id,
+        parent_item_id=body.parent_item_id,
         is_agent_task=body.is_agent_task,
+        is_done=body.is_done,
     )
     return ItemResponse.model_validate(item)
 
@@ -41,7 +42,8 @@ def list_items(
     space_id: str | None = Query(None),
     stage: str | None = Query(None),
     item_type: str | None = Query(None),
-    parent_record_id: str | None = Query(None),
+    parent_item_id: str | None = Query(None),
+    is_done: bool | None = Query(None),
     archived: bool = Query(False),
     sort_by: str | None = Query(None),
     sort_order: str = Query("asc"),
@@ -54,7 +56,8 @@ def list_items(
         space_id=space_id,
         stage=stage,
         item_type=item_type,
-        parent_record_id=parent_record_id,
+        parent_item_id=parent_item_id,
+        is_done=is_done,
         archived=archived,
         sort_by=sort_by,
         sort_order=sort_order,
@@ -95,16 +98,27 @@ def get_record_children(item_id: str, db: Session = Depends(get_db)) -> RecordCh
     return RecordChildrenResponse(
         record=ItemResponse.model_validate(result["record"]),
         child_records=[ItemResponse.model_validate(c) for c in result["child_records"]],
-        linked_todos=[TodoResponse.model_validate(t) for t in result["linked_todos"]],
+        linked_items=[ItemResponse.model_validate(i) for i in result["linked_items"]],
     )
 
 
-@router.post("/{record_id}/link-todo", response_model=TodoResponse)
-def link_todo_to_record(
-    record_id: str, body: LinkTodoRequest, db: Session = Depends(get_db)
-) -> TodoResponse:
-    todo = item_service.link_todo_to_record(db, body.todo_id, record_id)
-    return TodoResponse.model_validate(todo)
+@router.post("/{item_id}/links", response_model=ItemLinkResponse, status_code=201)
+def create_item_link(item_id: str, body: ItemLinkCreate, db: Session = Depends(get_db)):
+    link = item_link_service.create_link(
+        db, source_item_id=item_id, target_item_id=body.target_item_id, link_type=body.link_type
+    )
+    return ItemLinkResponse.model_validate(link)
+
+
+@router.get("/{item_id}/links", response_model=list[ItemLinkResponse])
+def list_item_links(item_id: str, link_type: str | None = Query(None), db: Session = Depends(get_db)):
+    links = item_link_service.list_links_for_item(db, item_id, link_type=link_type)
+    return [ItemLinkResponse.model_validate(l) for l in links]
+
+
+@router.delete("/{item_id}/links/{link_id}", status_code=204)
+def delete_item_link(item_id: str, link_id: str, db: Session = Depends(get_db)):
+    item_link_service.delete_link(db, link_id)
 
 
 @router.get("/{item_id}/events", response_model=list[ItemEventResponse])

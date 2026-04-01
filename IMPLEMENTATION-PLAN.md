@@ -937,10 +937,128 @@ Update Agent Builder (Phase 5.1, when built) instructions to include layout desi
 
 ---
 
+## Phase 4c: Unified Item Model
+
+**Goal:** Collapse the separate `todos` and `items` tables into a single unified item model. To-dos become a view (list view) of items, not a separate entity. Add many-to-many item linking for associating tasks with records.
+**Depends on:** Phase 4b (complete).
+**Must complete before Phase 5** (agents and automations reference items, not todos).
+
+### Task 4c.1: Schema Migration + Data Migration
+**Agent:** 1 agent
+**Complexity:** Medium
+
+Database schema changes (Alembic migration):
+- Add `is_done` (boolean, default false) to `items` table
+- Rename `parent_record_id` → `parent_item_id` on `items` table (same FK to items.id). **Note: SQLite requires batch mode for column renames with FK constraints — use `op.batch_alter_table()` as established in commit `94ec432`.**
+- Create `item_links` table: `id` (UUID, PK), `source_item_id` (FK → items, indexed), `target_item_id` (FK → items, indexed), `link_type` (string, default "related_to"), `created_at`, `UNIQUE(source_item_id, target_item_id, link_type)`
+- Add `LinkType` enum to `contract/enums.py` (start with `RELATED_TO`)
+
+Data migration (within the same Alembic migration):
+- For each existing `todos` row: insert into `items` with `item_type='task'`, carrying `title`, `is_done`, `due_date`, `sort_position`, `created_by`, `source_conversation_id`. Assign `stage` based on space: board-enabled spaces → "todo" (or "done" if `is_done=true`), simple spaces → null.
+- For each todo with `record_id`: create a row in `item_links` (source=new item, target=record, type="related_to")
+- Drop `todos` table
+
+Update ORM models:
+- Remove `Todo` model class
+- Add `ItemLink` model class
+- Update `Item`: add `is_done`, rename `parent_record_id` → `parent_item_id`
+- Update `Space`: remove `todos` relationship
+
+**Acceptance criteria:** Migration runs cleanly. All existing todos preserved as items. Existing record links preserved in item_links. `todos` table dropped. ORM models reflect new schema.
+
+### Task 4c.2: Backend Service + API Refactor
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 4c.1
+
+Service layer:
+- Delete `todo_service.py`
+- Update `ItemService`:
+  - Lightweight creation path (just title + space_id → defaults everything else)
+  - `toggle_done(item_id)` with bidirectional stage sync **(tasks only — records ignore sync)**: is_done=true → stage="done", is_done=false → stage reverts to `"todo"`. In simple spaces (no board), is_done toggles without affecting stage (stays null).
+  - Stage change handler (tasks only): moving to "done" stage sets `is_done=true`, moving out sets `is_done=false`
+  - Default stage assignment on create: board-enabled spaces → `"todo"`, simple spaces → `null`
+  - Cross-space task listing: `list_items(item_type='task', is_done=false)` across spaces
+- New `item_link_service.py`: create_link, delete_link, list_links_for_item
+
+Pydantic schemas:
+- Delete all Todo schemas (`TodoCreate`, `TodoUpdate`, `TodoResponse`)
+- Add `is_done` to `ItemCreate`, `ItemUpdate`, `ItemResponse`
+- Add `ItemLinkCreate`, `ItemLinkResponse`
+- Re-export updated schemas from `__init__.py`
+
+API routes:
+- Delete todo routes file and router registration
+- Update item routes: add `is_done` filter, `linked_to` filter, lightweight creation support
+- New link routes: `POST /api/v1/items/{id}/links`, `GET /api/v1/items/{id}/links`, `DELETE /api/v1/items/{id}/links/{link_id}`
+- Update `main.py` router registration (remove todo router, add link router)
+- Update Home dashboard endpoint to query items instead of todos
+
+**Acceptance criteria:** All todo-specific code removed. Item API supports lightweight creation and is_done toggle with stage sync. Link CRUD works. Home dashboard returns cross-space tasks from items table.
+
+### Task 4c.3: MCP Tools + Context Assembler Update
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 4c.2
+
+MCP tools (`mcp_tools.py`):
+- Remove `create_todo`, `complete_todo`, `list_todos` tools
+- Update `create_item` to support lightweight creation (title + space_id minimum)
+- Add `complete_item(item_id)` convenience tool (sets is_done=true with stage sync)
+- Add `link_items(source_item_id, target_item_id, link_type?)` tool
+- Add `unlink_items(link_id)` tool
+- Add `get_linked_items(item_id, link_type?)` tool — queries both `source_item_id` and `target_item_id` columns (links are effectively undirected)
+- Add `archive_item(item_id)` tool
+- Update `list_items` to accept `is_done` filter parameter
+- Rename `get_todo_state` → `get_task_list` (queries items with is_done filter)
+- Update Odin tools: `get_cross_space_todos` → `get_cross_space_tasks` (queries items)
+
+Context assembler:
+- Remove TodoService import
+- Working memory tier reads from ItemService only
+- Update `get_todo_state` references → `get_task_list`
+
+**Acceptance criteria:** All todo MCP tools removed. New item/link tools work correctly — including `archive_item` and `get_linked_items` returning items from both source and target columns (bidirectional). Context assembler produces correct working memory from items table only.
+
+### Task 4c.4: Frontend Update
+**Agent:** 1 agent using `frontend-design` skill
+**Complexity:** Large
+**Depends on:** 4c.2
+
+- Regenerate TypeScript types (`make generate-types`)
+- Update TodoPanel component → queries `/api/v1/items?item_type=task&is_done=false&archived=false`
+- Add inline stage dropdown (editable) to each row in the list view
+- Add done-item toggle (show/hide completed items, hidden by default)
+- Clicking a list view row opens the same item detail panel used by kanban cards
+- Update Kanban: "Done" column hideable/collapsible
+- Update Home dashboard cross-space list: queries items instead of todos
+- Update seed script: all work items seeded via items table
+- Remove any todo-specific Zustand store state, React Query hooks, or API client calls
+
+**Acceptance criteria:** List view shows items with stage dropdown and due date. Done toggle works. Clicking row opens detail panel. Kanban done column hideable. Home cross-space list works. No remaining references to todo API endpoints in frontend code.
+
+### Task 4c.5: Tests + Integration Check
+**Agent:** 1 agent
+**Complexity:** Medium
+**Depends on:** 4c.3, 4c.4
+
+- Delete all todo-specific backend tests
+- Update item service tests: is_done toggle, stage sync, lightweight creation, link CRUD
+- Update item API tests: new filters, link endpoints, removed todo endpoints
+- Update MCP tool tests: removed todo tools, new link/complete tools
+- Update frontend Playwright tests: list view queries items, stage dropdown, done toggle
+- Verify `make generate-types` clean
+- Verify `make test` and `make lint` pass
+- Verify no remaining references to `/api/v1/todos` anywhere in the codebase
+
+**Acceptance criteria:** All tests pass. No regressions. No todo references in code. Verify that setting `is_done` on a record does not trigger stage sync (records are excluded from bidirectional sync).
+
+---
+
 ## Phase 5: Agent Builder + Sub-agents
 
 **Goal:** Conversational agent creation and agent-to-agent delegation.
-**Can overlap with Phases 4b and 6.**
+**Depends on:** Phase 4c (unified item model). Can overlap with Phase 6.
 
 ### Task 5.1: Agent Builder Agent
 **Agent:** 1 agent
@@ -951,6 +1069,7 @@ Update Agent Builder (Phase 5.1, when built) instructions to include layout desi
 - Agent Builder is a special system agent: exempt from "can't modify other agents" guardrail. Only the Agent Builder has these tools.
 - Integration with Odin: Odin detects agent creation requests ("I need an agent for...") and calls `open_conversation` to route to the Agent Builder
 - The Agent Builder registers the new agent in the DB and confirms to the user
+- Agent system prompt templates reference `create_item`/`complete_item`/`link_items` (unified item model), not legacy todo tools
 
 ### Task 5.2a: Sub-agent Delegation + Workflow Tracking
 **Agent:** 1 agent
@@ -1043,9 +1162,9 @@ Update Agent Builder (Phase 5.1, when built) instructions to include layout desi
 **Complexity:** Medium (upgraded from Small — includes agent prompts that produce useful results)
 **Depends on:** 6.1
 
-- "Daily To-Do Review" — agent scans all spaces for overdue to-dos, items with past due dates, and items that haven't moved. Produces a summary notification.
-- "Stale Work Check" — weekly scan for board items not updated in 7+ days. Surfaces via notification.
-- "Follow-up Reminder" — scans records with custom field `next_follow_up` past due. Surfaces via notification.
+- "Daily Task Review" — agent scans all spaces for items with `is_done=false` and past `due_date`, plus items that haven't moved stages. Uses `list_items` with appropriate filters. Produces a summary notification.
+- "Stale Work Check" — weekly scan for items not updated in 7+ days. Surfaces via notification.
+- "Follow-up Reminder" — scans records with custom field `next_follow_up` past due, plus linked tasks. Surfaces via notification.
 
 Each template includes: the automation config, the agent system prompt, and the MCP tool calls needed. Templates are pre-configured but not auto-enabled.
 
@@ -1125,7 +1244,7 @@ Phase 3b built the write-time infrastructure (dedup, caps, scoring). This task a
 - Animations and transitions (page transitions, panel slides, toast notifications, loading → loaded transitions)
 - Loading states (skeleton screens for dashboard, spinners for actions)
 - Empty states (no conversations, no items, no agents — each with helpful prompts and suggested actions)
-- Keyboard shortcuts (/ to focus Odin, Escape to close panels, n for new to-do, etc.)
+- Keyboard shortcuts (/ to focus Odin, Escape to close panels, n for new task, etc.)
 - Notification sounds / browser tab badge for pending approvals
 - Overall visual consistency pass across all pages
 - Timezone-safe date handling in item-detail-panel (use UTC `T00:00:00Z` suffix for due_date fields, normalize date parsing across components)
@@ -1136,14 +1255,16 @@ Phase 3b built the write-time infrastructure (dedup, caps, scoring). This task a
 **Complexity:** Large
 
 Full workflow Playwright tests:
-- First-run: open app → see welcome → create space → create agent → start conversation → agent creates to-do → verify on board
+- First-run: open app → see welcome → create space → create agent → start conversation → agent creates task → verify in list view and board
 - Conversation lifecycle: start → chat → close → start new → verify summary in new context
 - Odin routing: type in Odin → Odin opens space conversation → verify navigation happened
 - Background delegation: delegate task in conversation → verify status on Home → verify completion notification
 - Permission flow: agent hits approval gate → see it on Home attention items → approve → agent continues
 - Automation: create automation → manual trigger → verify run history and result
 - Board workflow: create item → drag through stages → archive → verify item_events
-- CRM workflow: create record → add custom fields → link to-do → switch to table view → verify display
+- CRM workflow: create record → add custom fields → link task via item_links → switch to table view → verify linked tasks in record detail
+- Unified item views: create task → view in list view → view on kanban → toggle done → verify hidden in both views, visible with show-done toggle → verify is_done/stage sync
+- Item links: create contact record → create task → link task to contact → verify task appears in contact detail → verify contact appears in task detail
 - Search: create content across types → global search → verify results grouped correctly
 - Backup: trigger backup → verify file created
 - **Memory lifecycle**: create facts → exceed namespace cap → verify lowest-scored archived → verify archived facts still searchable via tools
@@ -1167,11 +1288,12 @@ Full workflow Playwright tests:
 | 3b | Four-tier memory, write-time dedup, temporal facts, context safety, procedural memory | 6 | 2 |
 | 4 | CRM, table view, documents, Drive, search + cross-space FTS5 search | 7 | 4 |
 | 4b | Widget-based space layouts, layout editor, agent layout tools | 5 | 2 |
+| 4c | Unified item model — collapse todos into items, item linking, is_done/stage sync | 5 | 2 |
 | 5 | Agent Builder, sub-agents, mid-task steering, workflow tracking | 5 | 2-3 |
 | 6 | Automations + dashboard + templates | 4 | 2 |
 | 7 | Lifecycle management, summary consolidation, backup, edge cases, integration tests | 6 | 3-4 |
 
-**Total: 63 tasks across 10 phases**
+**Total: 68 tasks across 11 phases**
 
 ---
 
@@ -1223,6 +1345,10 @@ Each task should be given to an agent with:
 | 4b.2 | Layer 1: Frontend (widget renderer) | Space Layouts |
 | 4b.3 | — | Space Layouts (layout editor) |
 | 4b.4 | MCP Tools (Layout operations) | Space Layouts (agent-designed layouts) |
+| 4c.1 | Data Model: items (is_done, parent_item_id), item_links | Items (unified model, item linking) |
+| 4c.2 | Layer 2: API (item endpoints, link endpoints), Layer 3: Service Layer (ItemService, ItemLinkService) | Items (unified model) |
+| 4c.3 | MCP Tools (item operations, link operations), Layer 6: Context Assembler | Items (unified model) |
+| 4c.4 | Layer 1: Frontend (list view, kanban done toggle) | Items (views), Space View |
 | 5.1 | — | Agent Creation (Agent Builder) |
 | 5.2a | Layer 4: delegate_background, Flow 8 | Agent Interaction (Sub-agents), Background Monitoring |
 | 5.2b | Layer 4: Session Manager (steer), Flow 8 | Agent Interaction (Steering mode), Resolved Decision 26 |
@@ -1285,12 +1411,16 @@ Phase 3b: 3b.1 (schema migration)
               ↓
          3b.6 (tests)
               ↓
-Phases 4, 4b, 5, 6 can overlap:
+Phases 4, 4b, 4c, 5, 6 can overlap where noted:
   Phase 4:  4.1 → 4.2, 4.3 || 4.4 || 4.5a → 4.5b → 4.6
   Phase 4b: 4b.1 → 4b.2 → 4b.3 || 4b.4 → 4b.5
-            (depends on Phase 4 completion; can overlap with 5/6)
+            (depends on Phase 4 completion)
+  Phase 4c: 4c.1 → 4c.2 → 4c.3 || 4c.4 → 4c.5
+            (depends on Phase 4b completion; must complete before Phase 5)
   Phase 5:  5.1 || 5.2a → 5.2b → 5.2c → 5.3
+            (depends on Phase 4c completion; can overlap with 6)
   Phase 6:  6.1 → 6.2 || 6.3 → 6.4
+            (can overlap with Phase 5)
               ↓
 Phase 7: 7.1a || 7.1b || 7.2 || 7.3 (parallel) → 7.4 → 7.5
 ```

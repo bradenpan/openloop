@@ -3,8 +3,6 @@ from datetime import datetime
 from contract.enums import ItemType
 from pydantic import BaseModel, ConfigDict
 
-from backend.openloop.api.schemas.todos import TodoResponse
-
 __all__ = [
     "ItemCreate",
     "ItemUpdate",
@@ -12,7 +10,8 @@ __all__ = [
     "ItemMove",
     "ItemEventResponse",
     "RecordChildrenResponse",
-    "LinkTodoRequest",
+    "ItemLinkCreate",
+    "ItemLinkResponse",
 ]
 
 
@@ -26,8 +25,9 @@ class ItemCreate(BaseModel):
     custom_fields: dict | None = None
     due_date: datetime | None = None
     assigned_agent_id: str | None = None
-    parent_record_id: str | None = None
+    parent_item_id: str | None = None
     is_agent_task: bool = False
+    is_done: bool = False
 
 
 class ItemUpdate(BaseModel):
@@ -38,8 +38,9 @@ class ItemUpdate(BaseModel):
     custom_fields: dict | None = None
     due_date: datetime | None = None
     assigned_agent_id: str | None = None
-    parent_record_id: str | None = None
+    parent_item_id: str | None = None
     is_agent_task: bool | None = None
+    is_done: bool | None = None
 
 
 class ItemMove(BaseModel):
@@ -53,13 +54,14 @@ class ItemResponse(BaseModel):
     space_id: str
     item_type: str
     is_agent_task: bool
+    is_done: bool
     title: str
     description: str | None
     stage: str | None
     priority: int | None
     sort_position: float
     custom_fields: dict | None
-    parent_record_id: str | None
+    parent_item_id: str | None
     assigned_agent_id: str | None
     due_date: datetime | None
     created_by: str
@@ -84,8 +86,19 @@ class ItemEventResponse(BaseModel):
 class RecordChildrenResponse(BaseModel):
     record: ItemResponse
     child_records: list[ItemResponse]
-    linked_todos: list[TodoResponse]
+    linked_items: list[ItemResponse]
 
 
-class LinkTodoRequest(BaseModel):
-    todo_id: str
+class ItemLinkCreate(BaseModel):
+    target_item_id: str
+    link_type: str = "related_to"
+
+
+class ItemLinkResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    source_item_id: str
+    target_item_id: str
+    link_type: str
+    created_at: datetime

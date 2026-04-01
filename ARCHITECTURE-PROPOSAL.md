@@ -9,7 +9,7 @@
 
 OpenLoop is a coordination layer between a human, a web UI, and multiple Claude Max sessions. It doesn't do AI work — it manages the plumbing: routing messages, storing state, assembling context, enforcing permissions, and tracking what agents are doing.
 
-**Key terminology change:** "Projects" are now **Spaces** — a broader abstraction that can be a project, a knowledge base, a CRM, or a simple to-do list. "Items" split into **to-dos** (lightweight, checkbox-style, every space) and **board items** (heavier, multi-stage, optional per space). **Odin** is the always-visible AI front door (Haiku-powered), replacing the separate command bar.
+**Key terminology change:** "Projects" are now **Spaces** — a broader abstraction that can be a project, a knowledge base, a CRM, or a simple task list. All tracked work is an **item** (task or record) in a single unified model — views (list, kanban, table) are presentation, not data model. **Odin** is the always-visible AI front door (Haiku-powered), replacing the separate command bar.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -28,7 +28,7 @@ OpenLoop is a coordination layer between a human, a web UI, and multiple Claude 
 │       │               │                    │            │
 │  ┌────▼───────────────▼────────────────────▼─────────┐  │
 │  │              Service Layer                         │  │
-│  │  Spaces│Todos│Items│Conversations│Memory│Perms│Odin│  │
+│  │  Spaces│Items│Links│Conversations│Memory│Perms│Odin│  │
 │  └────────────────────┬──────────────────────────────┘  │
 │                       │                                 │
 │  ┌────────────────────▼──────────────────────────────┐  │
@@ -87,7 +87,7 @@ The web UI. Displays data, sends user actions, receives streamed responses.
 
 **Key UI surfaces:**
 - Home dashboard (cross-space)
-- Space view (widget-based layout: kanban, table, to-dos, conversations, charts, data feeds — configurable per space)
+- Space view (widget-based layout: kanban, table, task list, conversations, charts, data feeds — configurable per space)
 - Conversation panel (chat interface with streaming)
 - Agent monitoring (status indicators, expandable logs)
 - Settings (agents, permissions, spaces)
@@ -114,20 +114,18 @@ PATCH  /api/v1/spaces/{id}/layout/widgets/{widget_id}  Update widget config/posi
 DELETE /api/v1/spaces/{id}/layout/widgets/{widget_id}  Remove widget from layout
 PUT    /api/v1/spaces/{id}/layout          Bulk replace layout (for agent-generated layouts)
 
-# To-dos (lightweight, every space)
-POST   /api/v1/todos                       Create to-do
-GET    /api/v1/todos                       List to-dos (filters: space_id, is_done, cross-space)
-PATCH  /api/v1/todos/{id}                  Update to-do (title, is_done)
-POST   /api/v1/todos/{id}/promote          Promote to-do to board item
-DELETE /api/v1/todos/{id}                  Delete to-do
+# Items (unified — tasks and records)
+POST   /api/v1/items                       Create item (lightweight: just title + space_id, or full)
+GET    /api/v1/items                       List items (filters: space_id, stage, type, is_done, archived, linked_to, view)
+GET    /api/v1/items/{id}                  Get item detail
+PATCH  /api/v1/items/{id}                  Update item (is_done toggle triggers stage sync)
+POST   /api/v1/items/{id}/move             Move item to stage (triggers is_done sync)
+POST   /api/v1/items/{id}/archive          Archive item
 
-# Board items (tasks and records, optional per space)
-POST   /api/v1/items                       Create board item
-GET    /api/v1/items                       List board items (filters: space, stage, type)
-GET    /api/v1/items/{id}                  Get board item detail
-PATCH  /api/v1/items/{id}                  Update board item
-POST   /api/v1/items/{id}/move             Move board item to stage
-POST   /api/v1/items/{id}/archive          Archive board item
+# Item links (many-to-many associations between items)
+POST   /api/v1/items/{id}/links            Create link to another item
+GET    /api/v1/items/{id}/links            List links for an item
+DELETE /api/v1/items/{id}/links/{link_id}  Remove link
 
 # Conversations
 POST   /api/v1/conversations               Start new conversation (with agent_id, space_id, model override)
@@ -184,7 +182,7 @@ POST   /api/v1/automations/{id}/run        Trigger automation manually
 GET    /api/v1/automations/{id}/runs       List run history
 
 # Home
-GET    /api/v1/home/dashboard              Cross-space summary (all to-dos, attention items, active agents)
+GET    /api/v1/home/dashboard              Cross-space summary (all open tasks, attention items, active agents)
 
 # Notifications
 GET    /api/v1/notifications               List notifications (read/unread filter)
@@ -201,10 +199,10 @@ Business logic. Stateless functions that operate on the database and coordinate 
 **Services:**
 
 - **SpaceService** — CRUD, configuration, templates, linked data sources, board enable/disable
-- **TodoService** — lightweight to-do CRUD, done/not-done toggle, cross-space listing, promote-to-board-item
-- **ItemService** — board item (task and record) CRUD, stage transitions, custom fields for records, archive
+- **ItemService** — unified item (task and record) CRUD, is_done toggle with bidirectional stage sync, stage transitions, lightweight creation (title + space_id minimum), custom fields for records, archive, cross-space task listing, default stage assignment for board-enabled spaces
+- **ItemLinkService** — create, delete, list associations between items (many-to-many via `item_links` table)
 - **ConversationService** — create, list, get history, close (trigger summary), reopen. Manages the mapping between conversations and SDK sessions.
-- **OdinService** — system-level agent session management. Routes Odin messages to a persistent Haiku session. Handles routing instructions (open conversation, create to-do, navigate) and delegates complex requests.
+- **OdinService** — system-level agent session management. Routes Odin messages to a persistent Haiku session. Handles routing instructions (open conversation, create task, navigate) and delegates complex requests.
 - **DataSourceService** — manage connected data sources per space (Drive folders, repos, API integrations). Config storage, status tracking, refresh scheduling.
 - **NotificationService** — create, list, mark read. Stores notifications for background task completion, permission requests, proactive alerts. Feeds the Home dashboard and SSE event stream.
 - **SessionManager** — the core orchestration piece. Manages active Claude SDK sessions:
@@ -216,10 +214,10 @@ Business logic. Stateless functions that operate on the database and coordinate 
 - **ContextAssembler** — builds the prompt context for a new session:
   - Reads space memory (facts tier)
   - Reads conversation summaries (summary tier)
-  - Reads current to-do + board state (state tier)
+  - Reads current item state — open tasks, board stages, deadlines (state tier)
   - Ranks by relevance, manages token budget
   - Returns assembled context string for system prompt injection
-  - Special mode for Odin: cross-space context (all spaces, all agents, cross-space to-do summary, attention items)
+  - Special mode for Odin: cross-space context (all spaces, all agents, cross-space task summary, attention items)
 - **PermissionEnforcer** — checks tool calls against the agent's permission matrix:
   - `check_permission(agent_id, resource, operation)` → Always/Approval/Never
   - For "Approval": creates a pending request, notifies frontend, waits for resolution
@@ -405,17 +403,21 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 These are the tools agents use to interact with OpenLoop's data. Defined as MCP tool closures (same pattern as current orchestrator, but broader):
 
 ```
-# To-do operations
-create_todo(title, space_id, due_date?)
-complete_todo(todo_id)
-list_todos(space_id?, is_done?)
-
-# Board operations
-create_item(title, type, space_id, stage?, description?, fields?)
+# Item operations (unified — tasks and records)
+create_item(title, type, space_id, stage?, description?, due_date?, fields?)
 update_item(item_id, fields...)
+complete_item(item_id)                                    # convenience: sets is_done=true with stage sync
 move_item(item_id, stage)
 get_item(item_id)
-list_items(space_id?, stage?, type?, limit?)
+list_items(space_id?, stage?, type?, is_done?, limit?)
+
+# Item link operations
+link_items(source_item_id, target_item_id, link_type?)    # create association between items
+unlink_items(link_id)                                      # remove an association
+get_linked_items(item_id, link_type?)                      # get all items linked to this item (queries both source and target — links are effectively undirected)
+
+# Item lifecycle
+archive_item(item_id)                                      # archive item (hidden from active views, still searchable)
 
 # Memory operations
 save_fact(content, importance?, category?)             # write-time dedup: compares against existing, decides ADD/UPDATE/DELETE/NOOP
@@ -436,7 +438,7 @@ create_document(title, content, space_id, tags?)
 
 # Context operations
 get_board_state(space_id)
-get_todo_state(space_id?)
+get_task_list(space_id?, is_done?)
 get_conversation_summaries(space_id, limit?)
 search_conversations(query?, space_id?, date_range?, agent_id?)  # space_id optional — omit for cross-space search
 search_summaries(query, space_id?)                               # FTS5 search on summary content, cross-space capable
@@ -464,7 +466,7 @@ list_agents(space_id?)
 open_conversation(space_id, agent_id, initial_message?, model?)
 navigate_to_space(space_id)
 get_attention_items()
-get_cross_space_todos(is_done?)
+get_cross_space_tasks(is_done?)
 ```
 
 These tools are only available to Odin's session, not to space agents.
@@ -487,7 +489,7 @@ Odin is a system-level agent that runs on Haiku. It is always visible in the UI 
 │     (or create a new one if none exists)         │
 │  2. Each user message → query(resume=session_id) │
 │  3. Odin handles simple actions directly via     │
-│     MCP tools (create_todo, list_spaces, etc.)   │
+│     MCP tools (create_item, list_spaces, etc.)   │
 │  4. For complex requests: Odin calls             │
 │     open_conversation() to route user to a       │
 │     space agent. Frontend receives routing       │
@@ -501,7 +503,7 @@ Odin is a system-level agent that runs on Haiku. It is always visible in the UI 
 │  Context Assembly (special mode):                │
 │  - List of all spaces (names, templates, desc)   │
 │  - List of all agents (names, spaces, status)    │
-│  - Cross-space to-do summary (open count by      │
+│  - Cross-space task summary (open count by        │
 │    space, overdue items)                         │
 │  - Attention items summary                       │
 │  - Odin's own prior conversation summaries       │
@@ -671,11 +673,11 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │                                               │
 │  ┌─ END (high model attention) ──────────────┐│
 │  │                                           ││
-│  │  7. To-do + board state (fresh from DB)    ││
-│  │     Open to-dos, current board items,      ││
-│  │     stages, upcoming deadlines, recent     ││
-│  │     changes. Closest to user's message     ││
-│  │     for maximum relevance.                 ││
+│  │  7. Item state (fresh from DB)              ││
+│  │     Open tasks, board items by stage,      ││
+│  │     upcoming deadlines, recent changes.    ││
+│  │     Closest to user's message for maximum  ││
+│  │     relevance.                             ││
 │  │     Budget: up to 1500 tokens              ││
 │  │                                           ││
 │  └───────────────────────────────────────────┘│
@@ -738,31 +740,19 @@ space_widgets (configurable layout — each row is one widget in a space's view)
 ├── created_at
 └── updated_at
 
-todos
-├── id (UUID, PK)
-├── space_id (FK → spaces, indexed)
-├── title
-├── is_done (boolean, default false)
-├── due_date (datetime, nullable)
-├── sort_position (float)
-├── created_by (string — "user" | "agent:{name}" | "odin")
-├── source_conversation_id (FK → conversations, nullable — which conversation created this)
-├── promoted_to_item_id (FK → items, nullable — set when promoted to board item, hidden from to-do list)
-├── created_at
-└── updated_at
-
-items (board items — tasks and records)
+items (unified — tasks and records)
 ├── id (UUID, PK)
 ├── space_id (FK → spaces, indexed)
 ├── item_type ("task" | "record")
 ├── is_agent_task (boolean, default false)
 ├── title
 ├── description
-├── stage (string, must be in space's board_columns)
+├── is_done (boolean, default false — canonical completion flag, syncs bidirectionally with stage for tasks only; records ignore sync)
+├── stage (string, nullable — must be in space's board_columns when set; null for simple spaces)
 ├── priority (integer, nullable)
 ├── sort_position (float)
 ├── custom_fields (JSON, for records)
-├── parent_record_id (FK → items, nullable, for tasks linked to records)
+├── parent_item_id (FK → items, nullable — structural hierarchy: sub-tasks, sub-records)
 ├── assigned_agent_id (FK → agents, nullable)
 ├── due_date (datetime, nullable)
 ├── created_by (string — "user" | "agent:{name}" | "odin")
@@ -770,6 +760,14 @@ items (board items — tasks and records)
 ├── archived (boolean, default false)
 ├── created_at
 └── updated_at
+
+item_links (many-to-many associations between items — links are effectively undirected)
+├── id (UUID, PK)
+├── source_item_id (FK → items, indexed)
+├── target_item_id (FK → items, indexed)
+├── link_type (string — "related_to", extensible)
+├── created_at
+└── UNIQUE(source_item_id, target_item_id, link_type)
 
 item_events (activity tracking for stale detection and audit)
 ├── id (UUID, PK)
@@ -982,19 +980,17 @@ documents_fts         — shadows documents.title (extend to content when docume
 
 ```
 Space ──1:N──> SpaceWidgets (configurable layout)
-Space ──1:N──> Todos
-Space ──1:N──> Items (board items)
+Space ──1:N──> Items (tasks and records)
 Space ──1:N──> Conversations
 Space ──1:N──> Documents
 Space ──1:N──> Data Sources
 Space ──1:N──> Conversation Summaries
 Space ──0:1──> Space (parent, for future subspaces)
 
-Todo ──N:1──> Space
-
 Item ──N:1──> Space
 Item ──N:1──> Agent (assigned, nullable)
-Item ──N:1──> Item (parent record, nullable)
+Item ──N:1──> Item (parent_item_id — structural hierarchy: sub-tasks, sub-records)
+Item ──N:N──> Item (via item_links — associative: "related_to", etc.)
 Item ──1:N──> Item Events
 
 Conversation ──N:1──> Space (nullable for system-level)
@@ -1355,12 +1351,12 @@ Summaries grow linearly — one per closed conversation, plus mid-conversation c
 - **Checkpoint pruning:** Mid-conversation checkpoint summaries (`is_checkpoint=true`) are superseded by the final close summary. After a conversation closes, its checkpoints are excluded from context assembly (kept in DB for search).
 - **Token budget:** Fixed allocation of 2000 tokens.
 
-### Tier 3: Working Memory — Board State (generated at assembly time)
+### Tier 3: Working Memory — Item State (generated at assembly time)
 
-Board state is always fresh — generated from the database, not stored. But a space with 200 items would produce a large dump.
+Item state is always fresh — generated from the database, not stored. But a space with 200 items would produce a large dump.
 
 **Pruning mechanisms:**
-- **Active items only:** Exclude archived items.
+- **Active items only:** Exclude archived items and done items (unless recently completed).
 - **Recency filter:** Only include items updated in the last 30 days, plus anything with an upcoming due date.
 - **Summarize, don't enumerate:** "12 tasks in To Do, 3 in In Progress, 2 completed this week" rather than listing all 200 items. Agents have `get_item` and `list_items` MCP tools for on-demand detail.
 - **Token budget:** Fixed allocation of 1500 tokens. Placed at the end of context (closest to user's message) for maximum model attention.
@@ -1418,7 +1414,7 @@ MIDDLE (lower model attention):
   Global facts:                      ~500 tokens (scored: importance × decay × access)
 
 END (high model attention):
-  Board/to-do state:                ~1500 tokens (fresh, pruned by recency)
+  Item state:                       ~1500 tokens (fresh, pruned by recency)
 ```
 
 The vast majority of the context window remains available for the actual conversation. The 8000-token injection is a starting point — tunable per space or per agent if needed. Content ordering exploits the U-shaped attention curve documented in "Lost in the Middle" (Liu et al., 2023).
@@ -1487,8 +1483,8 @@ Restore = replace the SQLite file with a backup copy and restart the backend. Co
 9. **Clean agent creation** — Agent Builder designs agents through conversation. Permission matrix set at creation time.
 10. **Automations** — cron-based scheduled agent runs with full run history. Same agents, permissions, and tools as manual conversations. Automation dashboard for visibility.
 11. **CRM and task views** — same data, different views. Board for tasks, table for records. Per-space defaults.
-12. **To-dos everywhere** — lightweight checklist in every space plus cross-space aggregation on Home.
-13. **Flexible spaces** — not everything is a "project." Knowledge bases, CRM systems, simple to-do lists. Template-based creation with widget-based layouts.
+12. **Tasks everywhere** — lightweight checklist (list view) in every space plus cross-space aggregation on Home.
+13. **Flexible spaces** — not everything is a "project." Knowledge bases, CRM systems, simple task lists. Template-based creation with widget-based layouts.
 14. **Agent-designed layouts** — agents can read, modify, and fully redesign space layouts via MCP tools. "Redesign my health space with Garmin charts" is a tool call, not a feature request. Templates provide defaults; agents and users customize from there.
 
 ---

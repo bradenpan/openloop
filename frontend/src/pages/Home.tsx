@@ -3,7 +3,7 @@ import { $api } from '../api/hooks';
 import { AttentionItems } from '../components/home/attention-items';
 import { ActiveAgents } from '../components/home/active-agents';
 import { SpaceList } from '../components/home/space-list';
-import { TodoOverview } from '../components/home/todo-overview';
+import { TaskOverview } from '../components/home/todo-overview';
 import { ConversationList } from '../components/home/conversation-list';
 import { WelcomeCard } from '../components/home/welcome-card';
 import { CreateSpaceModal } from '../components/home/create-space-modal';
@@ -13,7 +13,9 @@ export default function Home() {
 
   const dashboard = $api.useQuery('get', '/api/v1/home/dashboard');
   const spaces = $api.useQuery('get', '/api/v1/spaces');
-  const todos = $api.useQuery('get', '/api/v1/todos');
+  const tasks = $api.useQuery('get', '/api/v1/items', {
+    params: { query: { item_type: 'task', is_done: false, archived: false } },
+  });
   const conversations = $api.useQuery('get', '/api/v1/conversations');
   const agents = $api.useQuery('get', '/api/v1/agents');
 
@@ -60,15 +62,15 @@ export default function Home() {
         <SpaceList spaces={spaces.data} isLoading={spaces.isLoading} />
       </section>
 
-      {/* 4. Todos */}
+      {/* 4. Tasks */}
       <section>
         <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
-          Todos
+          Tasks
         </h2>
-        <TodoOverview
-          todos={todos.data}
+        <TaskOverview
+          tasks={tasks.data}
           spaces={spaces.data}
-          isLoading={todos.isLoading || spaces.isLoading}
+          isLoading={tasks.isLoading || spaces.isLoading}
         />
       </section>
 

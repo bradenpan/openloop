@@ -6,7 +6,6 @@ all use FTS5, support cross-space search, and respect permission scoping.
 
 import json
 import uuid
-from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import text

@@ -67,14 +67,13 @@ from backend.openloop.api.routes.drive import router as drive_router  # noqa: E4
 from backend.openloop.api.routes.events import router as events_router  # noqa: E402
 from backend.openloop.api.routes.home import router as home_router  # noqa: E402
 from backend.openloop.api.routes.items import router as items_router  # noqa: E402
+from backend.openloop.api.routes.layout import router as layout_router  # noqa: E402
 from backend.openloop.api.routes.memory import router as memory_router  # noqa: E402
 from backend.openloop.api.routes.notifications import router as notifications_router  # noqa: E402
 from backend.openloop.api.routes.odin import router as odin_router  # noqa: E402
 from backend.openloop.api.routes.running import router as running_router  # noqa: E402
-from backend.openloop.api.routes.layout import router as layout_router  # noqa: E402
-from backend.openloop.api.routes.spaces import router as spaces_router  # noqa: E402
 from backend.openloop.api.routes.search import router as search_router  # noqa: E402
-from backend.openloop.api.routes.todos import router as todos_router  # noqa: E402
+from backend.openloop.api.routes.spaces import router as spaces_router  # noqa: E402
 
 # NOTE: running_router must be included BEFORE agents_router because both use
 # prefix /api/v1/agents and agents_router has a /{agent_id} catch-all that would
@@ -94,7 +93,6 @@ app.include_router(odin_router)
 app.include_router(layout_router)
 app.include_router(search_router)
 app.include_router(spaces_router)
-app.include_router(todos_router)
 
 
 @app.get("/api/v1/health")

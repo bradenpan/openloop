@@ -15,7 +15,6 @@ from backend.openloop.services import (
     item_service,
     memory_service,
     space_service,
-    todo_service,
 )
 
 # ---------------------------------------------------------------------------
@@ -58,9 +57,9 @@ def test_basic_space_assembly(db_session: Session):
         mcp_tools=["notion", "search"],
     )
 
-    # Create todos
-    todo_service.create_todo(db_session, space_id=space.id, title="Write docs")
-    todo_service.create_todo(
+    # Create tasks
+    item_service.create_item(db_session, space_id=space.id, title="Write docs")
+    item_service.create_item(
         db_session,
         space_id=space.id,
         title="Fix bug",
@@ -102,7 +101,7 @@ def test_basic_space_assembly(db_session: Session):
     assert "## Agent: SpaceAgent" in result
     assert "A test agent for the space" in result
     assert "You help with project management." in result
-    assert "## Current To-dos" in result
+    assert "## Current Tasks" in result
     assert "Write docs" in result
     assert "Fix bug" in result
     assert "## Board State" in result
@@ -132,7 +131,7 @@ def test_empty_space(db_session: Session):
     assert "Handles empty space" in result
 
     # None of the data sections should be present
-    assert "## Current To-dos" not in result
+    assert "## Current Tasks" not in result
     assert "## Board State" not in result
     assert "## Recent Conversations" not in result
     assert "## Space Facts" not in result
@@ -181,10 +180,10 @@ def test_odin_mode(db_session: Session):
     # Link helper to a space
     agent_service.add_agent_to_space(db_session, helper.id, space1.id)
 
-    # Create todos in different spaces
-    todo_service.create_todo(db_session, space_id=space1.id, title="Alpha task 1")
-    todo_service.create_todo(db_session, space_id=space1.id, title="Alpha task 2")
-    todo_service.create_todo(db_session, space_id=space2.id, title="CRM task")
+    # Create tasks in different spaces
+    item_service.create_item(db_session, space_id=space1.id, title="Alpha task 1")
+    item_service.create_item(db_session, space_id=space1.id, title="Alpha task 2")
+    item_service.create_item(db_session, space_id=space2.id, title="CRM task")
 
     # Add global memory
     memory_service.create_entry(db_session, namespace="global", key="owner", value="Brad")
@@ -205,8 +204,8 @@ def test_odin_mode(db_session: Session):
     assert "Odin" in result
     assert "Helper" in result
 
-    # Cross-space todo summary
-    assert "## Cross-Space To-do Summary" in result
+    # Cross-space task summary
+    assert "## Cross-Space Task Summary" in result
     assert "Project Alpha" in result
 
     # Global facts
@@ -219,37 +218,37 @@ def test_odin_mode(db_session: Session):
 # ---------------------------------------------------------------------------
 
 
-def test_todo_budget_truncation(db_session: Session):
-    """Creating enough todos to exceed the tier's budget triggers truncation."""
+def test_task_budget_truncation(db_session: Session):
+    """Creating enough tasks to exceed the tier's budget triggers truncation."""
     space = _make_space(db_session, name="Big Space")
     agent = _make_agent(db_session, name="BudgetAgent")
 
-    # Create many todos with long titles to exceed BUDGET_TODOS_BOARD (1500 tokens = ~6000 chars)
+    # Create many tasks with long titles to exceed BUDGET_TODOS_BOARD (1500 tokens = ~6000 chars)
     for i in range(200):
-        todo_service.create_todo(
+        item_service.create_item(
             db_session,
             space_id=space.id,
-            title=f"Todo item number {i} with a sufficiently long description to consume tokens",
+            title=f"Task item number {i} with a sufficiently long description to consume tokens",
         )
 
     result = assemble_context(db_session, agent_id=agent.id, space_id=space.id)
 
-    # The todo section should exist
-    assert "## Current To-dos" in result
+    # The task section should exist
+    assert "## Current Tasks" in result
 
     # It should be truncated
     assert "... (truncated)" in result
 
-    # Verify the total todo/board section fits within budget
-    # Extract the todo section
+    # Verify the total task/board section fits within budget
+    # Extract the task section
     sections = result.split("\n\n")
-    todo_section = ""
+    task_section = ""
     for section in sections:
-        if "## Current To-dos" in section or "## Board State" in section:
-            todo_section = section
+        if "## Current Tasks" in section or "## Board State" in section:
+            task_section = section
             break
     # small margin for the truncation marker line
-    assert estimate_tokens(todo_section) <= BUDGET_TODOS_BOARD + 10
+    assert estimate_tokens(task_section) <= BUDGET_TODOS_BOARD + 10
 
 
 def test_summaries_budget_truncation(db_session: Session):
@@ -342,12 +341,12 @@ def test_conversation_summaries_with_open_questions(db_session: Session):
     assert "Open: Should we use REST or GraphQL?" in result
 
 
-def test_todo_with_due_date_display(db_session: Session):
-    """Todos with due dates should show the date in context."""
+def test_task_with_due_date_display(db_session: Session):
+    """Tasks with due dates should show the date in context."""
     space = _make_space(db_session, name="Due Space")
     agent = _make_agent(db_session, name="DueAgent")
 
-    todo_service.create_todo(
+    item_service.create_item(
         db_session,
         space_id=space.id,
         title="Urgent task",
@@ -356,16 +355,17 @@ def test_todo_with_due_date_display(db_session: Session):
 
     result = assemble_context(db_session, agent_id=agent.id, space_id=space.id)
 
-    assert "Urgent task (due: 2026-04-15)" in result
+    assert "Urgent task" in result
+    assert "2026-04-15" in result
 
 
-def test_odin_overdue_todos(db_session: Session):
-    """Odin should see overdue todos in the attention summary."""
+def test_odin_overdue_tasks(db_session: Session):
+    """Odin should see overdue tasks in the attention summary."""
     space = _make_space(db_session, name="Overdue Space")
     odin = _make_agent(db_session, name="Odin Overdue")
 
-    # Create an overdue todo
-    todo_service.create_todo(
+    # Create an overdue task
+    item_service.create_item(
         db_session,
         space_id=space.id,
         title="Overdue task",
@@ -374,7 +374,7 @@ def test_odin_overdue_todos(db_session: Session):
 
     result = assemble_context(db_session, agent_id=odin.id, space_id=None)
 
-    assert "## Cross-Space To-do Summary" in result
+    assert "## Cross-Space Task Summary" in result
     assert "Overdue Space" in result
     assert "Overdue" in result
     assert "Overdue task" in result

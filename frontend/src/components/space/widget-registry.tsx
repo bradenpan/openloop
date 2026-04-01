@@ -1,6 +1,6 @@
 import { useState, type ComponentType } from 'react';
 import { $api } from '../../api/hooks';
-import { TodoPanel } from './todo-panel';
+import { TaskListPanel } from './todo-panel';
 import { KanbanBoard } from './kanban-board';
 import { TableView } from './table-view';
 import { ConversationSidebar } from './conversation-sidebar';
@@ -20,11 +20,11 @@ const DEFAULT_COLUMNS = ['Idea', 'Scoping', 'To Do', 'In Progress', 'Done'];
 
 // --- Widget wrappers ---
 
-function TodoPanelWidget({ spaceId }: WidgetProps) {
+function TaskListPanelWidget({ spaceId }: WidgetProps) {
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <TodoPanel
+    <TaskListPanel
       spaceId={spaceId}
       collapsed={collapsed}
       onToggle={() => setCollapsed((v) => !v)}
@@ -121,7 +121,7 @@ function PlaceholderWidget({ widgetId, config }: WidgetProps) {
 // --- Registry ---
 
 const registry: Record<string, ComponentType<WidgetProps>> = {
-  todo_panel: TodoPanelWidget,
+  todo_panel: TaskListPanelWidget,
   kanban_board: KanbanBoardWidget,
   data_table: DataTableWidget,
   conversations: ConversationsSidebarWidget,

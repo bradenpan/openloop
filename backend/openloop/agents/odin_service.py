@@ -1,6 +1,6 @@
 """Odin Service — system-level AI front door.
 
-Odin is always available, handles simple actions directly (to-dos, navigation),
+Odin is always available, handles simple actions directly (tasks, navigation),
 and routes complex work to space agents. Runs on Haiku. Its conversation record
 has space_id=None (system-level).
 """
@@ -22,35 +22,40 @@ ODIN_SYSTEM_PROMPT = """\
 You are Odin, the AI front door for OpenLoop — a personal command center.
 
 You help the user by:
-- Creating to-dos and managing tasks directly via your tools
+- Creating tasks and managing items directly via your tools
 - Answering questions about their spaces, agents, and work
 - Routing them to the right space agent for complex work (use open_conversation tool)
 - Navigating them to spaces (use navigate_to_space tool)
 
-Keep responses concise. For simple actions (create a to-do, list spaces), handle them directly.
+Keep responses concise. For simple actions (create a task, list spaces), handle them directly.
 For complex work (planning, research, code review), route to the appropriate space agent.
 
 If you're unsure which space or agent to use, ask a clarifying question.\
 """
 
 ODIN_MCP_TOOLS = [
-    "create_todo",
-    "complete_todo",
-    "list_todos",
+    "create_task",
+    "complete_task",
+    "list_tasks",
     "create_item",
     "update_item",
     "move_item",
     "get_item",
     "list_items",
+    "link_items",
+    "unlink_items",
+    "get_linked_items",
+    "archive_item",
     "read_memory",
     "write_memory",
     "read_document",
     "list_documents",
     "create_document",
     "get_board_state",
-    "get_todo_state",
+    "get_task_state",
     "get_conversation_summaries",
     "search_conversations",
+    "search_summaries",
     "get_conversation_messages",
     "delegate_task",
     "list_spaces",
@@ -58,7 +63,7 @@ ODIN_MCP_TOOLS = [
     "open_conversation",
     "navigate_to_space",
     "get_attention_items",
-    "get_cross_space_todos",
+    "get_cross_space_tasks",
 ]
 
 

@@ -61,15 +61,19 @@ _FILE_WRITE_TOOLS = frozenset({"Write", "Edit"})
 # ``openloop_RecruitingAgent``).  We strip the prefix in map_tool_to_resource
 # and look up the bare name here.
 _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
-    # Board / to-do tools (1-8)
-    "create_todo": ("openloop-board", Operation.CREATE),
-    "complete_todo": ("openloop-board", Operation.EDIT),
-    "list_todos": ("openloop-board", Operation.READ),
+    # Task / item tools (1-12)
+    "create_task": ("openloop-board", Operation.CREATE),
+    "complete_task": ("openloop-board", Operation.EDIT),
+    "list_tasks": ("openloop-board", Operation.READ),
     "create_item": ("openloop-board", Operation.CREATE),
     "update_item": ("openloop-board", Operation.EDIT),
     "move_item": ("openloop-board", Operation.EDIT),
     "get_item": ("openloop-board", Operation.READ),
     "list_items": ("openloop-board", Operation.READ),
+    "link_items": ("openloop-board", Operation.CREATE),
+    "unlink_items": ("openloop-board", Operation.DELETE),
+    "get_linked_items": ("openloop-board", Operation.READ),
+    "archive_item": ("openloop-board", Operation.EDIT),
     # Memory tools (9-10, legacy)
     "read_memory": ("openloop-memory", Operation.READ),
     "write_memory": ("openloop-memory", Operation.CREATE),
@@ -89,9 +93,10 @@ _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
     "create_document": ("openloop-docs", Operation.CREATE),
     # State / read-only views (14-18)
     "get_board_state": ("openloop-board", Operation.READ),
-    "get_todo_state": ("openloop-board", Operation.READ),
+    "get_task_state": ("openloop-board", Operation.READ),
     "get_conversation_summaries": ("openloop-conversations", Operation.READ),
     "search_conversations": ("openloop-conversations", Operation.READ),
+    "search_summaries": ("openloop-conversations", Operation.READ),
     "get_conversation_messages": ("openloop-conversations", Operation.READ),
     # Delegation (19)
     "delegate_task": ("openloop-delegation", Operation.EXECUTE),
@@ -101,7 +106,7 @@ _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
     "open_conversation": ("openloop-conversations", Operation.CREATE),
     "navigate_to_space": ("openloop-spaces", Operation.READ),
     "get_attention_items": ("openloop-attention", Operation.READ),
-    "get_cross_space_todos": ("openloop-board", Operation.READ),
+    "get_cross_space_tasks": ("openloop-board", Operation.READ),
 }
 
 

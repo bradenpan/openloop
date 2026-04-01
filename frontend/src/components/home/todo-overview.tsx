@@ -3,11 +3,11 @@ import { $api } from '../../api/hooks';
 import type { components } from '../../api/types';
 import { Card, CardHeader, CardBody } from '../ui';
 
-type Todo = components['schemas']['TodoResponse'];
+type ItemResponse = components['schemas']['ItemResponse'];
 type Space = components['schemas']['SpaceResponse'];
 
-interface TodoOverviewProps {
-  todos: Todo[] | undefined;
+interface TaskOverviewProps {
+  tasks: ItemResponse[] | undefined;
   spaces: Space[] | undefined;
   isLoading: boolean;
 }
@@ -27,64 +27,69 @@ function Skeleton() {
   );
 }
 
-function TodoRow({ todo }: { todo: Todo }) {
+function TaskRow({ task }: { task: ItemResponse }) {
   const queryClient = useQueryClient();
-  const updateTodo = $api.useMutation('patch', '/api/v1/todos/{todo_id}', {
+  const updateItem = $api.useMutation('patch', '/api/v1/items/{item_id}', {
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/todos'] });
+      queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/items'] });
       queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/home/dashboard'] });
     },
   });
 
   function toggle() {
-    updateTodo.mutate({
-      params: { path: { todo_id: todo.id } },
-      body: { is_done: !todo.is_done },
+    updateItem.mutate({
+      params: { path: { item_id: task.id } },
+      body: { is_done: !task.is_done },
     });
   }
 
-  const isDueToday = todo.due_date
-    ? new Date(todo.due_date).toDateString() === new Date().toDateString()
+  const isDueToday = task.due_date
+    ? new Date(task.due_date).toDateString() === new Date().toDateString()
     : false;
 
   return (
     <label className="flex items-center gap-3 py-1 px-1 -mx-1 rounded hover:bg-raised/50 transition-colors duration-100 cursor-pointer group">
       <input
         type="checkbox"
-        checked={todo.is_done}
+        checked={task.is_done}
         onChange={toggle}
-        disabled={updateTodo.isPending}
+        disabled={updateItem.isPending}
         className="h-4 w-4 rounded border-border accent-primary cursor-pointer shrink-0"
       />
       <span
         className={`text-sm flex-1 min-w-0 truncate ${
-          todo.is_done ? 'line-through text-muted' : 'text-foreground'
+          task.is_done ? 'line-through text-muted' : 'text-foreground'
         }`}
       >
-        {todo.title}
+        {task.title}
       </span>
-      {isDueToday && !todo.is_done && (
+      {task.stage && (
+        <span className="text-[10px] text-muted bg-raised rounded px-1.5 py-0.5 shrink-0">
+          {task.stage}
+        </span>
+      )}
+      {isDueToday && !task.is_done && (
         <span className="text-xs text-warning shrink-0">due today</span>
       )}
     </label>
   );
 }
 
-export function TodoOverview({ todos, spaces, isLoading }: TodoOverviewProps) {
+export function TaskOverview({ tasks, spaces, isLoading }: TaskOverviewProps) {
   if (isLoading) return <Skeleton />;
 
-  if (!todos || todos.length === 0) {
-    return <p className="text-sm text-muted py-2">No todos yet.</p>;
+  if (!tasks || tasks.length === 0) {
+    return <p className="text-sm text-muted py-2">No tasks yet.</p>;
   }
 
   const spaceMap = new Map(spaces?.map((s) => [s.id, s.name]) ?? []);
 
   // Group by space
-  const grouped = new Map<string, Todo[]>();
-  for (const todo of todos) {
-    const key = todo.space_id;
+  const grouped = new Map<string, ItemResponse[]>();
+  for (const task of tasks) {
+    const key = task.space_id;
     if (!grouped.has(key)) grouped.set(key, []);
-    grouped.get(key)!.push(todo);
+    grouped.get(key)!.push(task);
   }
 
   // Sort groups: undone first within each group
@@ -105,8 +110,8 @@ export function TodoOverview({ todos, spaces, isLoading }: TodoOverviewProps) {
             </h4>
           </CardHeader>
           <CardBody className="py-1.5 px-3 space-y-0.5">
-            {items.map((todo) => (
-              <TodoRow key={todo.id} todo={todo} />
+            {items.map((task) => (
+              <TaskRow key={task.id} task={task} />
             ))}
           </CardBody>
         </Card>

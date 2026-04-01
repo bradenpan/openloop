@@ -1,6 +1,5 @@
 """API route tests for document management — Phase 4.3 additions."""
 
-import io
 from pathlib import Path
 from unittest.mock import patch
 

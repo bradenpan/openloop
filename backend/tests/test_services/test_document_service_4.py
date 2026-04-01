@@ -1,6 +1,5 @@
 """Tests for document_service — Phase 4.3 additions (upload, scan, content, update, filtering)."""
 
-import os
 from pathlib import Path
 from unittest.mock import patch
 

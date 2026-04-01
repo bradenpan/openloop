@@ -1,8 +1,7 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
-
 from contract.enums import RuleSourceType
+from pydantic import BaseModel, ConfigDict
 
 __all__ = [
     "BehavioralRuleCreate",

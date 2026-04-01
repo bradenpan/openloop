@@ -30,7 +30,6 @@ from backend.openloop.db.models import (
     Notification,
     PermissionRequest,
     Space,
-    Todo,
     agent_spaces,
     document_items,
 )
@@ -41,7 +40,6 @@ from backend.openloop.services import (
     memory_service,
     notification_service,
     space_service,
-    todo_service,
 )
 
 # ---------------------------------------------------------------------------
@@ -82,7 +80,6 @@ def clear_all(db):
     db.query(Document).delete()
     db.query(DataSource).delete()
     db.query(MemoryEntry).delete()
-    db.query(Todo).delete()
     db.query(Item).delete()
     db.query(Conversation).delete()
     db.query(AgentPermission).delete()
@@ -127,7 +124,7 @@ def seed(db):
         description="Automates candidate outreach and pipeline management",
         system_prompt="You are a recruiting assistant. Help manage candidates, schedule interviews, and track the hiring pipeline.",
         default_model="sonnet",
-        tools=["create_todo", "create_item", "move_item", "memory_read", "memory_write"],
+        tools=["create_item", "move_item", "memory_read", "memory_write"],
         space_ids=[recruiting.id],
     )
     code_agent = agent_service.create_agent(
@@ -136,7 +133,7 @@ def seed(db):
         description="Handles code review, PR summaries, and technical tasks",
         system_prompt="You are a software engineering assistant. Help with code review, technical planning, and development tasks.",
         default_model="opus",
-        tools=["create_todo", "create_item", "move_item", "memory_read", "memory_write", "execute_code"],
+        tools=["create_item", "move_item", "memory_read", "memory_write", "execute_code"],
         mcp_tools=["github"],
         space_ids=[openloop.id],
     )
@@ -163,8 +160,8 @@ def seed(db):
     agent_service.set_permission(
         db,
         agent_id=recruiting_agent.id,
-        resource_pattern="spaces/*/todos",
-        operation="create",
+        resource_pattern="spaces/*/items/move",
+        operation="execute",
         grant_level="always",
     )
     agent_service.set_permission(
@@ -199,67 +196,69 @@ def seed(db):
     )
 
     # ------------------------------------------------------------------
-    # 3. Todos (10-15 across spaces)
+    # 3. Task items (10-15 across spaces, replacing old todos)
     # ------------------------------------------------------------------
-    print("  Creating todos...")
-    # Recruiting space todos
-    t1 = todo_service.create_todo(
-        db, space_id=recruiting.id, title="Review resume: Sarah Chen — Senior Frontend"
+    print("  Creating task items...")
+    # Recruiting space tasks
+    t1 = item_service.create_item(
+        db, space_id=recruiting.id, title="Review resume: Sarah Chen — Senior Frontend",
+        item_type="task",
     )
-    t2 = todo_service.create_todo(
-        db,
-        space_id=recruiting.id,
-        title="Schedule phone screen with Marcus Johnson",
-        due_date=_days_from_now(2),
-    )
-    t3 = todo_service.create_todo(
-        db,
-        space_id=recruiting.id,
-        title="Send offer letter to Priya Patel",
-        due_date=_days_from_now(1),
-    )
-    t4 = todo_service.create_todo(
-        db, space_id=recruiting.id, title="Post Senior Backend role to LinkedIn"
-    )
-    # Mark one done
-    todo_service.update_todo(db, t1.id, is_done=True)
+    item_service.update_item(db, t1.id, is_done=True)
 
-    # OpenLoop space todos
-    t5 = todo_service.create_todo(
-        db, space_id=openloop.id, title="Write API tests for conversation endpoints"
+    t2 = item_service.create_item(
+        db, space_id=recruiting.id, title="Schedule phone screen with Marcus Johnson",
+        item_type="task", due_date=_days_from_now(2),
     )
-    t6 = todo_service.create_todo(
-        db,
-        space_id=openloop.id,
-        title="Fix SSE reconnection bug on Safari",
-        due_date=_days_from_now(3),
+    t3 = item_service.create_item(
+        db, space_id=recruiting.id, title="Send offer letter to Priya Patel",
+        item_type="task", due_date=_days_from_now(1),
     )
-    t7 = todo_service.create_todo(
-        db, space_id=openloop.id, title="Update README with setup instructions"
+    t4 = item_service.create_item(
+        db, space_id=recruiting.id, title="Post Senior Backend role to LinkedIn",
+        item_type="task",
     )
-    t8 = todo_service.create_todo(
-        db,
-        space_id=openloop.id,
-        title="Benchmark SQLite query performance",
-        due_date=_days_from_now(7),
-    )
-    todo_service.update_todo(db, t7.id, is_done=True)
 
-    # Personal space todos
-    t9 = todo_service.create_todo(
-        db, space_id=personal.id, title="Buy groceries"
+    # OpenLoop space tasks
+    t5 = item_service.create_item(
+        db, space_id=openloop.id, title="Write API tests for conversation endpoints",
+        item_type="task",
     )
-    t10 = todo_service.create_todo(
-        db, space_id=personal.id, title="Call dentist for appointment", due_date=_days_from_now(5)
+    t6 = item_service.create_item(
+        db, space_id=openloop.id, title="Fix SSE reconnection bug on Safari",
+        item_type="task", due_date=_days_from_now(3),
     )
-    t11 = todo_service.create_todo(
-        db, space_id=personal.id, title="Read chapter 4 of Designing Data-Intensive Applications"
+    t7 = item_service.create_item(
+        db, space_id=openloop.id, title="Update README with setup instructions",
+        item_type="task",
     )
-    t12 = todo_service.create_todo(
-        db, space_id=personal.id, title="Renew gym membership", due_date=_days_ago(2)
+    item_service.update_item(db, t7.id, is_done=True)
+
+    t8 = item_service.create_item(
+        db, space_id=openloop.id, title="Benchmark SQLite query performance",
+        item_type="task", due_date=_days_from_now(7),
     )
-    todo_service.update_todo(db, t9.id, is_done=True)
-    todo_service.update_todo(db, t12.id, is_done=True)
+
+    # Personal space tasks
+    t9 = item_service.create_item(
+        db, space_id=personal.id, title="Buy groceries",
+        item_type="task",
+    )
+    item_service.update_item(db, t9.id, is_done=True)
+
+    t10 = item_service.create_item(
+        db, space_id=personal.id, title="Call dentist for appointment",
+        item_type="task", due_date=_days_from_now(5),
+    )
+    t11 = item_service.create_item(
+        db, space_id=personal.id, title="Read chapter 4 of Designing Data-Intensive Applications",
+        item_type="task",
+    )
+    t12 = item_service.create_item(
+        db, space_id=personal.id, title="Renew gym membership",
+        item_type="task", due_date=_days_ago(2),
+    )
+    item_service.update_item(db, t12.id, is_done=True)
 
     # ------------------------------------------------------------------
     # 4. Board items (8-10 across spaces that have boards)

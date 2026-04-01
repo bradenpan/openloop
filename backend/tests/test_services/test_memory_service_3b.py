@@ -10,11 +10,10 @@ from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from contract.enums import DedupDecision
 from sqlalchemy.orm import Session
 
 from backend.openloop.services import memory_service
-from contract.enums import DedupDecision
-
 
 # ---------------------------------------------------------------------------
 # Helpers

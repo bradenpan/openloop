@@ -1,8 +1,7 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
-
 from contract.enums import WidgetSize, WidgetType
+from pydantic import BaseModel, ConfigDict
 
 __all__ = ["WidgetCreate", "WidgetUpdate", "WidgetResponse", "LayoutResponse", "LayoutBulkReplace"]
 

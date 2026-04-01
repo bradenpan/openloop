@@ -35,6 +35,13 @@ export function KanbanBoard({ spaceId, boardColumns, boardEnabled }: KanbanBoard
   const [activeItem, setActiveItem] = useState<ItemResponse | null>(null);
   // Track which column an item is currently over during drag
   const [overColumn, setOverColumn] = useState<string | null>(null);
+  // Done column visibility — collapsed by default
+  const [hideDone, setHideDone] = useState(true);
+  const hasDoneColumn = boardColumns.includes('done');
+  const visibleColumns = useMemo(
+    () => (hideDone && hasDoneColumn ? boardColumns.filter((c) => c !== 'done') : boardColumns),
+    [boardColumns, hideDone, hasDoneColumn],
+  );
 
   const { data: itemsData, isLoading } = $api.useQuery('get', '/api/v1/items', {
     params: { query: { space_id: spaceId, archived: false } },
@@ -169,9 +176,23 @@ export function KanbanBoard({ spaceId, boardColumns, boardEnabled }: KanbanBoard
       {/* Board header */}
       <div className="px-4 py-2.5 border-b border-border flex items-center justify-between shrink-0">
         <h3 className="text-sm font-semibold text-foreground">Board</h3>
-        <Button size="sm" onClick={() => setCreateModalOpen(true)}>
-          + Add Item
-        </Button>
+        <div className="flex items-center gap-2">
+          {hasDoneColumn && (
+            <button
+              onClick={() => setHideDone((v) => !v)}
+              className={`text-xs px-2 py-1 rounded transition-colors cursor-pointer ${
+                hideDone
+                  ? 'text-muted hover:text-foreground hover:bg-raised'
+                  : 'bg-primary/10 text-primary'
+              }`}
+            >
+              {hideDone ? 'Show done' : 'Hide done'}
+            </button>
+          )}
+          <Button size="sm" onClick={() => setCreateModalOpen(true)}>
+            + Add Item
+          </Button>
+        </div>
       </div>
 
       {/* Board columns */}
@@ -188,7 +209,7 @@ export function KanbanBoard({ spaceId, boardColumns, boardEnabled }: KanbanBoard
           onDragEnd={handleDragEnd}
         >
           <div className="flex-1 flex gap-0 overflow-x-auto">
-            {boardColumns.map((col) => (
+            {visibleColumns.map((col) => (
               <BoardColumn
                 key={col}
                 columnName={col}

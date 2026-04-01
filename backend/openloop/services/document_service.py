@@ -1,10 +1,9 @@
 import mimetypes
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import HTTPException
-from sqlalchemy import func, literal_column, text
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from backend.openloop.db.models import Document, Space

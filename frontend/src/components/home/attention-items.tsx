@@ -41,7 +41,7 @@ export function AttentionItems({ dashboard, isLoading }: AttentionItemsProps) {
     <Card>
       <CardBody className="flex flex-wrap items-center divide-x divide-border">
         <StatCell label="Pending Approvals" value={dashboard.pending_approvals} warn />
-        <StatCell label="Open Todos" value={dashboard.open_todo_count} />
+        <StatCell label="Open Tasks" value={dashboard.open_task_count} />
         <StatCell label="Active Conversations" value={dashboard.active_conversations} />
         <StatCell label="Unread Notifications" value={dashboard.unread_notifications} warn />
         <StatCell label="Spaces" value={dashboard.total_spaces} />

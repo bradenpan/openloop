@@ -2,7 +2,7 @@
 
 Covers:
 - Records: custom field validation against schema, parent-child, children
-  endpoint, link-todo, sort_by/sort_order on list
+  endpoint, link items, sort_by/sort_order on list
 - Documents: upload text vs binary content_text extraction, content endpoint
   for both types, list with tag/mime_type filters, scan empty dir
 - Search: search_all grouped results, space_id filtering, archived/superseded
@@ -22,7 +22,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,7 +34,6 @@ from backend.openloop.db.models import (
     Conversation,
     ConversationMessage,
     ConversationSummary,
-    DataSource,
     Document,
     MemoryEntry,
     Space,
@@ -358,15 +357,9 @@ def _create_item(client: TestClient, space_id: str, **kw) -> dict:
     return resp.json()
 
 
-def _create_todo(client: TestClient, space_id: str, title: str = "Todo") -> dict:
-    resp = client.post("/api/v1/todos", json={"space_id": space_id, "title": title})
-    assert resp.status_code == 201
-    return resp.json()
-
-
 # ===========================================================================
 # 1. RECORDS — custom field validation, parent-child, children endpoint,
-#    link-todo, sort_by/sort_order
+#    link items, sort_by/sort_order
 # ===========================================================================
 
 
@@ -394,11 +387,11 @@ class TestRecordsIntegration:
         )
         child1 = _create_item(
             client, space["id"], title="Sub Deal A",
-            parent_record_id=parent["id"],
+            parent_item_id=parent["id"],
         )
         child2 = _create_item(
             client, space["id"], title="Sub Deal B",
-            parent_record_id=parent["id"],
+            parent_item_id=parent["id"],
         )
         # unrelated item should not appear
         _create_item(client, space["id"], title="Other Item")
@@ -412,24 +405,24 @@ class TestRecordsIntegration:
         child_ids = {c["id"] for c in data["child_records"]}
         assert child1["id"] in child_ids
         assert child2["id"] in child_ids
-        assert len(data["linked_todos"]) == 0
+        assert len(data["linked_items"]) == 0
 
-    def test_link_todo_shows_in_children_response(self, client: TestClient):
-        """Link a todo to a record, confirm it appears in the children endpoint."""
+    def test_link_item_shows_in_children_response(self, client: TestClient):
+        """Link an item to a record, confirm it appears in the children endpoint."""
         space = _create_crm_space(client)
         record = _create_item(client, space["id"], title="Record", item_type="record")
-        todo = _create_todo(client, space["id"], title="Follow up call")
+        task = _create_item(client, space["id"], title="Follow up call")
 
         link_resp = client.post(
-            f"/api/v1/items/{record['id']}/link-todo",
-            json={"todo_id": todo["id"]},
+            f"/api/v1/items/{record['id']}/links",
+            json={"target_item_id": task["id"]},
         )
-        assert link_resp.status_code == 200
+        assert link_resp.status_code == 201
 
         children_resp = client.get(f"/api/v1/items/{record['id']}/children")
         assert children_resp.status_code == 200
-        assert len(children_resp.json()["linked_todos"]) == 1
-        assert children_resp.json()["linked_todos"][0]["id"] == todo["id"]
+        assert len(children_resp.json()["linked_items"]) == 1
+        assert children_resp.json()["linked_items"][0]["id"] == task["id"]
 
     def test_list_items_sort_by_title_asc_and_desc(self, client: TestClient):
         """sort_by=title with both asc and desc order."""
@@ -476,10 +469,10 @@ class TestRecordsIntegration:
         space = _create_crm_space(client)
         parent = _create_item(client, space["id"], title="Parent", item_type="record")
         child = _create_item(
-            client, space["id"], title="Active", parent_record_id=parent["id"],
+            client, space["id"], title="Active", parent_item_id=parent["id"],
         )
         archived = _create_item(
-            client, space["id"], title="Archived", parent_record_id=parent["id"],
+            client, space["id"], title="Archived", parent_item_id=parent["id"],
         )
         client.post(f"/api/v1/items/{archived['id']}/archive")
 

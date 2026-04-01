@@ -82,12 +82,6 @@ class Space(Base):
 
     # Relationships
     parent: Mapped["Space | None"] = relationship("Space", remote_side="Space.id", lazy="select")
-    todos: Mapped[list["Todo"]] = relationship(
-        "Todo",
-        back_populates="space",
-        lazy="select",
-        cascade="all, delete-orphan",
-    )
     items: Mapped[list["Item"]] = relationship(
         "Item",
         back_populates="space",
@@ -150,49 +144,7 @@ class SpaceWidget(Base):
 
 
 # ---------------------------------------------------------------------------
-# 2. todos
-# ---------------------------------------------------------------------------
-
-
-class Todo(Base):
-    __tablename__ = "todos"
-
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    space_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
-    )
-    title: Mapped[str] = mapped_column(String, nullable=False)
-    is_done: Mapped[bool] = mapped_column(Boolean, default=False)
-    due_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    sort_position: Mapped[float] = mapped_column(Float, default=0.0)
-    created_by: Mapped[str] = mapped_column(String, default="user")
-    source_conversation_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
-    )
-    promoted_to_item_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("items.id", ondelete="SET NULL"), nullable=True
-    )
-    record_id: Mapped[str | None] = mapped_column(
-        String(36), ForeignKey("items.id", ondelete="SET NULL"), nullable=True
-    )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
-
-    # Relationships
-    space: Mapped["Space"] = relationship("Space", back_populates="todos")
-    source_conversation: Mapped["Conversation | None"] = relationship(
-        "Conversation", foreign_keys=[source_conversation_id], lazy="select"
-    )
-    promoted_to_item: Mapped["Item | None"] = relationship(
-        "Item", foreign_keys=[promoted_to_item_id], lazy="select"
-    )
-    record: Mapped["Item | None"] = relationship(
-        "Item", foreign_keys=[record_id], lazy="select"
-    )
-
-
-# ---------------------------------------------------------------------------
-# 3. items (board items — tasks and records)
+# 2. items (unified — tasks and records)
 # ---------------------------------------------------------------------------
 
 
@@ -205,13 +157,14 @@ class Item(Base):
     )
     item_type: Mapped[str] = mapped_column(String, nullable=False)
     is_agent_task: Mapped[bool] = mapped_column(Boolean, default=False)
+    is_done: Mapped[bool] = mapped_column(Boolean, default=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     stage: Mapped[str | None] = mapped_column(String, nullable=True)
     priority: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sort_position: Mapped[float] = mapped_column(Float, default=0.0)
     custom_fields: Mapped[dict | None] = mapped_column(SA_JSON, nullable=True)
-    parent_record_id: Mapped[str | None] = mapped_column(
+    parent_item_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("items.id", ondelete="SET NULL"), nullable=True
     )
     assigned_agent_id: Mapped[str | None] = mapped_column(
@@ -228,8 +181,8 @@ class Item(Base):
 
     # Relationships
     space: Mapped["Space"] = relationship("Space", back_populates="items")
-    parent_record: Mapped["Item | None"] = relationship(
-        "Item", remote_side="Item.id", foreign_keys=[parent_record_id], lazy="select"
+    parent_item: Mapped["Item | None"] = relationship(
+        "Item", remote_side="Item.id", foreign_keys=[parent_item_id], lazy="select"
     )
     assigned_agent: Mapped["Agent | None"] = relationship(
         "Agent", foreign_keys=[assigned_agent_id], lazy="select"
@@ -238,8 +191,8 @@ class Item(Base):
         "Conversation", foreign_keys=[source_conversation_id], lazy="select"
     )
     children: Mapped[list["Item"]] = relationship(
-        "Item", foreign_keys="Item.parent_record_id", lazy="select",
-        overlaps="parent_record",
+        "Item", foreign_keys="Item.parent_item_id", lazy="select",
+        overlaps="parent_item",
     )
     events: Mapped[list["ItemEvent"]] = relationship(
         "ItemEvent",
@@ -253,7 +206,30 @@ class Item(Base):
 
 
 # ---------------------------------------------------------------------------
-# 4. item_events
+# 2b. item_links
+# ---------------------------------------------------------------------------
+
+
+class ItemLink(Base):
+    __tablename__ = "item_links"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    source_item_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    target_item_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("items.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    link_type: Mapped[str] = mapped_column(String, default="related_to")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    # Relationships
+    source_item: Mapped["Item"] = relationship("Item", foreign_keys=[source_item_id], lazy="select")
+    target_item: Mapped["Item"] = relationship("Item", foreign_keys=[target_item_id], lazy="select")
+
+
+# ---------------------------------------------------------------------------
+# 3. item_events
 # ---------------------------------------------------------------------------
 
 
@@ -275,7 +251,7 @@ class ItemEvent(Base):
 
 
 # ---------------------------------------------------------------------------
-# 5. agents
+# 4. agents
 # ---------------------------------------------------------------------------
 
 
@@ -315,7 +291,7 @@ class Agent(Base):
 
 
 # ---------------------------------------------------------------------------
-# 7. agent_permissions
+# 5. agent_permissions
 # ---------------------------------------------------------------------------
 
 
@@ -336,7 +312,7 @@ class AgentPermission(Base):
 
 
 # ---------------------------------------------------------------------------
-# 8. data_sources
+# 6. data_sources
 # ---------------------------------------------------------------------------
 
 
@@ -360,7 +336,7 @@ class DataSource(Base):
 
 
 # ---------------------------------------------------------------------------
-# 9. conversations
+# 7. conversations
 # ---------------------------------------------------------------------------
 
 
@@ -404,7 +380,7 @@ class Conversation(Base):
 
 
 # ---------------------------------------------------------------------------
-# 10. conversation_messages
+# 8. conversation_messages
 # ---------------------------------------------------------------------------
 
 
@@ -425,7 +401,7 @@ class ConversationMessage(Base):
 
 
 # ---------------------------------------------------------------------------
-# 11. conversation_summaries
+# 9. conversation_summaries
 # ---------------------------------------------------------------------------
 
 
@@ -459,7 +435,7 @@ class ConversationSummary(Base):
 
 
 # ---------------------------------------------------------------------------
-# 12. memory_entries
+# 10. memory_entries
 # ---------------------------------------------------------------------------
 
 
@@ -488,7 +464,7 @@ class MemoryEntry(Base):
 
 
 # ---------------------------------------------------------------------------
-# 12b. behavioral_rules (procedural memory)
+# 10b. behavioral_rules (procedural memory)
 # ---------------------------------------------------------------------------
 
 
@@ -519,7 +495,7 @@ class BehavioralRule(Base):
 
 
 # ---------------------------------------------------------------------------
-# 13. documents
+# 11. documents
 # ---------------------------------------------------------------------------
 
 
@@ -551,7 +527,7 @@ class Document(Base):
 
 
 # ---------------------------------------------------------------------------
-# 15. permission_requests
+# 12. permission_requests
 # ---------------------------------------------------------------------------
 
 
@@ -580,7 +556,7 @@ class PermissionRequest(Base):
 
 
 # ---------------------------------------------------------------------------
-# 16. notifications
+# 13. notifications
 # ---------------------------------------------------------------------------
 
 
@@ -600,7 +576,7 @@ class Notification(Base):
 
 
 # ---------------------------------------------------------------------------
-# 17. automations
+# 14. automations
 # ---------------------------------------------------------------------------
 
 
@@ -635,7 +611,7 @@ class Automation(Base):
 
 
 # ---------------------------------------------------------------------------
-# 18. automation_runs
+# 15. automation_runs
 # ---------------------------------------------------------------------------
 
 
@@ -661,7 +637,7 @@ class AutomationRun(Base):
 
 
 # ---------------------------------------------------------------------------
-# 19. background_tasks
+# 16. background_tasks
 # ---------------------------------------------------------------------------
 
 

@@ -8,11 +8,11 @@ import math
 import re
 from datetime import UTC, datetime
 
+from contract.enums import DedupDecision
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from backend.openloop.db.models import MemoryEntry
-from contract.enums import DedupDecision
 
 # ---------------------------------------------------------------------------
 # Namespace caps

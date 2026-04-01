@@ -12,7 +12,6 @@ from sqlalchemy.orm import Session
 
 from backend.openloop.db.models import DataSource, Document, Space
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

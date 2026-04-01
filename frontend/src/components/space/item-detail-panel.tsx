@@ -5,7 +5,6 @@ import { Panel, Button, Badge } from '../ui';
 import type { components } from '../../api/types';
 
 type ItemResponse = components['schemas']['ItemResponse'];
-type TodoResponse = components['schemas']['TodoResponse'];
 
 interface FieldSchema {
   name: string;
@@ -39,7 +38,7 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
   );
   const events = eventsData ?? [];
 
-  // Fetch children (child records + linked todos)
+  // Fetch children (child records + linked items)
   const { data: childrenData } = $api.useQuery(
     'get',
     '/api/v1/items/{item_id}/children',
@@ -47,7 +46,7 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
     { enabled: open && itemId != null },
   );
   const childRecords: ItemResponse[] = childrenData?.child_records ?? [];
-  const linkedTodos: TodoResponse[] = childrenData?.linked_todos ?? [];
+  const linkedItems: ItemResponse[] = childrenData?.linked_items ?? [];
 
   // Fetch field schema from the item's space
   const spaceIdForSchema = itemData?.space_id;
@@ -223,17 +222,18 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
             </div>
           )}
 
-          {/* Linked Todos */}
-          {linkedTodos.length > 0 && (
+          {/* Linked Items */}
+          {linkedItems.length > 0 && (
             <div className="border-t border-border pt-4 mt-1">
-              <h4 className="text-xs font-medium text-muted uppercase tracking-wider mb-3">Linked Todos</h4>
+              <h4 className="text-xs font-medium text-muted uppercase tracking-wider mb-3">Linked Items</h4>
               <div className="flex flex-col gap-1.5">
-                {linkedTodos.map((todo) => (
-                  <div key={todo.id} className="flex items-center gap-2 text-xs bg-raised rounded-md px-3 py-2">
-                    <span className={`flex-1 truncate ${todo.is_done ? 'line-through text-muted' : 'text-foreground'}`}>
-                      {todo.title}
+                {linkedItems.map((linked) => (
+                  <div key={linked.id} className="flex items-center gap-2 text-xs bg-raised rounded-md px-3 py-2">
+                    <span className={`flex-1 truncate ${linked.is_done ? 'line-through text-muted' : 'text-foreground'}`}>
+                      {linked.title}
                     </span>
-                    {todo.is_done && <Badge variant="success">Done</Badge>}
+                    {linked.is_done && <Badge variant="success">Done</Badge>}
+                    <Badge variant={linked.item_type === 'task' ? 'default' : 'info'}>{linked.item_type}</Badge>
                   </div>
                 ))}
               </div>

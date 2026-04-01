@@ -6,11 +6,11 @@ Confidence adjusts asymmetrically: confirmations boost slowly, overrides decay f
 
 from datetime import UTC, datetime
 
+from contract.enums import RuleSourceType
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from backend.openloop.db.models import BehavioralRule
-from contract.enums import RuleSourceType
 
 _VALID_SOURCE_TYPES = {e.value for e in RuleSourceType}
 

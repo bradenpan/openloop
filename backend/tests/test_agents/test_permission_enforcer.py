@@ -63,21 +63,21 @@ class TestMapToolToResource:
         assert resource == "web"
         assert op == Operation.EXECUTE
 
-    def test_mcp_openloop_create_todo(self):
-        resource, op = map_tool_to_resource("mcp__openloop__create_todo", {"title": "test"})
+    def test_mcp_openloop_create_task(self):
+        resource, op = map_tool_to_resource("mcp__openloop__create_task", {"title": "test"})
         assert resource == "openloop-board"
         assert op == Operation.CREATE
 
     def test_mcp_openloop_dynamic_agent_name(self):
         """Tool names with dynamic agent suffixes should map correctly."""
         resource, op = map_tool_to_resource(
-            "mcp__openloop_RecruitingAgent__create_todo", {"title": "test"}
+            "mcp__openloop_RecruitingAgent__create_task", {"title": "test"}
         )
         assert resource == "openloop-board"
         assert op == Operation.CREATE
 
-    def test_mcp_openloop_list_todos(self):
-        resource, op = map_tool_to_resource("mcp__openloop__list_todos", {})
+    def test_mcp_openloop_list_tasks(self):
+        resource, op = map_tool_to_resource("mcp__openloop__list_tasks", {})
         assert resource == "openloop-board"
         assert op == Operation.READ
 
@@ -99,9 +99,9 @@ class TestMapToolToResource:
         assert resource == "openloop-spaces"
         assert op == Operation.READ
 
-    def test_mcp_openloop_complete_todo(self):
+    def test_mcp_openloop_complete_task(self):
         resource, op = map_tool_to_resource(
-            "mcp__openloop_TestAgent__complete_todo", {"todo_id": "123"}
+            "mcp__openloop_TestAgent__complete_task", {"item_id": "123"}
         )
         assert resource == "openloop-board"
         assert op == Operation.EDIT

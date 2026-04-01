@@ -23,14 +23,13 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from backend.openloop.db.models import Agent, ConversationSummary, Item, Todo
+from backend.openloop.db.models import Agent, ConversationSummary, Item
 from backend.openloop.services import (
     agent_service,
     behavioral_rule_service,
     item_service,
     memory_service,
     space_service,
-    todo_service,
 )
 
 # ---------------------------------------------------------------------------
@@ -299,20 +298,22 @@ def _build_behavioral_rules_section(db: Session, agent_id: str, read_only: bool 
 
 
 def _build_todo_board_section(db: Session, space_id: str) -> str:
-    """Build to-do list and board state for a space."""
+    """Build task list and board state for a space."""
     lines: list[str] = []
 
-    # Open to-dos
-    todos = todo_service.list_todos(db, space_id=space_id, is_done=False, limit=10000)
-    if todos:
-        lines.append("## Current To-dos")
-        for t in todos:
-            due = f" (due: {t.due_date.strftime('%Y-%m-%d')})" if t.due_date else ""
-            lines.append(f"- {t.title}{due}")
-
-    # Board items by stage
+    # All items by stage (tasks and records together)
     items = item_service.list_items(db, space_id=space_id, archived=False)
     if items:
+        # Open tasks first
+        open_tasks = [i for i in items if i.item_type == "task" and not i.is_done]
+        if open_tasks:
+            lines.append("## Current Tasks")
+            for t in open_tasks:
+                due = f" (due: {t.due_date.strftime('%Y-%m-%d')})" if t.due_date else ""
+                stage_str = f" [{t.stage}]" if t.stage else ""
+                lines.append(f"- {t.title}{stage_str}{due}")
+
+        # Board state (all items grouped by stage)
         lines.append("")
         lines.append("## Board State")
         stages: dict[str | None, list[Item]] = {}
@@ -323,7 +324,8 @@ def _build_todo_board_section(db: Session, space_id: str) -> str:
             lines.append(f"### {stage_label}")
             for item in stage_items:
                 due = f" (due: {item.due_date.strftime('%Y-%m-%d')})" if item.due_date else ""
-                lines.append(f"- {item.title}{due}")
+                done_str = " [DONE]" if item.is_done else ""
+                lines.append(f"- {item.title}{done_str}{due}")
 
     return "\n".join(lines)
 
@@ -464,17 +466,17 @@ def _build_odin_agents_section(db: Session) -> str:
 
 
 def _build_odin_todo_summary(db: Session) -> str:
-    """Cross-space to-do summary: open count per space, overdue items."""
-    all_todos = todo_service.list_todos(db, is_done=False, limit=10000)
-    if not all_todos:
+    """Cross-space task summary: open count per space, overdue items."""
+    all_tasks = item_service.list_items(db, item_type="task", is_done=False, archived=False, limit=200)
+    if not all_tasks:
         return ""
 
     # Count by space
     space_counts: dict[str, int] = {}
-    overdue: list[Todo] = []
+    overdue: list[Item] = []
     now = datetime.now(UTC)
 
-    for t in all_todos:
+    for t in all_tasks:
         space_counts[t.space_id] = space_counts.get(t.space_id, 0) + 1
         if t.due_date and _naive_utc(t.due_date) < _naive_utc(now):
             overdue.append(t)
@@ -488,7 +490,7 @@ def _build_odin_todo_summary(db: Session) -> str:
         except Exception:
             space_name_cache[sid] = sid
 
-    lines = ["## Cross-Space To-do Summary"]
+    lines = ["## Cross-Space Task Summary"]
     for sid, count in space_counts.items():
         name = space_name_cache.get(sid, sid)
         lines.append(f"- **{name}**: {count} open")

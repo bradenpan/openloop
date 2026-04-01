@@ -17,7 +17,6 @@ import pytest
 from sqlalchemy.orm import Session
 
 from backend.openloop.agents.session_manager import (
-    CHECKPOINT_THRESHOLD,
     CONTEXT_WINDOW_TOKENS,
     FLUSH_MEMORY_PROMPT,
     SessionState,
@@ -33,7 +32,6 @@ from backend.openloop.services import (
     memory_service,
     space_service,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
