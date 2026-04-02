@@ -2,29 +2,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { api } from '../api/client';
+import type { components } from '../api/types';
 
-// ---------------------------------------------------------------------------
-// Types (manually defined since search endpoints are new and types.ts
-// is auto-generated — we define just enough to consume the response)
-// ---------------------------------------------------------------------------
-
-interface SearchResultItem {
-  id: string;
-  type: string;
-  title: string;
-  excerpt: string;
-  space_id: string | null;
-  space_name: string | null;
-  relevance_score: number;
-  created_at: string;
-  source_id: string;
-}
-
-interface SearchResponse {
-  query: string;
-  total_count: number;
-  results: Record<string, SearchResultItem[]>;
-}
+type SearchResultItem = components['schemas']['SearchResultItem'];
+type SearchResponse = components['schemas']['SearchResponse'];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,11 +77,11 @@ export function SearchModal() {
     }
     setLoading(true);
     try {
-      const { data } = await api.GET('/api/v1/search' as never, {
+      const { data } = await api.GET('/api/v1/search', {
         params: { query: { q, limit: 50 } },
-      } as never);
+      });
       if (data) {
-        setResults(data as unknown as SearchResponse);
+        setResults(data);
       }
     } catch {
       // Silently ignore search errors

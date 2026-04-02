@@ -2,17 +2,19 @@
 
 Phase 3b additions: save_fact_with_dedup, get_scored_entries, archive_entry,
 namespace caps, scoring formula, temporal fact management.
+Phase 7.1a additions: auto_archive_superseded, consolidate_space_memory,
+apply_consolidation_report, get_memory_health.
 """
 
 import math
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from contract.enums import DedupDecision
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from backend.openloop.db.models import MemoryEntry
+from backend.openloop.db.models import BehavioralRule, MemoryEntry
 
 # ---------------------------------------------------------------------------
 # Namespace caps
@@ -415,3 +417,215 @@ def _enforce_namespace_cap(
         lowest = min(counted, key=_compute_score)
         lowest.archived_at = datetime.now(UTC)
         db.flush()
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.1a: Lifecycle management
+# ---------------------------------------------------------------------------
+
+
+def auto_archive_superseded(db: Session) -> int:
+    """Auto-archive facts that have been superseded for 90+ days.
+
+    Query: valid_until IS NOT NULL AND valid_until < now - 90 days AND archived_at IS NULL.
+    Sets archived_at = now on matching entries.
+
+    Returns the count of entries archived.
+    """
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=90)
+    entries = (
+        db.query(MemoryEntry)
+        .filter(
+            MemoryEntry.valid_until.isnot(None),
+            MemoryEntry.valid_until < cutoff,
+            MemoryEntry.archived_at.is_(None),
+        )
+        .all()
+    )
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    for entry in entries:
+        entry.archived_at = now
+
+    if entries:
+        db.commit()
+
+    return len(entries)
+
+
+async def consolidate_space_memory(db: Session, space_id: str) -> dict:
+    """Run LLM-driven fact consolidation for a space.
+
+    Loads active facts for the space:{space_id} namespace, calls the LLM to review
+    and produce: proposed merges, contradictions, stale entries (zero access 60+ days).
+
+    Returns a structured dict with the consolidation report. Does NOT auto-apply.
+    """
+    from backend.openloop.services.llm_utils import llm_consolidate_facts
+
+    namespace = f"space:{space_id}"
+    stale_cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=60)  # naive, matches SQLite storage
+
+    # Load active facts
+    active_entries = (
+        db.query(MemoryEntry)
+        .filter(
+            MemoryEntry.namespace == namespace,
+            MemoryEntry.archived_at.is_(None),
+            MemoryEntry.valid_until.is_(None),
+        )
+        .all()
+    )
+
+    if not active_entries:
+        return {"merges": [], "contradictions": [], "stale": []}
+
+    # Prepare facts for LLM
+    facts_for_llm = [
+        {
+            "id": e.id,
+            "key": e.key,
+            "value": e.value,
+            "access_count": e.access_count,
+            "last_accessed": (
+                e.last_accessed.isoformat() if e.last_accessed else "never"
+            ),
+        }
+        for e in active_entries
+    ]
+
+    # Call LLM for consolidation review
+    llm_report = await llm_consolidate_facts(facts_for_llm)
+
+    # Augment stale list with local check: zero access, 60+ days old
+    stale_ids_from_llm = {s.get("id") for s in llm_report.get("stale", []) if s.get("id")}
+    for entry in active_entries:
+        if entry.id in stale_ids_from_llm:
+            continue
+        if entry.access_count == 0 and entry.created_at < stale_cutoff:
+            llm_report["stale"].append({
+                "id": entry.id,
+                "reason": f"Zero access, created {entry.created_at.isoformat()}",
+            })
+
+    return llm_report
+
+
+def apply_consolidation_report(db: Session, space_id: str, report: dict) -> dict:
+    """Apply approved items from a consolidation report.
+
+    Processes:
+    - merges: supersede source entries, create merged entry
+    - stale: archive stale entries
+
+    Returns a summary dict with counts of applied actions.
+    """
+    namespace = f"space:{space_id}"
+    now = datetime.now(UTC)
+    merged_count = 0
+    archived_count = 0
+
+    # Apply merges
+    for merge in report.get("merges") or []:
+        source_ids = merge.get("source_ids", [])
+        merged_value = merge.get("merged_value", "")
+        if not source_ids or not merged_value:
+            continue
+
+        # Supersede source entries (validate namespace to prevent cross-space manipulation)
+        for sid in source_ids:
+            entry = db.query(MemoryEntry).filter(MemoryEntry.id == sid).first()
+            if entry and entry.namespace == namespace:
+                entry.valid_until = now
+
+        # Create merged entry
+        new_entry = MemoryEntry(
+            namespace=namespace,
+            key=_slugify(merged_value),
+            value=merged_value,
+            importance=0.5,
+            source="consolidation",
+            valid_from=now,
+        )
+        db.add(new_entry)
+        merged_count += 1
+
+    # Archive stale entries
+    for stale in report.get("stale") or []:
+        stale_id = stale.get("id")
+        if not stale_id:
+            continue
+        entry = db.query(MemoryEntry).filter(MemoryEntry.id == stale_id).first()
+        if entry and entry.namespace == namespace and entry.archived_at is None:
+            entry.archived_at = now
+            archived_count += 1
+
+    db.commit()
+
+    return {"merged": merged_count, "archived": archived_count}
+
+
+def get_memory_health(db: Session, space_id: str) -> dict:
+    """Return memory health stats for a space.
+
+    Returns: active_facts, archived_facts, active_rules, inactive_rules.
+    """
+    namespace = f"space:{space_id}"
+
+    active_facts = (
+        db.query(MemoryEntry)
+        .filter(
+            MemoryEntry.namespace == namespace,
+            MemoryEntry.archived_at.is_(None),
+            MemoryEntry.valid_until.is_(None),
+        )
+        .count()
+    )
+
+    archived_facts = (
+        db.query(MemoryEntry)
+        .filter(
+            MemoryEntry.namespace == namespace,
+            MemoryEntry.archived_at.isnot(None),
+        )
+        .count()
+    )
+
+    # Rules are agent-scoped, not space-scoped. Count rules for all agents
+    # that have conversations in this space.
+    from backend.openloop.db.models import Conversation
+
+    agent_ids = (
+        db.query(Conversation.agent_id)
+        .filter(Conversation.space_id == space_id)
+        .distinct()
+        .all()
+    )
+    agent_id_list = [a[0] for a in agent_ids]
+
+    active_rules = 0
+    inactive_rules = 0
+    if agent_id_list:
+        active_rules = (
+            db.query(BehavioralRule)
+            .filter(
+                BehavioralRule.agent_id.in_(agent_id_list),
+                BehavioralRule.is_active.is_(True),
+            )
+            .count()
+        )
+        inactive_rules = (
+            db.query(BehavioralRule)
+            .filter(
+                BehavioralRule.agent_id.in_(agent_id_list),
+                BehavioralRule.is_active.is_(False),
+            )
+            .count()
+        )
+
+    return {
+        "active_facts": active_facts,
+        "archived_facts": archived_facts,
+        "active_rules": active_rules,
+        "inactive_rules": inactive_rules,
+    }

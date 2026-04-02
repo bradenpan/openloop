@@ -69,6 +69,97 @@ async def llm_compare_facts(new_fact: str, existing_facts: list[dict]) -> dict:
         return default_add
 
 
+async def llm_consolidate_facts(facts: list[dict]) -> dict:
+    """Review a set of facts for consolidation opportunities using an LLM call.
+
+    Args:
+        facts: List of dicts with 'id', 'key', 'value', 'access_count', 'last_accessed' fields.
+
+    Returns:
+        Dict with keys: merges (list of merge proposals), contradictions (list),
+        stale (list of stale entry ids).
+    """
+    default_empty = {"merges": [], "contradictions": [], "stale": []}
+
+    if not facts or len(facts) < 2:
+        return default_empty
+
+    facts_block = "\n".join(
+        f"[{f['id']}] {f['key']}: {f['value']} (accessed: {f['access_count']}x, last: {f['last_accessed']})"
+        for f in facts
+    )
+
+    prompt = (
+        "You are a memory consolidation system. Review the following facts and identify:\n"
+        "1. MERGES: groups of facts that should be merged into one (provide merged_value)\n"
+        "2. CONTRADICTIONS: pairs of facts that contradict each other\n"
+        "3. STALE: facts with 0 access count that appear outdated or redundant\n"
+        "\n"
+        f"Facts:\n{facts_block}\n"
+        "\n"
+        "Respond with ONLY valid JSON:\n"
+        '{\n'
+        '  "merges": [{"source_ids": ["id1", "id2"], "merged_value": "combined text", "reason": "why"}],\n'
+        '  "contradictions": [{"ids": ["id1", "id2"], "description": "what contradicts"}],\n'
+        '  "stale": [{"id": "id1", "reason": "why stale"}]\n'
+        '}'
+    )
+
+    try:
+        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
+        response_text = ""
+        async for event in query(
+            prompt=prompt,
+            options=ClaudeAgentOptions(model=DEDUP_MODEL),
+        ):
+            if isinstance(event, ResultMessage):
+                response_text = event.result
+                break
+
+        if not response_text:
+            logger.warning("Empty response from SDK consolidation call, returning empty report")
+            return default_empty
+
+        return _parse_consolidation_json(response_text)
+
+    except (Exception, ExceptionGroup):
+        logger.warning("SDK call failed for fact consolidation, returning empty report", exc_info=True)
+        return default_empty
+
+
+def _parse_consolidation_json(text: str) -> dict:
+    """Parse JSON from LLM consolidation response.
+
+    Returns a validated dict with merges/contradictions/stale keys.
+    Falls back to empty report if parsing fails.
+    """
+    default_empty = {"merges": [], "contradictions": [], "stale": []}
+
+    # Strip markdown code fences if present
+    fence_match = re.search(r"```(?:json)?\s*\n?(.*?)\n?\s*```", text, re.DOTALL)
+    if fence_match:
+        text = fence_match.group(1)
+
+    text = text.strip()
+
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        logger.warning("Failed to parse LLM consolidation response as JSON: %s", text[:200])
+        return default_empty
+
+    if not isinstance(parsed, dict):
+        logger.warning("LLM consolidation response is not a dict: %s", type(parsed))
+        return default_empty
+
+    return {
+        "merges": parsed.get("merges", []),
+        "contradictions": parsed.get("contradictions", []),
+        "stale": parsed.get("stale", []),
+    }
+
+
 def _parse_llm_json(text: str) -> dict:
     """Parse JSON from LLM response, handling markdown code fences.
 

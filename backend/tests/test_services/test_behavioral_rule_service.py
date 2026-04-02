@@ -106,7 +106,7 @@ class TestListRules:
 
     def test_active_only_filter(self, db_session: Session):
         agent = _make_agent(db_session)
-        active = _make_rule(db_session, agent.id, rule="active")
+        _make_rule(db_session, agent.id, rule="active")
         inactive = _make_rule(db_session, agent.id, rule="inactive")
         behavioral_rule_service.deactivate_rule(db_session, inactive.id)
 
@@ -255,7 +255,7 @@ class TestApplyRules:
 
     def test_excludes_inactive(self, db_session: Session):
         agent = _make_agent(db_session)
-        active = _make_rule(db_session, agent.id, rule="active")
+        _make_rule(db_session, agent.id, rule="active")
         inactive = _make_rule(db_session, agent.id, rule="inactive")
         behavioral_rule_service.deactivate_rule(db_session, inactive.id)
 

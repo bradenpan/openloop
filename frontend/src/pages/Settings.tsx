@@ -1,3 +1,4 @@
+import { Button } from '../components/ui';
 import { useUIStore, type PaletteId } from '../stores/ui-store';
 
 const palettes: { id: PaletteId; name: string; desc: string }[] = [
@@ -21,12 +22,9 @@ export default function Settings() {
 
         <div className="mb-6">
           <div className="text-sm font-medium text-muted mb-2">Theme</div>
-          <button
-            onClick={toggleTheme}
-            className="px-4 py-2 bg-surface border border-border rounded-md text-sm hover:bg-raised transition-colors cursor-pointer"
-          >
+          <Button variant="secondary" onClick={toggleTheme}>
             {theme === 'dark' ? 'Dark' : 'Light'} — click to toggle
-          </button>
+          </Button>
         </div>
 
         <div>

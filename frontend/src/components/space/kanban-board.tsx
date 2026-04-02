@@ -200,6 +200,14 @@ export function KanbanBoard({ spaceId, boardColumns, boardEnabled }: KanbanBoard
         <div className="flex-1 flex items-center justify-center">
           <p className="text-sm text-muted">Loading board...</p>
         </div>
+      ) : items.length === 0 ? (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-sm text-muted">No items yet.</p>
+            <p className="text-xs text-muted mt-1 mb-3">Add a task or start a conversation to get going.</p>
+            <Button size="sm" onClick={() => setCreateModalOpen(true)}>+ Add Item</Button>
+          </div>
+        </div>
       ) : (
         <DndContext
           sensors={sensors}

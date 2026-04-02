@@ -23,7 +23,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from backend.openloop.db.models import Agent, ConversationSummary, Item
+from backend.openloop.db.models import Agent, Conversation, ConversationSummary, Item
 from backend.openloop.services import (
     agent_service,
     behavioral_rule_service,
@@ -330,16 +330,35 @@ def _build_behavioral_rules_section(db: Session, agent_id: str, read_only: bool 
 
     Calls apply_rules() which increments apply_count and last_applied
     (unless read_only=True for estimation paths).
+
+    Phase 7.1a: Lazy auto-demotion — if confidence < 0.3 AND apply_count >= 10,
+    deactivate the rule and exclude it from context.
     """
     rules = behavioral_rule_service.apply_rules(db, agent_id=agent_id, read_only=read_only)
     if not rules:
+        return ""
+
+    # Auto-demotion check: deactivate low-confidence rules with enough history
+    active_rules = []
+    demoted = False
+    for rule in rules:
+        if rule.confidence < 0.3 and rule.apply_count >= 10:
+            rule.is_active = False
+            demoted = True
+            continue
+        active_rules.append(rule)
+
+    if demoted:
+        db.commit()
+
+    if not active_rules:
         return ""
 
     lines = [
         "## Behavioral Rules",
         "These rules reflect learned preferences and corrections. Follow them.",
     ]
-    for rule in rules:
+    for rule in active_rules:
         lines.append(f"- [confidence: {rule.confidence}] {rule.rule}")
     return "\n".join(lines)
 
@@ -401,13 +420,26 @@ def _build_summaries_section(
         .first()
     )
 
-    # Load unconsolidated individual summaries
+    # Load unconsolidated individual summaries.
+    # Phase 7.1a: Exclude checkpoints for closed conversations (mid-conversation
+    # snapshots are only useful while the conversation is still active).
+    from sqlalchemy import and_, or_
+
     unconsolidated = (
         db.query(ConversationSummary)
+        .outerjoin(Conversation, ConversationSummary.conversation_id == Conversation.id)
         .filter(
             ConversationSummary.space_id == space_id,
             ConversationSummary.is_meta_summary.is_(False),
             ConversationSummary.consolidated_into.is_(None),
+            # Keep non-checkpoints always; keep checkpoints only for active conversations
+            or_(
+                ConversationSummary.is_checkpoint.is_(False),
+                and_(
+                    ConversationSummary.is_checkpoint.is_(True),
+                    Conversation.status == "active",
+                ),
+            ),
         )
         .order_by(ConversationSummary.created_at.desc())
         .all()

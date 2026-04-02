@@ -67,6 +67,12 @@ FLUSH_MEMORY_PROMPT = (
 RECENT_TURNS_VERBATIM = 7
 
 # ---------------------------------------------------------------------------
+# Rate limit retry configuration
+# ---------------------------------------------------------------------------
+RATE_LIMIT_BACKOFF_SECONDS = [30, 60, 120]  # Exponential backoff schedule
+RATE_LIMIT_MAX_RETRIES = 3
+
+# ---------------------------------------------------------------------------
 # Concurrency limits
 # ---------------------------------------------------------------------------
 MAX_INTERACTIVE_SESSIONS = 5
@@ -160,6 +166,120 @@ def _check_concurrency(session_type: str = "active") -> None:
                 status_code=429,
                 detail="Too many active sessions. Please close a conversation first.",
             )
+
+
+# ---------------------------------------------------------------------------
+# Rate limit detection & retry
+# ---------------------------------------------------------------------------
+
+
+def _is_rate_limit_error(exc: BaseException) -> bool:
+    """Check if an exception is a rate limit / overloaded error.
+
+    Inspects both HTTP status codes (429) and error message text.
+    Handles ExceptionGroup by checking all contained exceptions.
+    """
+    if isinstance(exc, ExceptionGroup):
+        return any(_is_rate_limit_error(e) for e in exc.exceptions)
+
+    exc_str = str(exc).lower()
+    # Check for 429 status code patterns
+    if "429" in exc_str:
+        return True
+    # Check for common rate limit / overloaded phrases
+    for phrase in ("rate limit", "rate_limit", "overloaded", "too many requests"):
+        if phrase in exc_str:
+            return True
+    # Check for status_code attribute (e.g. httpx.HTTPStatusError)
+    status_code = getattr(exc, "status_code", None)
+    if status_code == 429:
+        return True
+    # Check for response attribute with status_code
+    response = getattr(exc, "response", None)
+    if response is not None and getattr(response, "status_code", None) == 429:
+        return True
+    return False
+
+
+async def _query_with_retry(
+    query_fn,
+    query_kwargs: dict,
+    *,
+    conversation_id: str,
+    space_id: str | None = None,
+) -> AsyncGenerator:
+    """Wrap an SDK query() call with rate limit retry logic.
+
+    On rate limit errors:
+    - Creates a notification
+    - Publishes a rate_limited SSE event
+    - Waits with exponential backoff (30s, 60s, 120s)
+    - Retries up to 3 times
+
+    On final failure, re-raises the exception for existing error handlers.
+    Yields events from the successful query() call.
+    """
+    from backend.openloop.agents.event_bus import event_bus
+    from backend.openloop.database import SessionLocal
+
+    last_exc: BaseException | None = None
+    for attempt in range(RATE_LIMIT_MAX_RETRIES + 1):
+        try:
+            async for event in query_fn(**query_kwargs):
+                yield event
+            return  # Success
+        except (Exception, ExceptionGroup) as exc:
+            if not _is_rate_limit_error(exc):
+                raise  # Not a rate limit error — let caller handle it
+
+            last_exc = exc
+            if attempt >= RATE_LIMIT_MAX_RETRIES:
+                break  # Out of retries
+
+            wait_seconds = RATE_LIMIT_BACKOFF_SECONDS[attempt]
+            logger.warning(
+                "Rate limited (attempt %d/%d) for conversation %s — "
+                "retrying in %ds: %s",
+                attempt + 1,
+                RATE_LIMIT_MAX_RETRIES,
+                conversation_id,
+                wait_seconds,
+                exc,
+            )
+
+            # Create notification and publish SSE event
+            try:
+                db_notify = SessionLocal()
+                try:
+                    notification_service.create_notification(
+                        db_notify,
+                        type="system",
+                        title="Rate limited — retrying",
+                        body=(
+                            f"API rate limit hit (attempt {attempt + 1}/{RATE_LIMIT_MAX_RETRIES}). "
+                            f"Retrying in {wait_seconds}s."
+                        ),
+                        space_id=space_id,
+                        conversation_id=conversation_id,
+                    )
+                finally:
+                    db_notify.close()
+            except Exception:
+                logger.debug("Failed to create rate limit notification", exc_info=True)
+
+            await event_bus.publish({
+                "type": "rate_limited",
+                "conversation_id": conversation_id,
+                "attempt": attempt + 1,
+                "max_retries": RATE_LIMIT_MAX_RETRIES,
+                "retry_after_seconds": wait_seconds,
+            })
+
+            await asyncio.sleep(wait_seconds)
+
+    # All retries exhausted — re-raise
+    if last_exc is not None:
+        raise last_exc
 
 
 # ---------------------------------------------------------------------------
@@ -380,20 +500,26 @@ async def _send_message_inner(
         await flush_memory(db, conversation_id=conversation_id)
         await _compress_conversation(db, conversation_id=conversation_id)
 
-    # Call the SDK with streaming
+    # Call the SDK with streaming + rate limit retry
     # NOTE: The user message is saved by the API route, not here, to avoid double-saving.
     full_response = ""
     result_message: ResultMessage | None = None
+    query_kwargs = {
+        "prompt": message,
+        "resume": sdk_session_id,
+        "options": ClaudeAgentOptions(
+            model=model,
+            mcp_servers=[mcp_server],
+            hooks=hooks,
+        ),
+        "include_partial_messages": True,
+    }
     try:
-        async for event in query(
-            prompt=message,
-            resume=sdk_session_id,
-            options=ClaudeAgentOptions(
-                model=model,
-                mcp_servers=[mcp_server],
-                hooks=hooks,
-            ),
-            include_partial_messages=True,
+        async for event in _query_with_retry(
+            query,
+            query_kwargs,
+            conversation_id=conversation_id,
+            space_id=state.space_id,
         ):
             if isinstance(event, StreamEvent):
                 yield {"type": "stream", "event": event}
@@ -555,6 +681,27 @@ async def close_session(
             conversation_id=conversation_id,
             summary=summary_text,
         )
+
+    # Auto-consolidate if threshold reached
+    conversation = conversation_service.get_conversation(db, conversation_id)
+    if conversation.space_id:
+        try:
+            from backend.openloop.services import consolidation_service
+
+            count = consolidation_service.get_unconsolidated_count(db, conversation.space_id)
+            if count >= 20:
+                logger.info(
+                    "Auto-consolidating %d summaries for space %s",
+                    count,
+                    conversation.space_id,
+                )
+                await consolidation_service.generate_meta_summary(db, conversation.space_id)
+        except (Exception, ExceptionGroup) as exc:
+            logger.warning(
+                "Auto-consolidation failed for space %s (non-blocking): %s",
+                conversation.space_id,
+                exc,
+            )
 
     # Close the conversation
     conversation_service.close_conversation(db, conversation_id)
@@ -778,9 +925,14 @@ async def _run_background_task(
             if sdk_session_id and turn > 1:
                 query_kwargs["resume"] = sdk_session_id
 
-            # Execute one turn
+            # Execute one turn with rate limit retry
             turn_result = ""
-            async for event in query(**query_kwargs):
+            async for event in _query_with_retry(
+                query,
+                query_kwargs,
+                conversation_id=conversation_id,
+                space_id=space_id,
+            ):
                 if isinstance(event, ResultMessage):
                     sdk_session_id = event.session_id
                     turn_result = event.result or ""

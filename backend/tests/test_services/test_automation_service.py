@@ -6,9 +6,8 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from backend.openloop.db.models import Agent, AutomationRun
+from backend.openloop.db.models import Agent
 from backend.openloop.services import agent_service, automation_service
-
 
 # ---------------------------------------------------------------------------
 # Helpers

@@ -58,6 +58,14 @@ export default function Agents() {
 
       {isLoading ? (
         <p className="text-sm text-muted">Loading agents...</p>
+      ) : agents.length === 0 ? (
+        <div className="text-center py-16">
+          <p className="text-sm text-muted">No agents yet.</p>
+          <p className="text-xs text-muted mt-1 mb-4">Create an agent to get started.</p>
+          <Button onClick={() => { setEditAgent(null); setFormOpen(true); }}>
+            New Agent
+          </Button>
+        </div>
       ) : (
         <AgentList
           agents={agents}

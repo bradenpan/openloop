@@ -1,9 +1,14 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from backend.openloop.api.schemas import SpaceCreate, SpaceResponse, SpaceUpdate
+from backend.openloop.api.schemas import (
+    ConsolidationResponse,
+    SpaceCreate,
+    SpaceResponse,
+    SpaceUpdate,
+)
 from backend.openloop.database import get_db
-from backend.openloop.services import space_service
+from backend.openloop.services import consolidation_service, space_service
 
 router = APIRouter(prefix="/api/v1/spaces", tags=["spaces"])
 
@@ -43,6 +48,24 @@ def update_space(space_id: str, body: SpaceUpdate, db: Session = Depends(get_db)
 def get_field_schema(space_id: str, db: Session = Depends(get_db)):
     space = space_service.get_space(db, space_id)
     return space.custom_field_schema or []
+
+
+@router.post("/{space_id}/consolidate", response_model=ConsolidationResponse)
+async def consolidate_summaries(
+    space_id: str, db: Session = Depends(get_db)
+) -> ConsolidationResponse:
+    # 404 if space not found
+    space_service.get_space(db, space_id)
+
+    count = consolidation_service.get_unconsolidated_count(db, space_id)
+    if count < 2:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Not enough unconsolidated summaries to consolidate (found {count}, need at least 2)",
+        )
+
+    meta = await consolidation_service.generate_meta_summary(db, space_id)
+    return ConsolidationResponse.model_validate(meta)
 
 
 @router.delete("/{space_id}", status_code=204)

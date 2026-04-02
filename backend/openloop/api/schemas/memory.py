@@ -2,7 +2,18 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
-__all__ = ["MemoryCreate", "MemoryUpdate", "MemoryResponse"]
+__all__ = [
+    "MemoryCreate",
+    "MemoryUpdate",
+    "MemoryResponse",
+    "MemoryHealthResponse",
+    "ConsolidationMerge",
+    "ConsolidationContradiction",
+    "ConsolidationStale",
+    "ConsolidationReportResponse",
+    "ConsolidationApplyRequest",
+    "ConsolidationApplyResponse",
+]
 
 
 class MemoryCreate(BaseModel):
@@ -41,3 +52,47 @@ class MemoryResponse(BaseModel):
     category: str | None
     created_at: datetime
     updated_at: datetime
+
+
+# ---------------------------------------------------------------------------
+# Phase 7.1a: Memory lifecycle schemas
+# ---------------------------------------------------------------------------
+
+
+class MemoryHealthResponse(BaseModel):
+    active_facts: int
+    archived_facts: int
+    active_rules: int
+    inactive_rules: int
+
+
+class ConsolidationMerge(BaseModel):
+    source_ids: list[str]
+    merged_value: str
+    reason: str | None = None
+
+
+class ConsolidationContradiction(BaseModel):
+    ids: list[str]
+    description: str | None = None
+
+
+class ConsolidationStale(BaseModel):
+    id: str
+    reason: str | None = None
+
+
+class ConsolidationReportResponse(BaseModel):
+    merges: list[ConsolidationMerge]
+    contradictions: list[ConsolidationContradiction]
+    stale: list[ConsolidationStale]
+
+
+class ConsolidationApplyRequest(BaseModel):
+    merges: list[ConsolidationMerge] | None = None
+    stale: list[ConsolidationStale] | None = None
+
+
+class ConsolidationApplyResponse(BaseModel):
+    merged: int
+    archived: int

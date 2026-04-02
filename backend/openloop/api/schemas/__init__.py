@@ -17,4 +17,5 @@ from backend.openloop.api.schemas.notifications import *  # noqa: F401, F403
 from backend.openloop.api.schemas.odin import *  # noqa: F401, F403
 from backend.openloop.api.schemas.search import *  # noqa: F401, F403
 from backend.openloop.api.schemas.spaces import *  # noqa: F401, F403
+from backend.openloop.api.schemas.system import *  # noqa: F401, F403
 from backend.openloop.api.schemas.widgets import *  # noqa: F401, F403

@@ -133,10 +133,10 @@ def test_list_items_sort_by_created_at(client: TestClient):
 def test_get_record_children(client: TestClient):
     space = _create_crm_space(client)
     record = _create_item(client, space["id"], title="Company", item_type="record")
-    child1 = _create_item(
+    _create_item(
         client, space["id"], title="Task 1", parent_item_id=record["id"]
     )
-    child2 = _create_item(
+    _create_item(
         client, space["id"], title="Task 2", parent_item_id=record["id"]
     )
 

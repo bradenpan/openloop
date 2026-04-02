@@ -1472,7 +1472,7 @@
           "events"
         ],
         "summary": "Sse Events",
-        "description": "Multiplexed SSE endpoint \u2014 streams all events to the frontend.",
+        "description": "Multiplexed SSE endpoint \u2014 streams all events to the frontend.\n\nSupports reconnection via the Last-Event-ID header: on reconnect the\nclient receives any events it missed from the in-memory replay buffer.",
         "operationId": "sse_events_api_v1_events_get",
         "responses": {
           "200": {
@@ -2992,6 +2992,177 @@
         }
       }
     },
+    "/api/v1/memory/{entry_id}/archive": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Archive Entry",
+        "operationId": "archive_entry_api_v1_memory__entry_id__archive_post",
+        "parameters": [
+          {
+            "name": "entry_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Entry Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/spaces/{space_id}/memory/health": {
+      "get": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Get Memory Health",
+        "operationId": "get_memory_health_api_v1_spaces__space_id__memory_health_get",
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Space Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MemoryHealthResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/spaces/{space_id}/memory/consolidate": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Consolidate Memory",
+        "operationId": "consolidate_memory_api_v1_spaces__space_id__memory_consolidate_post",
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Space Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolidationReportResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/spaces/{space_id}/memory/consolidate/apply": {
+      "post": {
+        "tags": [
+          "memory"
+        ],
+        "summary": "Apply Consolidation",
+        "operationId": "apply_consolidation_api_v1_spaces__space_id__memory_consolidate_apply_post",
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Space Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConsolidationApplyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolidationApplyResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/notifications/mark-all-read": {
       "post": {
         "tags": [
@@ -3822,6 +3993,70 @@
         }
       }
     },
+    "/api/v1/spaces/{space_id}/consolidate": {
+      "post": {
+        "tags": [
+          "spaces"
+        ],
+        "summary": "Consolidate Summaries",
+        "operationId": "consolidate_summaries_api_v1_spaces__space_id__consolidate_post",
+        "parameters": [
+          {
+            "name": "space_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Space Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConsolidationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/backup-status": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get Backup Status",
+        "description": "Return the last backup timestamp and whether a backup is needed.",
+        "operationId": "get_backup_status_api_v1_system_backup_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackupStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/health": {
       "get": {
         "summary": "Health",
@@ -4193,8 +4428,7 @@
             "title": "Instruction"
           },
           "trigger_type": {
-            "type": "string",
-            "title": "Trigger Type"
+            "$ref": "#/components/schemas/AutomationTriggerType"
           },
           "cron_expression": {
             "anyOf": [
@@ -4478,6 +4712,14 @@
         ],
         "title": "AutomationRunResponse"
       },
+      "AutomationTriggerType": {
+        "type": "string",
+        "enum": [
+          "cron",
+          "event"
+        ],
+        "title": "AutomationTriggerType"
+      },
       "AutomationUpdate": {
         "properties": {
           "name": {
@@ -4527,13 +4769,12 @@
           "trigger_type": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/AutomationTriggerType"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Trigger Type"
+            ]
           },
           "cron_expression": {
             "anyOf": [
@@ -4583,6 +4824,41 @@
         "type": "object",
         "title": "AutomationUpdate"
       },
+      "BackupStatusResponse": {
+        "properties": {
+          "last_backup_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Backup At"
+          },
+          "hours_since_backup": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hours Since Backup"
+          },
+          "needs_backup": {
+            "type": "boolean",
+            "title": "Needs Backup"
+          }
+        },
+        "type": "object",
+        "required": [
+          "needs_backup"
+        ],
+        "title": "BackupStatusResponse"
+      },
       "Body_upload_document_api_v1_documents_upload_post": {
         "properties": {
           "file": {
@@ -4596,6 +4872,245 @@
           "file"
         ],
         "title": "Body_upload_document_api_v1_documents_upload_post"
+      },
+      "ConsolidationApplyRequest": {
+        "properties": {
+          "merges": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ConsolidationMerge"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Merges"
+          },
+          "stale": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ConsolidationStale"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stale"
+          }
+        },
+        "type": "object",
+        "title": "ConsolidationApplyRequest"
+      },
+      "ConsolidationApplyResponse": {
+        "properties": {
+          "merged": {
+            "type": "integer",
+            "title": "Merged"
+          },
+          "archived": {
+            "type": "integer",
+            "title": "Archived"
+          }
+        },
+        "type": "object",
+        "required": [
+          "merged",
+          "archived"
+        ],
+        "title": "ConsolidationApplyResponse"
+      },
+      "ConsolidationContradiction": {
+        "properties": {
+          "ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ids"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ids"
+        ],
+        "title": "ConsolidationContradiction"
+      },
+      "ConsolidationMerge": {
+        "properties": {
+          "source_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Source Ids"
+          },
+          "merged_value": {
+            "type": "string",
+            "title": "Merged Value"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_ids",
+          "merged_value"
+        ],
+        "title": "ConsolidationMerge"
+      },
+      "ConsolidationReportResponse": {
+        "properties": {
+          "merges": {
+            "items": {
+              "$ref": "#/components/schemas/ConsolidationMerge"
+            },
+            "type": "array",
+            "title": "Merges"
+          },
+          "contradictions": {
+            "items": {
+              "$ref": "#/components/schemas/ConsolidationContradiction"
+            },
+            "type": "array",
+            "title": "Contradictions"
+          },
+          "stale": {
+            "items": {
+              "$ref": "#/components/schemas/ConsolidationStale"
+            },
+            "type": "array",
+            "title": "Stale"
+          }
+        },
+        "type": "object",
+        "required": [
+          "merges",
+          "contradictions",
+          "stale"
+        ],
+        "title": "ConsolidationReportResponse"
+      },
+      "ConsolidationResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          },
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "decisions": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Decisions"
+          },
+          "open_questions": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Open Questions"
+          },
+          "is_meta_summary": {
+            "type": "boolean",
+            "title": "Is Meta Summary"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "space_id",
+          "conversation_id",
+          "summary",
+          "decisions",
+          "open_questions",
+          "is_meta_summary",
+          "created_at"
+        ],
+        "title": "ConsolidationResponse"
+      },
+      "ConsolidationStale": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "ConsolidationStale"
       },
       "ConversationCreate": {
         "properties": {
@@ -5885,6 +6400,34 @@
           "value"
         ],
         "title": "MemoryCreate"
+      },
+      "MemoryHealthResponse": {
+        "properties": {
+          "active_facts": {
+            "type": "integer",
+            "title": "Active Facts"
+          },
+          "archived_facts": {
+            "type": "integer",
+            "title": "Archived Facts"
+          },
+          "active_rules": {
+            "type": "integer",
+            "title": "Active Rules"
+          },
+          "inactive_rules": {
+            "type": "integer",
+            "title": "Inactive Rules"
+          }
+        },
+        "type": "object",
+        "required": [
+          "active_facts",
+          "archived_facts",
+          "active_rules",
+          "inactive_rules"
+        ],
+        "title": "MemoryHealthResponse"
       },
       "MemoryResponse": {
         "properties": {

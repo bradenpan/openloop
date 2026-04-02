@@ -158,7 +158,7 @@ class TestGetScoredEntries:
         assert len(results) == 3
 
     def test_excludes_archived_by_default(self, db_session: Session):
-        active = _create_entry(db_session, "space:arc", "active", "still here")
+        _create_entry(db_session, "space:arc", "active", "still here")
         archived = _create_entry(db_session, "space:arc", "archived", "gone")
         memory_service.archive_entry(db_session, archived.id)
 

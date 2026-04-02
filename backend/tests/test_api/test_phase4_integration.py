@@ -442,9 +442,9 @@ class TestRecordsIntegration:
     def test_list_items_sort_by_due_date(self, client: TestClient):
         """sort_by=due_date — items without due_date still appear."""
         space = _create_space(client)
-        i1 = _create_item(client, space["id"], title="No date")
-        i2 = _create_item(client, space["id"], title="With date", due_date="2026-06-01")
-        i3 = _create_item(client, space["id"], title="Earlier date", due_date="2026-01-15")
+        _create_item(client, space["id"], title="No date")
+        _create_item(client, space["id"], title="With date", due_date="2026-06-01")
+        _create_item(client, space["id"], title="Earlier date", due_date="2026-01-15")
 
         resp = client.get("/api/v1/items?sort_by=due_date&sort_order=asc")
         assert resp.status_code == 200
@@ -584,7 +584,7 @@ class TestDocumentsIntegration:
         # Add tags via PATCH
         client.patch(f"/api/v1/documents/{d1_id}", json={"tags": ["alpha", "beta"]})
 
-        d2 = client.post("/api/v1/documents", json={
+        client.post("/api/v1/documents", json={
             "space_id": space["id"], "title": "Untagged",
         })
 

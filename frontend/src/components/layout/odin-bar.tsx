@@ -140,6 +140,7 @@ export function OdinBar() {
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            data-odin-input
             className="flex-1 bg-raised border border-border rounded-md px-3 py-1.5 text-sm text-foreground placeholder:text-muted focus:outline-none focus:ring-2 focus:ring-primary"
             placeholder="Ask Odin anything..."
             disabled={isStreaming}

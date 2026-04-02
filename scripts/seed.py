@@ -206,25 +206,25 @@ def seed(db):
     )
     item_service.update_item(db, t1.id, is_done=True)
 
-    t2 = item_service.create_item(
+    item_service.create_item(
         db, space_id=recruiting.id, title="Schedule phone screen with Marcus Johnson",
         item_type="task", due_date=_days_from_now(2),
     )
-    t3 = item_service.create_item(
+    item_service.create_item(
         db, space_id=recruiting.id, title="Send offer letter to Priya Patel",
         item_type="task", due_date=_days_from_now(1),
     )
-    t4 = item_service.create_item(
+    item_service.create_item(
         db, space_id=recruiting.id, title="Post Senior Backend role to LinkedIn",
         item_type="task",
     )
 
     # OpenLoop space tasks
-    t5 = item_service.create_item(
+    item_service.create_item(
         db, space_id=openloop.id, title="Write API tests for conversation endpoints",
         item_type="task",
     )
-    t6 = item_service.create_item(
+    item_service.create_item(
         db, space_id=openloop.id, title="Fix SSE reconnection bug on Safari",
         item_type="task", due_date=_days_from_now(3),
     )
@@ -234,7 +234,7 @@ def seed(db):
     )
     item_service.update_item(db, t7.id, is_done=True)
 
-    t8 = item_service.create_item(
+    item_service.create_item(
         db, space_id=openloop.id, title="Benchmark SQLite query performance",
         item_type="task", due_date=_days_from_now(7),
     )
@@ -246,11 +246,11 @@ def seed(db):
     )
     item_service.update_item(db, t9.id, is_done=True)
 
-    t10 = item_service.create_item(
+    item_service.create_item(
         db, space_id=personal.id, title="Call dentist for appointment",
         item_type="task", due_date=_days_from_now(5),
     )
-    t11 = item_service.create_item(
+    item_service.create_item(
         db, space_id=personal.id, title="Read chapter 4 of Designing Data-Intensive Applications",
         item_type="task",
     )
@@ -508,7 +508,7 @@ def seed(db):
     # ------------------------------------------------------------------
     print("  Creating notifications...")
 
-    notif_unread = notification_service.create_notification(
+    notification_service.create_notification(
         db,
         type="approval_request",
         title="Code Agent wants to create a GitHub issue",

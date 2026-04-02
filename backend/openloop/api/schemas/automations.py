@@ -1,9 +1,8 @@
 from datetime import datetime
 
+from contract.enums import AutomationTriggerType
 from croniter import croniter
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
-
-from contract.enums import AutomationTriggerType
 
 __all__ = [
     "AutomationCreate",

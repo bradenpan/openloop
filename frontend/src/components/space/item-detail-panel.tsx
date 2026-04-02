@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
 import { Panel, Button, Badge } from '../ui';
+import { formatDate } from '../../utils/dates';
 import type { components } from '../../api/types';
 
 type ItemResponse = components['schemas']['ItemResponse'];
@@ -76,13 +77,30 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
     }
   }, [item]);
 
+  const needsMove = () => item && stage !== (item.stage ?? '');
+
+  const moveItem = $api.useMutation('post', '/api/v1/items/{item_id}/move', {
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/items'] });
+      setDirty(false);
+    },
+  });
+
   const updateItem = $api.useMutation('patch', '/api/v1/items/{item_id}', {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/items'] });
       queryClient.invalidateQueries({
         queryKey: ['get', '/api/v1/items/{item_id}', { params: { path: { item_id: itemId! } } }],
       });
-      setDirty(false);
+      // Chain move after update succeeds
+      if (itemId && needsMove()) {
+        moveItem.mutate({
+          params: { path: { item_id: itemId } },
+          body: { stage },
+        });
+      } else {
+        setDirty(false);
+      }
     },
   });
 
@@ -97,24 +115,11 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
           ? (priority ? Number(priority) : null)
           : undefined,
         due_date: dueDate !== (item.due_date ? item.due_date.slice(0, 10) : '')
-          ? (dueDate ? `${dueDate}T00:00:00` : null)
+          ? (dueDate ? `${dueDate}T00:00:00Z` : null)
           : undefined,
       },
     });
-    // Stage change uses move endpoint
-    if (stage !== (item.stage ?? '')) {
-      moveItem.mutate({
-        params: { path: { item_id: itemId } },
-        body: { stage },
-      });
-    }
   }
-
-  const moveItem = $api.useMutation('post', '/api/v1/items/{item_id}/move', {
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/items'] });
-    },
-  });
 
   function markDirty() {
     setDirty(true);
@@ -130,8 +135,9 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
         <div className="flex flex-col gap-5">
           {/* Title */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted uppercase tracking-wider">Title</label>
+            <label htmlFor="item-title" className="text-xs font-medium text-muted uppercase tracking-wider">Title</label>
             <input
+              id="item-title"
               value={title}
               onChange={(e) => { setTitle(e.target.value); markDirty(); }}
               className="bg-raised text-foreground border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
@@ -140,8 +146,9 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
 
           {/* Description */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted uppercase tracking-wider">Description</label>
+            <label htmlFor="item-description" className="text-xs font-medium text-muted uppercase tracking-wider">Description</label>
             <textarea
+              id="item-description"
               value={description}
               onChange={(e) => { setDescription(e.target.value); markDirty(); }}
               rows={4}
@@ -152,8 +159,9 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
 
           {/* Stage */}
           <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-medium text-muted uppercase tracking-wider">Stage</label>
+            <label htmlFor="item-stage" className="text-xs font-medium text-muted uppercase tracking-wider">Stage</label>
             <select
+              id="item-stage"
               value={stage}
               onChange={(e) => { setStage(e.target.value); markDirty(); }}
               className="bg-raised text-foreground border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
@@ -167,8 +175,9 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
           {/* Priority + Due Date row */}
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted uppercase tracking-wider">Priority</label>
+              <label htmlFor="item-priority" className="text-xs font-medium text-muted uppercase tracking-wider">Priority</label>
               <input
+                id="item-priority"
                 type="number"
                 min={0}
                 max={5}
@@ -179,8 +188,9 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-medium text-muted uppercase tracking-wider">Due Date</label>
+              <label htmlFor="item-due-date" className="text-xs font-medium text-muted uppercase tracking-wider">Due Date</label>
               <input
+                id="item-due-date"
                 type="date"
                 value={dueDate}
                 onChange={(e) => { setDueDate(e.target.value); markDirty(); }}
@@ -243,7 +253,7 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
           {/* Metadata */}
           <div className="flex items-center gap-2 text-xs text-muted">
             <Badge variant={item.item_type === 'task' ? 'default' : 'info'}>{item.item_type}</Badge>
-            <span>Created {new Date(item.created_at).toLocaleDateString()}</span>
+            <span>Created {formatDate(item.created_at)}</span>
             {item.archived && <Badge variant="warning">Archived</Badge>}
           </div>
 
@@ -270,7 +280,7 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
                       {evt.new_value && <span>{evt.new_value}</span>}
                     </span>
                     <span className="shrink-0 ml-auto">
-                      {new Date(evt.created_at).toLocaleDateString()}
+                      {formatDate(evt.created_at)}
                     </span>
                   </div>
                 ))}

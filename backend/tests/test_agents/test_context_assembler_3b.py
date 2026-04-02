@@ -161,7 +161,7 @@ class TestBehavioralRulesInjection:
         space = _make_space(db_session)
         agent = _make_agent(db_session, name="InactiveAgent")
 
-        active = behavioral_rule_service.create_rule(
+        behavioral_rule_service.create_rule(
             db_session, agent_id=agent.id, rule="Active rule"
         )
         inactive = behavioral_rule_service.create_rule(

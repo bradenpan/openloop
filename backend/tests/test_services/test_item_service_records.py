@@ -97,7 +97,7 @@ def test_list_items_filter_by_parent_item_id(db_session: Session):
         title="Child Task",
         parent_item_id=parent.id,
     )
-    other = item_service.create_item(
+    item_service.create_item(
         db_session, space_id=space.id, title="Unrelated"
     )
 
@@ -134,7 +134,7 @@ def test_list_items_sort_by_title_desc(db_session: Session):
 def test_list_items_sort_by_created_at(db_session: Session):
     space = _make_space(db_session)
     i1 = item_service.create_item(db_session, space_id=space.id, title="First")
-    i2 = item_service.create_item(db_session, space_id=space.id, title="Second")
+    item_service.create_item(db_session, space_id=space.id, title="Second")
 
     items = item_service.list_items(db_session, sort_by="created_at", sort_order="asc")
     assert items[0].id == i1.id

@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from backend.openloop.db.models import AutomationRun
 from backend.openloop.services import automation_service, notification_service
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

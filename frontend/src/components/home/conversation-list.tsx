@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import type { components } from '../../api/types';
 import { Card, CardBody, Badge } from '../ui';
+import { timeAgo } from '../../utils/dates';
 
 type Conversation = components['schemas']['ConversationResponse'];
 type Agent = components['schemas']['AgentResponse'];
@@ -18,17 +19,6 @@ const statusVariant: Record<string, 'default' | 'success' | 'warning' | 'danger'
   closed: 'info',
   error: 'danger',
 };
-
-function timeAgo(dateStr: string): string {
-  const ms = Date.now() - new Date(dateStr).getTime();
-  const mins = Math.floor(ms / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
 
 function Skeleton() {
   return (
@@ -51,7 +41,11 @@ export function ConversationList({ conversations, agents, spaces, isLoading }: C
   if (isLoading) return <Skeleton />;
 
   if (!conversations || conversations.length === 0) {
-    return <p className="text-sm text-muted py-2">No conversations yet.</p>;
+    return (
+      <p className="text-sm text-muted py-4">
+        No conversations yet. Start a conversation to work with an agent.
+      </p>
+    );
   }
 
   const agentMap = new Map(agents?.map((a) => [a.id, a.name]) ?? []);

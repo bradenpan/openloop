@@ -3,12 +3,12 @@
 import logging
 from datetime import UTC, datetime
 
+from contract.enums import AutomationTriggerType, BackgroundTaskStatus
 from croniter import croniter
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from backend.openloop.db.models import Automation, AutomationRun
-from contract.enums import AutomationTriggerType, BackgroundTaskStatus
 
 logger = logging.getLogger(__name__)
 

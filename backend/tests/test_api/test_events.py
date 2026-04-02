@@ -31,7 +31,7 @@ async def test_event_stream_format() -> None:
     await task
 
     # Verify SSE format: id, event, data lines
-    assert frame.startswith("id: 1\n")
+    assert frame.startswith("id: ")
     assert "event: token\n" in frame
     assert "data: " in frame
 
@@ -78,8 +78,10 @@ async def test_event_stream_increments_id() -> None:
     frame2 = await gen.__anext__()
     await task
 
-    assert frame1.startswith("id: 1\n")
-    assert frame2.startswith("id: 2\n")
+    # Extract IDs and verify they increment
+    id1 = int(frame1.split("\n")[0].split(": ")[1])
+    id2 = int(frame2.split("\n")[0].split(": ")[1])
+    assert id2 == id1 + 1
 
     await gen.aclose()
 

@@ -154,7 +154,7 @@ def test_list_documents_with_mime_type_filter(client: TestClient):
         json={"space_id": space["id"], "title": "A"},
     )
     # Manually set mime_type via patch
-    doc_resp = client.post(
+    client.post(
         "/api/v1/documents",
         json={"space_id": space["id"], "title": "B"},
     )

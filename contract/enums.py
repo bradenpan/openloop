@@ -58,6 +58,7 @@ class NotificationType(StrEnum):
     AUTOMATION_FAILED = "automation_failed"
     AUTOMATION_MISSED = "automation_missed"
     CONTEXT_WARNING = "context_warning"
+    MEMORY_CONSOLIDATION = "memory_consolidation"
     SYSTEM = "system"
 
 
@@ -69,6 +70,7 @@ class SSEEventType(StrEnum):
     NOTIFICATION = "notification"
     ROUTE = "route"
     BACKGROUND_UPDATE = "background_update"
+    RATE_LIMITED = "rate_limited"
     ERROR = "error"
 
 

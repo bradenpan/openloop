@@ -60,6 +60,14 @@ export interface SSEBackgroundProgressEvent {
   summary: string;
 }
 
+export interface SSERateLimitedEvent {
+  type: 'rate_limited';
+  conversation_id: string;
+  attempt: number;
+  max_retries: number;
+  retry_after_seconds: number;
+}
+
 export interface SSEErrorEvent {
   type: 'error';
   conversation_id: string | null;
@@ -75,6 +83,7 @@ export type SSEEvent =
   | SSERouteEvent
   | SSEBackgroundUpdateEvent
   | SSEBackgroundProgressEvent
+  | SSERateLimitedEvent
   | SSEErrorEvent;
 
 export type SSEStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
@@ -107,7 +116,8 @@ const BASE_RETRY_DELAY = 1_000;
 
 const EVENT_TYPES = [
   'token', 'tool_call', 'tool_result', 'approval_request',
-  'notification', 'route', 'background_update', 'background_progress', 'error',
+  'notification', 'route', 'background_update', 'background_progress',
+  'rate_limited', 'error',
 ];
 
 function dispatch(event: SSEEvent) {

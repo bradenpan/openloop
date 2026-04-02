@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 interface PanelProps {
@@ -12,25 +12,39 @@ interface PanelProps {
 
 export function Panel({ open, onClose, title, children, width = '400px', className = '' }: PanelProps) {
   const contentRef = useRef<HTMLDivElement>(null);
+  const [visible, setVisible] = useState(false);
+
+  // Animate in when open changes
+  useEffect(() => {
+    if (open) {
+      // Trigger slide-in on next frame so initial translate-x-full renders first
+      requestAnimationFrame(() => setVisible(true));
+    } else {
+      setVisible(false);
+    }
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopImmediatePropagation(); onClose(); } };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  // Focus trap
+  // Focus trap — recomputes focusable elements on each Tab press
   useEffect(() => {
     if (!open || !contentRef.current) return;
-    const els = contentRef.current.querySelectorAll<HTMLElement>(
-      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-    );
-    const first = els[0];
-    const last = els[els.length - 1];
-    first?.focus();
+    const container = contentRef.current;
+    const focusableSelector = 'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])';
+    // Focus first element on open
+    const initial = container.querySelectorAll<HTMLElement>(focusableSelector);
+    initial[0]?.focus();
     const onTab = (e: KeyboardEvent) => {
       if (e.key !== 'Tab') return;
+      const els = container.querySelectorAll<HTMLElement>(focusableSelector);
+      if (els.length === 0) return;
+      const first = els[0];
+      const last = els[els.length - 1];
       if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
       else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
     };
@@ -42,10 +56,10 @@ export function Panel({ open, onClose, title, children, width = '400px', classNa
 
   return createPortal(
     <div className="fixed inset-0 z-40" onClick={onClose}>
-      <div className="absolute inset-0 bg-black/30" />
+      <div className={`absolute inset-0 bg-black/30 transition-opacity duration-200 ${visible ? 'opacity-100' : 'opacity-0'}`} />
       <div
         ref={contentRef}
-        className={`absolute right-0 top-0 h-full bg-surface border-l border-border shadow-xl overflow-auto ${className}`}
+        className={`absolute right-0 top-0 h-full bg-surface border-l border-border shadow-xl overflow-auto transition-transform duration-200 ease-out ${visible ? 'translate-x-0' : 'translate-x-full'} ${className}`}
         style={{ width }}
         onClick={(e) => e.stopPropagation()}
         role="dialog"

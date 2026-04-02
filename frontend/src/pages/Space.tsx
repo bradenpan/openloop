@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { useParams } from 'react-router-dom';
 import { $api } from '../api/hooks';
-import { Badge } from '../components/ui';
+import { Badge, Skeleton } from '../components/ui';
 import { DocumentViewer } from '../components/space/document-viewer';
-import { LayoutEditor } from '../components/space/layout-editor';
+import { SpaceSettings } from '../components/space/space-settings';
 import { getWidgetComponent, sizeToTrack } from '../components/space/widget-registry';
 import type { components } from '../api/types';
 
@@ -73,10 +73,19 @@ function gridTemplateForRow(row: WidgetResponse[]): string {
 export default function Space() {
   const { spaceId } = useParams<{ spaceId: string }>();
   const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
-  const [layoutEditorOpen, setLayoutEditorOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [centerView, setCenterViewState] = useState<CenterView>(() =>
     spaceId ? loadSavedView(spaceId) : 'board',
   );
+
+  // Reset local state when navigating to a different space
+  useEffect(() => {
+    setSettingsOpen(false);
+    setSelectedDocId(null);
+    if (spaceId) {
+      setCenterViewState(loadSavedView(spaceId));
+    }
+  }, [spaceId]);
 
   function setCenterView(view: CenterView) {
     setCenterViewState(view);
@@ -126,7 +135,25 @@ export default function Space() {
   }
 
   if (spaceLoading || layoutLoading) {
-    return <p className="text-muted">Loading space...</p>;
+    return (
+      <div className="flex flex-col h-full -m-6">
+        {/* Header skeleton */}
+        <div className="px-6 py-3 border-b border-border flex items-center gap-3 shrink-0 bg-surface/50">
+          <Skeleton width="10rem" height="1.5rem" rounded="rounded" />
+          <Skeleton width="4rem" height="1.25rem" rounded="rounded-full" />
+        </div>
+        {/* Widget grid skeleton */}
+        <div className="flex-1 p-6 grid grid-cols-3 gap-4">
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="flex flex-col gap-3">
+              <Skeleton height="2rem" rounded="rounded" />
+              <Skeleton height="8rem" rounded="rounded-lg" />
+              <Skeleton height="4rem" rounded="rounded-lg" />
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   }
 
   if (spaceError || !space) {
@@ -143,12 +170,12 @@ export default function Space() {
           <span className="text-sm text-muted ml-2 truncate">{space.description}</span>
         )}
 
-        {/* Gear icon — opens layout editor */}
+        {/* Gear icon — opens space settings */}
         <button
-          onClick={() => setLayoutEditorOpen(true)}
+          onClick={() => setSettingsOpen(true)}
           className="ml-auto p-1.5 rounded-md text-muted hover:text-foreground hover:bg-raised transition-colors cursor-pointer"
-          aria-label="Open layout editor"
-          title="Layout settings"
+          aria-label="Open space settings"
+          title="Space settings"
         >
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="8" cy="8" r="2.5" />
@@ -221,11 +248,11 @@ export default function Space() {
         onClose={() => setSelectedDocId(null)}
       />
 
-      {/* Layout editor slide-over */}
-      <LayoutEditor
+      {/* Space settings slide-over */}
+      <SpaceSettings
         spaceId={spaceId}
-        open={layoutEditorOpen}
-        onClose={() => setLayoutEditorOpen(false)}
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
     </div>
   );

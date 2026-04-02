@@ -12,12 +12,12 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
+from contract.enums import AutomationTriggerType, BackgroundTaskStatus, NotificationType
 from croniter import croniter
 
 from backend.openloop.database import SessionLocal
 from backend.openloop.db.models import Notification
 from backend.openloop.services import automation_service, conversation_service, notification_service
-from contract.enums import AutomationTriggerType, BackgroundTaskStatus, NotificationType
 
 logger = logging.getLogger(__name__)
 

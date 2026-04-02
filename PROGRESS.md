@@ -268,16 +268,84 @@ All 4 tasks done per IMPLEMENTATION-PLAN.md. Scheduled agent runs with dashboard
 - Notification panel and `mark-all-read` endpoint were not in the Phase 6 spec but were added to support the attention items integration requirement. General-purpose infrastructure, not automation-specific.
 - Template instructions use `write_memory` instead of `create_notification` because no `create_notification` MCP tool exists for agents. Automation results stored as memory entries.
 
+## Phase 7: Polish, Backup, Integration — COMPLETE
+
+All 6 tasks done per IMPLEMENTATION-PLAN.md. Memory lifecycle management, summary consolidation, backup system, error handling/resilience, UI polish, and comprehensive E2E integration tests.
+
+**Task 7.1a (Memory Lifecycle Management):** `auto_archive_superseded()` — daily background job archives facts where `valid_until` set 90+ days ago. Lazy rule demotion in context assembler — rules with `confidence < 0.3` and `apply_count >= 10` auto-deactivated during context assembly. LLM-driven fact consolidation — monthly background job (or manual trigger) calls Haiku to review active facts, produces consolidation report with proposed merges, contradictions, and stale entries. User approves before any changes apply. `LifecycleScheduler` — asyncio background loop (60s interval, same pattern as automation scheduler), runs daily archival and monthly consolidation. Checkpoint pruning — closed-conversation checkpoints excluded from context assembly. 3 API endpoints: `GET /spaces/{id}/memory/health`, `POST /spaces/{id}/memory/consolidate`, `POST /spaces/{id}/memory/consolidate/apply`. 6 Pydantic schemas in new `memory.py`. Space Settings panel — tabbed slide-over (Layout, Memory, History) replacing the old layout editor. Memory tab with stats bar, facts/rules sub-tabs, archive/delete actions, consolidation report display with per-item accept/dismiss. `NotificationType.MEMORY_CONSOLIDATION` added.
+
+**Task 7.1b (Summary Consolidation):** `consolidation_service.py` — `get_unconsolidated_count()` and `generate_meta_summary()`. Threshold-triggered: when a space hits 20+ unconsolidated summaries, auto-generates a meta-summary via Haiku. Wired into `close_session()` (fire-and-forget, non-blocking). Successive consolidation — second round absorbs old meta-summary plus new individuals into a new meta. Manual trigger: `POST /spaces/{id}/consolidate` (returns 409 if <2 summaries). Context assembler updated: meta-summary loads first, then unconsolidated individuals (excluding checkpoints).
+
+**Task 7.2 (Backup System):** `scripts/backup_local.py` — local SQLite backup via `.backup` command with `shutil.copy2` fallback, 10-backup retention, timestamped filenames. `make backup` and `make backup-gdrive` wired in Makefile. Backup status tracking via `data/.last_backup` timestamp file. `GET /api/v1/system/backup-status` endpoint returns `last_backup_at`, `hours_since_backup`, `needs_backup`. Home dashboard shows subtle muted reminder when no backup in 24 hours.
+
+**Task 7.3 (Error Handling + Edge Cases):** Rate limit retry wrapper — `_query_with_retry()` wraps SDK `query()` calls with exponential backoff (30s/60s/120s, max 3 retries). Creates notification and publishes `rate_limited` SSE event on rate limit. SSE reconnection — `_ReplayBuffer` (deque, last 100 events) with sequential IDs, `Last-Event-ID` header support for replay on reconnect. `ConnectionStatus` component shows "Reconnecting..." indicator. Orphaned task cleanup on startup — marks stale running/queued tasks as failed. Graceful shutdown — closes active interactive sessions with 30s timeout, per-session DB sessions for concurrency safety. `SSEEventType.RATE_LIMITED` added. SQLite `busy_timeout` and crash recovery confirmed pre-existing.
+
+**Task 7.4 (UI Polish):** `Skeleton` component (configurable pulsing rectangle). Toast notification system (Zustand store, bottom-right, auto-dismiss 3s, `role="status"`, `aria-live="polite"`). `FadeIn` wrapper on route transitions. Panel slide-in animation (`translate-x`). Modal fade+scale animation. Skeleton loading states on Home (stat cards, space list) and Space (widget grid). Empty states for agents, conversations, kanban, automations. Keyboard shortcuts: `/` focus Odin, `Escape` close panel/modal, `n` new item, `?` shortcuts help overlay, `Ctrl+K` search (pre-existing). `useDocumentTitle` hook — browser tab badge `(N) OpenLoop` for pending approvals + unread notifications. Date utility (`formatDate`, `formatDateTime`, `timeAgo`). Timezone-safe due dates (UTC suffix). Accessibility: `aria-invalid`/`aria-describedby` on Input, `aria-labelledby` on Modal, `aria-label` on layout editor select, focus-visible rings. Visual consistency: Settings theme toggle uses Button component.
+
+**Task 7.5 (E2E Integration Tests):** 63 Playwright tests across 15 spec files, all using API mocking (`page.route()`) — no backend required. Comprehensive mock layer with factory functions (`makeSpace`, `makeAgent`, `makeItem`, etc.). Test scenarios: first-run experience, space navigation, item CRUD, conversation lifecycle, agent management, automation management, kanban workflow, search modal, settings persistence, Space Settings panel, keyboard shortcuts, Home dashboard, empty states, UI polish verification, app shell navigation. 3 SDK-dependent tests in `e2e/slow/` directory (skipped by default).
+
+**Code review (2 rounds — 4 review agents total):**
+
+*Round 1 — backend (19 issues found, 16 fixed):*
+1. **CRITICAL:** Timezone mismatch in `consolidate_space_memory` — naive vs aware comparison would crash at runtime. Fixed: `datetime.now(UTC).replace(tzinfo=None)`.
+2. **CRITICAL:** Graceful shutdown fails for background sessions — `close_conversation()` requires `status="active"`. Fixed: filter to `status == "active"` sessions only.
+3. **CRITICAL:** Cross-space entry manipulation in `apply_consolidation_report` — no namespace validation. Fixed: added namespace check before modifying entries.
+4. Long-lived DB session in lifecycle scheduler — single session across LLM calls. Fixed: per-space `SessionLocal()`.
+5. Missing 404 on memory health routes — returns zeros for invalid space. Fixed: `space_service.get_space()` validation.
+6. Missing `db.rollback()` in lifecycle scheduler error handler. Fixed.
+7. `generate_meta_summary` fragile with 0 individuals — added `ValueError` guard.
+8. Skipped: `ExceptionGroup` Python 3.11+ (project requires 3.12+), raw notification strings (pre-existing), threading.Lock in async (O(1) ops).
+
+*Round 1 — frontend (18 issues found, 9 fixed):*
+1. **CRITICAL:** SpaceList card clicks don't navigate — `CardBody` dropped `onClick`. Fixed: forward `onClick` to div.
+2. **CRITICAL:** Archive button sends no-op PATCH — no archive route. Fixed: added `POST /memory/{id}/archive` backend route, updated frontend.
+3. **CRITICAL:** XSS in search modal — confirmed non-issue, backend already HTML-escapes excerpts with safe `<mark>` restoration (Phase 4 fix).
+4. Stale focus traps in Panel/Modal — elements cached on mount. Fixed: recompute in keydown handler.
+5. Double Escape handlers — Panel/Modal + keyboard shortcuts hook. Fixed: `stopPropagation`.
+6. Missing label associations in ItemDetailPanel. Fixed: `id`/`htmlFor` pairs.
+7. Toast container lacks `aria-live`. Fixed: always render with `aria-live="polite"`.
+8. Non-functional RulesList checkbox. Fixed: removed.
+9. Uncoordinated dual mutations in handleSave. Fixed: chained (move after update succeeds).
+
+*Round 2 — backend (16 issues found, 8 fixed):*
+1. **CRITICAL:** Shared DB session across concurrent shutdown coroutines. Fixed: per-session `_close_one()` helper.
+2. **CRITICAL:** `backup_gdrive.py` wrong REPO_ROOT — `.parent.parent.parent` gives `C:\dev` not `C:\dev\openloop`. Fixed: `.parent.parent`.
+3. Timezone consistency — `auto_archive_superseded` used aware cutoff, `consolidate_space_memory` used deprecated `utcnow()`. Fixed: standardized on `datetime.now(UTC).replace(tzinfo=None)`.
+4. `_run_daily` missing `db.rollback()`. Fixed.
+5. `apply_consolidation_report` iterates `None` when client sends explicit null. Fixed: `or []` pattern.
+6. `_run_monthly` closes DB then iterates ORM objects. Fixed: extract to plain tuples first.
+7. Redundant `db.close()` in error path. Fixed.
+8. `backup_gdrive.py` `datetime.now()` without UTC for filenames. Fixed: `datetime.now(UTC)`.
+
+*Round 2 — frontend (20 issues found, 8 fixed):*
+1. `stopPropagation` ineffective on document-level listeners. Fixed: `stopImmediatePropagation`.
+2. `valid_until` filter hides all superseded entries regardless of expiry. Fixed: check `new Date(valid_until) > new Date()`.
+3. `Card` component drops `onClick` (not just `CardBody`). Fixed: forward to div.
+4. `Home.tsx` `allLoading` uses `&&` instead of `||`. Fixed.
+5. `Space.tsx` state not reset on `spaceId` change. Fixed: `useEffect` resets `settingsOpen`, `selectedDocId`, `centerView`.
+6. Layout editor size select missing `aria-label`. Fixed.
+7. `connection-status.tsx` missing `role="status"`/`aria-live`. Fixed.
+8. `search-modal.tsx` `as never` type casts. Fixed: uses generated types.
+
+*Additional fixes between rounds (5 items):*
+1. `ConsolidationResponse.conversation_id` typed `str` but can be `None`. Fixed: `str | None`.
+2. `backup_local.py` local time for filename vs UTC for `.last_backup`. Fixed: UTC consistently.
+3. `space-settings.tsx` stale `activeTab` on `spaceId` change. Fixed: `useEffect` reset.
+4. `timeAgo` returns "NaN d ago" for invalid dates. Fixed: guard.
+5. `ShortcutsHelp` lacks own Escape handler. Fixed: added `useEffect` listener.
+
+**Deviations from plan:**
+- Plan specified "optional: backup on conversation close" — skipped per user decision.
+- Plan specified notification sounds — replaced with browser tab badge (less intrusive, more useful).
+- Space Settings panel (tabbed: Layout, Memory, History) was not in the original plan — added to house memory health UI and consolidation trigger alongside the existing layout editor.
+- E2E tests use full API mocking instead of requiring a running backend — faster, more reliable, with SDK-dependent tests in a separate slow/ directory.
+
 ## Current State
 
-- **858 backend tests passing** (798 prior + 60 new Phase 6 tests), lint clean
-- **39 frontend Playwright tests passing** + E2E automation tests
-- Backend: CRUD, agent sessions, SSE streaming, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure
-- Frontend: dashboard, space view (widget-based layout), conversation panel, agent management, search modal, document panel + viewer, layout editor, task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, 3 palettes
-
-## Phase 7: Not Started
-
-See IMPLEMENTATION-PLAN.md for full breakdown. Phase 7 (Polish, Backup, Integration) is next.
+- **925 backend tests passing** (858 prior + 67 new Phase 7 tests), lint clean
+- **63 Playwright E2E tests passing** (new comprehensive suite) + 39 prior component tests
+- Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup
+- Frontend: dashboard with skeleton loading + backup reminder, space view (widget-based layout), conversation panel, agent management, search modal, document panel + viewer, Space Settings (tabbed: layout editor + memory health + history), task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, toast notifications, keyboard shortcuts + help overlay, browser tab badge, page transitions, empty states, 3 palettes × 2 themes
 
 ---
 

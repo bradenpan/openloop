@@ -8,9 +8,8 @@ from backend.openloop.agents.automation_scheduler import (
     _count_running_automations,
     _is_due,
 )
-from backend.openloop.db.models import Agent, AutomationRun
+from backend.openloop.db.models import Agent
 from backend.openloop.services import agent_service, automation_service
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -160,7 +159,7 @@ def test_count_running_automations_counts_only_running(db_session: Session):
 
     run1 = automation_service.create_run(db_session, automation_id=auto.id)
     run2 = automation_service.create_run(db_session, automation_id=auto.id)
-    run3 = automation_service.create_run(db_session, automation_id=auto.id)
+    automation_service.create_run(db_session, automation_id=auto.id)
 
     # Complete two of them
     automation_service.complete_run(db_session, run1.id, status="success")

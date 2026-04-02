@@ -32,10 +32,10 @@ generate-types:
 	npx openapi-typescript contract/openapi.json -o frontend/src/api/types.ts
 
 backup:
-	@echo "TODO: Backup database"
+	python scripts/backup_local.py
 
 backup-gdrive:
-	@echo "TODO: Backup to Google Drive"
+	python scripts/backup_gdrive.py
 
 register-automations:
 	python -m scripts.register_automation_templates

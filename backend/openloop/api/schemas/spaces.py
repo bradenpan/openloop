@@ -3,7 +3,7 @@ from datetime import datetime
 from contract.enums import DefaultView, SpaceTemplate
 from pydantic import BaseModel, ConfigDict
 
-__all__ = ["SpaceCreate", "SpaceUpdate", "SpaceResponse"]
+__all__ = ["SpaceCreate", "SpaceUpdate", "SpaceResponse", "ConsolidationResponse"]
 
 
 class SpaceCreate(BaseModel):
@@ -35,3 +35,16 @@ class SpaceResponse(BaseModel):
     custom_field_schema: list[dict] | None
     created_at: datetime
     updated_at: datetime
+
+
+class ConsolidationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    space_id: str | None
+    conversation_id: str | None
+    summary: str
+    decisions: list | None
+    open_questions: list | None
+    is_meta_summary: bool
+    created_at: datetime

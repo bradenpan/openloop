@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { $api } from '../../api/hooks';
 import { Badge, Button } from '../ui';
+import { formatDate } from '../../utils/dates';
 import { NewConversationModal } from './new-conversation-modal';
 import { ConversationPanel } from '../conversation';
 
@@ -65,7 +66,10 @@ export function ConversationSidebar({ spaceId, collapsed, onToggle }: Conversati
         {isLoading && <p className="px-3 py-4 text-sm text-muted">Loading...</p>}
 
         {!isLoading && conversations.length === 0 && (
-          <p className="px-3 py-4 text-sm text-muted italic">No conversations yet</p>
+          <div className="px-3 py-6 text-center">
+            <p className="text-sm text-muted">No conversations yet.</p>
+            <p className="text-xs text-muted mt-1">Start a conversation to work with an agent.</p>
+          </div>
         )}
 
         {conversations.map((conv) => (
@@ -84,7 +88,7 @@ export function ConversationSidebar({ spaceId, collapsed, onToggle }: Conversati
               </Badge>
             </div>
             <div className="flex items-center gap-2 text-[11px] text-muted">
-              <span>{new Date(conv.created_at).toLocaleDateString()}</span>
+              <span>{formatDate(conv.created_at)}</span>
               {conv.model_override && <span>({conv.model_override})</span>}
             </div>
           </button>

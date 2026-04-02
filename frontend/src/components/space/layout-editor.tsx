@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
-import { Panel, Button } from '../ui';
+import { Button } from '../ui';
 import type { components } from '../../api/types';
 
 type WidgetResponse = components['schemas']['WidgetResponse'];
@@ -60,11 +60,9 @@ function getConfigNote(widgetType: string): string | null {
 
 interface LayoutEditorProps {
   spaceId: string;
-  open: boolean;
-  onClose: () => void;
 }
 
-export function LayoutEditor({ spaceId, open, onClose }: LayoutEditorProps) {
+export function LayoutEditor({ spaceId }: LayoutEditorProps) {
   const queryClient = useQueryClient();
   const [showPicker, setShowPicker] = useState(false);
   const [expandedWidgetId, setExpandedWidgetId] = useState<string | null>(null);
@@ -76,7 +74,6 @@ export function LayoutEditor({ spaceId, open, onClose }: LayoutEditorProps) {
     'get',
     '/api/v1/spaces/{space_id}/layout',
     { params: { path: { space_id: spaceId } } },
-    { enabled: open },
   );
 
   const widgets = layoutData?.widgets
@@ -158,59 +155,57 @@ export function LayoutEditor({ spaceId, open, onClose }: LayoutEditorProps) {
   }
 
   return (
-    <Panel open={open} onClose={onClose} title="Layout Editor" width="400px">
-      <div className="flex flex-col gap-3">
-        {/* Widget list */}
-        {widgets.length === 0 && !showPicker && (
-          <p className="text-sm text-muted py-4 text-center">
-            No widgets yet. Add one to get started.
-          </p>
-        )}
+    <div className="flex flex-col gap-3">
+      {/* Widget list */}
+      {widgets.length === 0 && !showPicker && (
+        <p className="text-sm text-muted py-4 text-center">
+          No widgets yet. Add one to get started.
+        </p>
+      )}
 
-        {widgets.map((widget, idx) => (
-          <WidgetCard
-            key={widget.id}
-            widget={widget}
-            index={idx}
-            total={widgets.length}
-            isExpanded={expandedWidgetId === widget.id}
-            isPendingRemove={pendingRemoveId === widget.id}
-            onSizeChange={(size) => handleSizeChange(widget.id, size)}
-            onMoveUp={() => handleMoveUp(widget, idx)}
-            onMoveDown={() => handleMoveDown(widget, idx)}
-            onToggleConfig={() => toggleConfig(widget.id)}
-            onRemoveClick={() => {
-              if (pendingRemoveId === widget.id) {
-                handleRemove(widget.id);
-              } else {
-                setPendingRemoveId(widget.id);
-              }
-            }}
-            onRemoveCancel={() => setPendingRemoveId(null)}
-            isRemoving={removeWidget.isPending}
-          />
-        ))}
+      {widgets.map((widget, idx) => (
+        <WidgetCard
+          key={widget.id}
+          widget={widget}
+          index={idx}
+          total={widgets.length}
+          isExpanded={expandedWidgetId === widget.id}
+          isPendingRemove={pendingRemoveId === widget.id}
+          onSizeChange={(size) => handleSizeChange(widget.id, size)}
+          onMoveUp={() => handleMoveUp(widget, idx)}
+          onMoveDown={() => handleMoveDown(widget, idx)}
+          onToggleConfig={() => toggleConfig(widget.id)}
+          onRemoveClick={() => {
+            if (pendingRemoveId === widget.id) {
+              handleRemove(widget.id);
+            } else {
+              setPendingRemoveId(widget.id);
+            }
+          }}
+          onRemoveCancel={() => setPendingRemoveId(null)}
+          isRemoving={removeWidget.isPending}
+        />
+      ))}
 
-        {/* Add widget button / picker */}
-        {showPicker ? (
-          <WidgetPicker
-            existingTypes={widgets.map((w) => w.widget_type)}
-            onSelect={handleAdd}
-            onCancel={() => setShowPicker(false)}
-            isAdding={addWidget.isPending}
-          />
-        ) : (
-          <Button
-            variant="secondary"
-            size="sm"
-            onClick={() => setShowPicker(true)}
-            className="mt-1 self-stretch"
-          >
-            <span className="mr-1">+</span> Add Widget
-          </Button>
-        )}
-      </div>
-    </Panel>
+      {/* Add widget button / picker */}
+      {showPicker ? (
+        <WidgetPicker
+          existingTypes={widgets.map((w) => w.widget_type)}
+          onSelect={handleAdd}
+          onCancel={() => setShowPicker(false)}
+          isAdding={addWidget.isPending}
+        />
+      ) : (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => setShowPicker(true)}
+          className="mt-1 self-stretch"
+        >
+          <span className="mr-1">+</span> Add Widget
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -266,6 +261,7 @@ function WidgetCard({
               value={widget.size}
               onChange={(e) => onSizeChange(e.target.value as WidgetSize)}
               className="text-xs bg-surface border border-border rounded px-1.5 py-0.5 text-muted cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary"
+              aria-label="Widget size"
             >
               {SIZE_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>

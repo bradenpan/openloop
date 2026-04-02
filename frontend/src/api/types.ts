@@ -373,6 +373,9 @@ export interface paths {
         /**
          * Sse Events
          * @description Multiplexed SSE endpoint — streams all events to the frontend.
+         *
+         *     Supports reconnection via the Last-Event-ID header: on reconnect the
+         *     client receives any events it missed from the in-memory replay buffer.
          */
         get: operations["sse_events_api_v1_events_get"];
         put?: never;
@@ -735,6 +738,74 @@ export interface paths {
         patch: operations["update_entry_api_v1_memory__entry_id__patch"];
         trace?: never;
     };
+    "/api/v1/memory/{entry_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Archive Entry */
+        post: operations["archive_entry_api_v1_memory__entry_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/spaces/{space_id}/memory/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Memory Health */
+        get: operations["get_memory_health_api_v1_spaces__space_id__memory_health_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/spaces/{space_id}/memory/consolidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Consolidate Memory */
+        post: operations["consolidate_memory_api_v1_spaces__space_id__memory_consolidate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/spaces/{space_id}/memory/consolidate/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Apply Consolidation */
+        post: operations["apply_consolidation_api_v1_spaces__space_id__memory_consolidate_apply_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notifications/mark-all-read": {
         parameters: {
             query?: never;
@@ -955,6 +1026,43 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/spaces/{space_id}/consolidate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Consolidate Summaries */
+        post: operations["consolidate_summaries_api_v1_spaces__space_id__consolidate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/backup-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Backup Status
+         * @description Return the last backup timestamp and whether a backup is needed.
+         */
+        get: operations["get_backup_status_api_v1_system_backup_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/health": {
         parameters: {
             query?: never;
@@ -1074,8 +1182,7 @@ export interface components {
             agent_id: string;
             /** Instruction */
             instruction: string;
-            /** Trigger Type */
-            trigger_type: string;
+            trigger_type: components["schemas"]["AutomationTriggerType"];
             /** Cron Expression */
             cron_expression?: string | null;
             /** Space Id */
@@ -1158,6 +1265,11 @@ export interface components {
             /** Completed At */
             completed_at: string | null;
         };
+        /**
+         * AutomationTriggerType
+         * @enum {string}
+         */
+        AutomationTriggerType: "cron" | "event";
         /** AutomationUpdate */
         AutomationUpdate: {
             /** Name */
@@ -1168,8 +1280,7 @@ export interface components {
             agent_id?: string | null;
             /** Instruction */
             instruction?: string | null;
-            /** Trigger Type */
-            trigger_type?: string | null;
+            trigger_type?: components["schemas"]["AutomationTriggerType"] | null;
             /** Cron Expression */
             cron_expression?: string | null;
             /** Space Id */
@@ -1179,10 +1290,87 @@ export interface components {
             /** Enabled */
             enabled?: boolean | null;
         };
+        /** BackupStatusResponse */
+        BackupStatusResponse: {
+            /** Last Backup At */
+            last_backup_at?: string | null;
+            /** Hours Since Backup */
+            hours_since_backup?: number | null;
+            /** Needs Backup */
+            needs_backup: boolean;
+        };
         /** Body_upload_document_api_v1_documents_upload_post */
         Body_upload_document_api_v1_documents_upload_post: {
             /** File */
             file: string;
+        };
+        /** ConsolidationApplyRequest */
+        ConsolidationApplyRequest: {
+            /** Merges */
+            merges?: components["schemas"]["ConsolidationMerge"][] | null;
+            /** Stale */
+            stale?: components["schemas"]["ConsolidationStale"][] | null;
+        };
+        /** ConsolidationApplyResponse */
+        ConsolidationApplyResponse: {
+            /** Merged */
+            merged: number;
+            /** Archived */
+            archived: number;
+        };
+        /** ConsolidationContradiction */
+        ConsolidationContradiction: {
+            /** Ids */
+            ids: string[];
+            /** Description */
+            description?: string | null;
+        };
+        /** ConsolidationMerge */
+        ConsolidationMerge: {
+            /** Source Ids */
+            source_ids: string[];
+            /** Merged Value */
+            merged_value: string;
+            /** Reason */
+            reason?: string | null;
+        };
+        /** ConsolidationReportResponse */
+        ConsolidationReportResponse: {
+            /** Merges */
+            merges: components["schemas"]["ConsolidationMerge"][];
+            /** Contradictions */
+            contradictions: components["schemas"]["ConsolidationContradiction"][];
+            /** Stale */
+            stale: components["schemas"]["ConsolidationStale"][];
+        };
+        /** ConsolidationResponse */
+        ConsolidationResponse: {
+            /** Id */
+            id: string;
+            /** Space Id */
+            space_id: string | null;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Summary */
+            summary: string;
+            /** Decisions */
+            decisions: unknown[] | null;
+            /** Open Questions */
+            open_questions: unknown[] | null;
+            /** Is Meta Summary */
+            is_meta_summary: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ConsolidationStale */
+        ConsolidationStale: {
+            /** Id */
+            id: string;
+            /** Reason */
+            reason?: string | null;
         };
         /** ConversationCreate */
         ConversationCreate: {
@@ -1602,6 +1790,17 @@ export interface components {
             importance: number;
             /** Category */
             category?: string | null;
+        };
+        /** MemoryHealthResponse */
+        MemoryHealthResponse: {
+            /** Active Facts */
+            active_facts: number;
+            /** Archived Facts */
+            archived_facts: number;
+            /** Active Rules */
+            active_rules: number;
+            /** Inactive Rules */
+            inactive_rules: number;
         };
         /** MemoryResponse */
         MemoryResponse: {
@@ -3917,6 +4116,132 @@ export interface operations {
             };
         };
     };
+    archive_entry_api_v1_memory__entry_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                entry_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_memory_health_api_v1_spaces__space_id__memory_health_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MemoryHealthResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    consolidate_memory_api_v1_spaces__space_id__memory_consolidate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsolidationReportResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    apply_consolidation_api_v1_spaces__space_id__memory_consolidate_apply_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConsolidationApplyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsolidationApplyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     mark_all_read_api_v1_notifications_mark_all_read_post: {
         parameters: {
             query?: never;
@@ -4451,6 +4776,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    consolidate_summaries_api_v1_spaces__space_id__consolidate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                space_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConsolidationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_backup_status_api_v1_system_backup_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupStatusResponse"];
                 };
             };
         };

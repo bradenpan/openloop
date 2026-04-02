@@ -13,11 +13,11 @@ import subprocess
 import sys
 import tarfile
 import tempfile
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
-# Repo root: four levels up from this file (backend/scripts/backup_gdrive.py)
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# Repo root: two levels up from this file (scripts/backup_gdrive.py)
+REPO_ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = REPO_ROOT / "data"
 DB_PATH = DATA_DIR / "openloop.db"
 ARTIFACTS_DIR = DATA_DIR / "artifacts"
@@ -186,7 +186,7 @@ def _copy_database(tmp_dir: Path) -> Path | None:
         print("Warning: Database not found, skipping DB backup.")
         return None
 
-    timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d-%H%M%S")
     backup_name = f"openloop-{timestamp}.db"
     backup_path = tmp_dir / backup_name
 
@@ -216,7 +216,7 @@ def _compress_artifacts(tmp_dir: Path) -> Path | None:
         print("No artifacts found, skipping artifacts backup.")
         return None
 
-    timestamp = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d-%H%M%S")
     archive_name = f"artifacts-{timestamp}.tar.gz"
     archive_path = tmp_dir / archive_name
 
@@ -358,6 +358,12 @@ def main():
 
     # Step 5: Enforce retention
     _enforce_retention(service, folder_id)
+
+    # Write last-backup timestamp
+    last_backup_path = DATA_DIR / ".last_backup"
+    now = datetime.now(tz=UTC)
+    last_backup_path.write_text(now.isoformat())
+    print(f"Last backup timestamp written: {now.isoformat()}")
 
     # Summary
     print()
