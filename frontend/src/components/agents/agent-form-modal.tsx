@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
+import { api } from '../../api/client';
 import type { components } from '../../api/types';
+import { useToastStore } from '../../stores/toast-store';
 import { Modal } from '../ui';
 import { Input } from '../ui';
 import { Button } from '../ui';
@@ -9,6 +11,7 @@ import { Button } from '../ui';
 type Agent = components['schemas']['AgentResponse'];
 
 const MODELS = ['haiku', 'sonnet', 'opus'] as const;
+const SPAWN_DEPTH_OPTIONS = [1, 2, 3, 4, 5] as const;
 
 interface AgentFormModalProps {
   open: boolean;
@@ -18,12 +21,14 @@ interface AgentFormModalProps {
 
 export function AgentFormModal({ open, onClose, agent }: AgentFormModalProps) {
   const queryClient = useQueryClient();
+  const addToast = useToastStore((s) => s.addToast);
   const isEditing = !!agent;
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [systemPrompt, setSystemPrompt] = useState('');
   const [defaultModel, setDefaultModel] = useState<string>('sonnet');
+  const [maxSpawnDepth, setMaxSpawnDepth] = useState<number>(1);
 
   useEffect(() => {
     if (open) {
@@ -32,11 +37,13 @@ export function AgentFormModal({ open, onClose, agent }: AgentFormModalProps) {
         setDescription(agent.description ?? '');
         setSystemPrompt(agent.system_prompt ?? '');
         setDefaultModel(agent.default_model);
+        setMaxSpawnDepth(agent.max_spawn_depth ?? 1);
       } else {
         setName('');
         setDescription('');
         setSystemPrompt('');
         setDefaultModel('sonnet');
+        setMaxSpawnDepth(1);
       }
     }
   }, [open, agent]);
@@ -70,6 +77,7 @@ export function AgentFormModal({ open, onClose, agent }: AgentFormModalProps) {
           description: description.trim() || null,
           system_prompt: systemPrompt.trim() || null,
           default_model: defaultModel,
+          max_spawn_depth: maxSpawnDepth,
         },
       });
     } else {
@@ -79,6 +87,22 @@ export function AgentFormModal({ open, onClose, agent }: AgentFormModalProps) {
           description: description.trim() || null,
           system_prompt: systemPrompt.trim() || null,
           default_model: defaultModel,
+        },
+      }, {
+        onSuccess: async (created) => {
+          // AgentCreate doesn't include max_spawn_depth, so if the user
+          // set a non-default value, follow up with a PATCH.
+          if (maxSpawnDepth !== 1 && created.id) {
+            try {
+              await api.PATCH('/api/v1/agents/{agent_id}', {
+                params: { path: { agent_id: created.id } },
+                body: { max_spawn_depth: maxSpawnDepth },
+              });
+            } catch {
+              addToast('Agent created but failed to set delegation depth.', 'warning');
+            }
+          }
+          queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/agents'] });
         },
       });
     }
@@ -124,6 +148,25 @@ export function AgentFormModal({ open, onClose, agent }: AgentFormModalProps) {
               <option key={m} value={m}>{m.charAt(0).toUpperCase() + m.slice(1)}</option>
             ))}
           </select>
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-foreground">Max Delegation Depth</label>
+          <select
+            value={maxSpawnDepth}
+            onChange={(e) => setMaxSpawnDepth(Number(e.target.value))}
+            className="bg-raised text-foreground border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent transition-colors duration-150 cursor-pointer"
+          >
+            {SPAWN_DEPTH_OPTIONS.map((n) => (
+              <option key={n} value={n}>
+                {n} {n === 1 ? '(no nesting)' : n === 2 ? '(1 level of sub-agents)' : `(${n - 1} levels of sub-agents)`}
+              </option>
+            ))}
+          </select>
+          <p className="text-xs text-muted">
+            Controls how many levels of sub-agent delegation this agent can create.
+            Level 1 means sub-agents cannot delegate further.
+          </p>
         </div>
 
         {error && (

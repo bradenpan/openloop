@@ -688,6 +688,8 @@ class BackgroundTask(Base):
     queued_approvals_count: Mapped[int] = mapped_column(Integer, default=0)
     run_type: Mapped[str] = mapped_column(String, default="task")
     run_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Phase 10.1: delegation depth for permission narrowing
+    delegation_depth: Mapped[int] = mapped_column(Integer, default=0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)

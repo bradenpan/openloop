@@ -324,28 +324,18 @@ Autonomous Agent (coordinator)
 
 4. **Configurable nesting depth:** Sub-agents can optionally spawn their own sub-agents, controlled by a per-agent `max_spawn_depth` setting. Default: 1 (no nesting — sub-agents are leaf workers). Can be increased to allow orchestrator patterns where a sub-agent decomposes its own work.
 
-5. **Permissions only narrow, never widen:** This is the core security invariant. Each delegation level inherits at most the parent's permissions — a sub-agent cannot grant its children capabilities it doesn't have itself. Tool access restricts at each level:
+5. **Permissions inherit, never widen:** Sub-agents get the same permissions as the parent agent by default. The core security invariant is that permissions can never *widen* beyond the parent's scope — a sub-agent cannot have capabilities its parent doesn't have. The permission enforcer validates this at each `delegate_task()` call; delegation with permissions the parent doesn't hold is rejected. The user can optionally restrict a sub-agent's permissions further at delegation time.
 
-   | Depth | Role | Capabilities |
-   |-------|------|-------------|
-   | 0 | Coordinator | Full agent permissions (space scope + configured tools) |
-   | 1 | Orchestrator or leaf | Parent's permissions minus delegation/agent management tools |
-   | 2+ | Leaf worker | Further restricted — read/write items and documents only |
-
-   The permission enforcer validates narrowing at each `delegate_task()` call. If a sub-agent attempts to delegate with permissions it doesn't hold, the delegation is rejected.
-
-6. **Scoped tool access:** Beyond permission narrowing, deeper agents lose access to sensitive tool categories. Sub-agents cannot: modify other agents, create automations, steer other conversations, or manage permissions. This is enforced by a `delegated` context in the permission enforcer that applies additional restrictions based on delegation depth.
-
-7. **Failure isolation:** If a sub-agent fails, the coordinator marks that item as failed in the task list and continues with other work. Sub-agent failures don't kill the parent run. Stopping a parent cascade-terminates all its children.
+6. **Failure isolation:** If a sub-agent fails, the coordinator marks that item as failed in the task list and continues with other work. Sub-agent failures don't kill the parent run. Stopping a parent cascade-terminates all its children.
 
 ### Lessons from OpenClaw
 
-OpenClaw uses the same configurable depth model (`maxSpawnDepth: 1` default, up to 5). Two CVEs exposed implementation failures in their permission narrowing:
+OpenClaw's two delegation-related CVEs were implementation failures in permission propagation:
 
-- **CVE-2026-32915** (CVSS 8.8): Leaf sub-agents escaped sandbox because authorization checks on the subagent control surface were insufficient — the narrowing rule existed but wasn't enforced at the tool dispatch layer.
+- **CVE-2026-32915** (CVSS 8.8): Authorization checks on the subagent control surface were insufficient — the no-escalation rule existed but wasn't enforced at the tool dispatch layer.
 - **CVE-2026-32048** (CVSS 7.5): Sandboxed sessions spawned children that inherited `sandbox.mode: off` — the sandbox restriction failed to propagate.
 
-Both were implementation bugs, not model flaws. The model (configurable depth + narrowing permissions) is sound. The lesson: test permission narrowing rigorously at every delegation boundary. OpenLoop's advantage is that permission enforcement already runs through a single codepath (`permission_enforcer.py`) rather than being scattered across modules.
+Both were implementation bugs, not model flaws. The lesson: test the no-escalation invariant rigorously at every delegation boundary. OpenLoop's advantage is that permission enforcement runs through a single codepath (`permission_enforcer.py`) rather than being scattered across modules.
 
 ### Concurrency Controls
 

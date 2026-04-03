@@ -152,12 +152,14 @@ def _build_hooks_dict(
     conversation_id: str | None,
     background_task_id: str | None = None,
     autonomous_mode: bool = False,
+    narrowed_permissions=None,
 ) -> dict:
     """Build the hooks dict for ClaudeAgentOptions from the permission hook."""
     matcher, hook_fn = build_permission_hook(
         agent_id, conversation_id,
         background_task_id=background_task_id,
         autonomous_mode=autonomous_mode,
+        narrowed_permissions=narrowed_permissions,
     )
     matcher.hooks = [hook_fn]
     return {"PreToolUse": [matcher]}
@@ -1149,6 +1151,25 @@ def _build_continuation_prompt(
     if queued > 0:
         parts.append(f"{queued} approval(s) queued — check before continuing.")
 
+    # --- Delegation status (Phase 10.2) ---
+    child_tasks = background_task_service.list_child_tasks(db, task_id)
+    if child_tasks:
+        delegation_lines = ["Sub-agent status:"]
+        for child in child_tasks:
+            label = child.instruction[:60] if child.instruction else "Unknown"
+            line = f'- Task "{label}" ({child.id}): {child.status.upper()}'
+            if child.status == "completed" and child.result_summary:
+                line += f' — "{child.result_summary[:100]}"'
+            elif child.status == "running":
+                c_done = child.completed_count or 0
+                c_total = child.total_count or 0
+                if c_total > 0:
+                    line += f" — step {c_done}/{c_total}"
+            elif child.status == "failed" and child.error:
+                line += f' — "{child.error[:100]}"'
+            delegation_lines.append(line)
+        parts.append("\n".join(delegation_lines))
+
     # --- Closing instruction ---
     if is_autonomous:
         parts.append(
@@ -1179,11 +1200,16 @@ async def delegate_background(
     automation_run_id: str | None = None,
     model_override: str | None = None,
     run_type: str = "task",
+    delegation_depth: int = 0,
+    narrowed_permissions=None,
 ) -> str:
     """Delegate work to an agent as a background task.
 
     Creates a background_task record, fires a managed turn loop.
     Returns the background_task ID.
+
+    When delegation_depth > 0 and narrowed_permissions is provided, the
+    child task runs with a restricted permission set enforced by the hook.
     """
     # Kill switch guard — refuse new background work while paused
     if system_service.is_paused(db):
@@ -1221,6 +1247,7 @@ async def delegate_background(
         goal=instruction,
         run_type=run_type,
         status="running",
+        delegation_depth=delegation_depth,
     )
 
     agent = agent_service.get_agent(db, agent_id)
@@ -1252,6 +1279,7 @@ async def delegate_background(
             automation_run_id=automation_run_id,
             model_override=model_override,
             run_type=run_type,
+            narrowed_permissions=narrowed_permissions,
         )
     )
     _background_tasks.add(bg)
@@ -1272,6 +1300,7 @@ async def _run_background_task(
     automation_run_id: str | None = None,
     model_override: str | None = None,
     run_type: str = "task",
+    narrowed_permissions=None,
 ) -> None:
     """Managed turn loop — agent works in discrete turns with steering checkpoints.
 
@@ -1331,7 +1360,11 @@ async def _run_background_task(
             "Say TASK_COMPLETE or GOAL_COMPLETE when the entire task is finished."
         )
 
-        hooks = _build_hooks_dict(agent_id, conversation_id, background_task_id=task_id)
+        hooks = _build_hooks_dict(
+            agent_id, conversation_id,
+            background_task_id=task_id,
+            narrowed_permissions=narrowed_permissions,
+        )
 
         sdk_session_id: str | None = None
         result_text = ""
@@ -1619,6 +1652,21 @@ async def _run_background_task(
                 space_id=space_id,
             )
 
+        # Sub-agent completion notification (Phase 10.1)
+        from contract.enums import NotificationType
+        task_record = background_task_service.get_background_task(db, task_id)
+        if task_record.parent_task_id:
+            notification_service.create_notification(
+                db,
+                type=NotificationType.SUB_TASK_COMPLETED,
+                title=f"Sub-task completed: {agent_name}",
+                body=(
+                    f"Delegated sub-task finished: {instruction[:100]}"
+                    + (f"\nResult: {result_text[:300]}" if result_text else "")
+                ),
+                space_id=space_id,
+            )
+
         # Complete the automation run if this was triggered by an automation
         if automation_run_id:
             from backend.openloop.services import automation_service
@@ -1641,6 +1689,18 @@ async def _run_background_task(
             error=str(exc)[:2000],
             completed_at=datetime.now(UTC),
         )
+
+        # Cascade-cancel all child tasks (Phase 10.1)
+        cancelled_count = background_task_service.cascade_update_status(
+            db, task_id,
+            new_status="cancelled",
+            error_note=f"Parent task {task_id} failed",
+        )
+        if cancelled_count > 0:
+            logger.info(
+                "Cascade-cancelled %d child task(s) of failed task %s",
+                cancelled_count, task_id,
+            )
 
         conversation_service.update_conversation(db, conversation_id, status="interrupted")
 
@@ -2276,6 +2336,7 @@ async def pause_autonomous(db: Session, *, task_id: str) -> None:
     """Pause an autonomous task at the next turn boundary.
 
     The turn loop checks _paused_tasks at each iteration.
+    Also cascade-pauses all child tasks (Phase 10.1).
     """
     task = background_task_service.get_background_task(db, task_id)
 
@@ -2293,6 +2354,18 @@ async def pause_autonomous(db: Session, *, task_id: str) -> None:
     if task.status == "pending":
         background_task_service.update_background_task(db, task_id, status="paused")
 
+    # Cascade-pause child tasks (Phase 10.1)
+    paused_count = background_task_service.cascade_update_status(
+        db, task_id,
+        new_status="paused",
+    )
+    # Also add child tasks to the in-memory paused set so their turn loops stop
+    for child_id in background_task_service.get_all_descendant_task_ids(db, task_id):
+        _paused_tasks.add(child_id)
+
+    if paused_count > 0:
+        logger.info("Cascade-paused %d child task(s) of task %s", paused_count, task_id)
+
     logger.info("Autonomous task %s marked for pause", task_id)
 
 
@@ -2302,6 +2375,7 @@ async def resume_autonomous(db: Session, *, task_id: str) -> None:
     If the task was paused mid-run, the turn loop will resume.
     If the task was paused before the loop started (pending->paused),
     we re-fire the turn loop.
+    Also cascade-resumes all child tasks (Phase 10.1).
     """
     task = background_task_service.get_background_task(db, task_id)
 
@@ -2316,6 +2390,23 @@ async def resume_autonomous(db: Session, *, task_id: str) -> None:
 
     # Remove from paused set — the turn loop will notice and continue
     _paused_tasks.discard(task_id)
+
+    # Cascade-resume child tasks (Phase 10.1)
+    descendant_ids = background_task_service.get_all_descendant_task_ids(db, task_id)
+    for child_id in descendant_ids:
+        _paused_tasks.discard(child_id)
+    # Update DB status for paused children back to running
+    from backend.openloop.db.models import BackgroundTask as BT
+
+    resumed_count = 0
+    for child_id in descendant_ids:
+        child_task = db.query(BT).filter(BT.id == child_id).first()
+        if child_task and child_task.status == "paused":
+            child_task.status = "running"
+            resumed_count += 1
+    if resumed_count > 0:
+        db.commit()
+        logger.info("Cascade-resumed %d child task(s) of task %s", resumed_count, task_id)
 
     # Check if the task is actually in the turn loop (has a conversation in _background_conversations)
     if task.conversation_id and task.conversation_id in _background_conversations:
@@ -2508,6 +2599,8 @@ def list_running(db: Session) -> list[dict]:
             "completed_count": bt.completed_count if bt else None,
             "total_count": bt.total_count if bt else None,
             "token_budget": bt.token_budget if bt else None,
+            "parent_task_id": bt.parent_task_id if bt else None,
+            "delegation_depth": bt.delegation_depth if bt else None,
         })
 
     # Background tasks that are currently running (not already covered via conversation)
@@ -2530,6 +2623,8 @@ def list_running(db: Session) -> list[dict]:
             "completed_count": task.completed_count,
             "total_count": task.total_count,
             "token_budget": task.token_budget,
+            "parent_task_id": task.parent_task_id,
+            "delegation_depth": task.delegation_depth,
         })
 
     return results

@@ -2512,6 +2512,10 @@ export interface components {
             total_count?: number | null;
             /** Token Budget */
             token_budget?: number | null;
+            /** Parent Task Id */
+            parent_task_id?: string | null;
+            /** Delegation Depth */
+            delegation_depth?: number | null;
         };
         /** ScanResponse */
         ScanResponse: {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
@@ -45,20 +45,135 @@ function ElapsedTime({ startedAt }: { startedAt: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Single agent row
+// Format helpers
+// ---------------------------------------------------------------------------
+
+function formatTokenBudget(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;
+  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k tok`;
+  return `${n} tok`;
+}
+
+// ---------------------------------------------------------------------------
+// Sub-agent row — compact, indented
+// ---------------------------------------------------------------------------
+
+interface SubAgentRowProps {
+  session: RunningSession;
+  agentName: string;
+}
+
+function SubAgentRow({ session, agentName }: SubAgentRowProps) {
+  const addToast = useToastStore((s) => s.addToast);
+  const queryClient = useQueryClient();
+  const [pauseLoading, setPauseLoading] = useState(false);
+
+  const runType = session.run_type ?? 'task';
+  const isRunning = session.status === 'active' || session.status === 'background' || session.status === 'running';
+  const isPaused = session.status === 'paused';
+  const instruction = session.instruction;
+  const truncated = instruction
+    ? instruction.length > 60 ? instruction.slice(0, 60) + '...' : instruction
+    : null;
+  const delegationDepth = session.delegation_depth ?? 0;
+
+  const handlePauseResume = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!session.background_task_id || pauseLoading) return;
+    setPauseLoading(true);
+    const endpoint = isPaused
+      ? '/api/v1/background-tasks/{task_id}/resume' as const
+      : '/api/v1/background-tasks/{task_id}/pause' as const;
+    const action = isPaused ? 'resume' : 'pause';
+    try {
+      const res = await api.POST(endpoint, {
+        params: { path: { task_id: session.background_task_id } },
+      });
+      if (res.error) {
+        addToast(`Failed to ${action} sub-agent.`, 'error');
+      } else {
+        addToast(`Sub-agent ${isPaused ? 'resumed' : 'paused'}.`, 'success');
+        queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/agents/running'] });
+      }
+    } catch {
+      addToast(`Failed to ${action} sub-agent.`, 'error');
+    } finally {
+      setPauseLoading(false);
+    }
+  };
+
+  return (
+    <div className="flex items-center gap-2 py-1.5 px-3 ml-5 border-l-2 border-border/40">
+      {/* Status dot — smaller for sub-agents */}
+      <span className="relative flex h-1.5 w-1.5 shrink-0">
+        {isRunning && (
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-success opacity-75" />
+        )}
+        <span className={`relative inline-flex rounded-full h-1.5 w-1.5 ${isRunning ? 'bg-success' : 'bg-muted'}`} />
+      </span>
+
+      {/* Agent name + instruction */}
+      <div className="flex flex-col min-w-0 flex-1">
+        <span className="text-xs font-medium text-foreground truncate">
+          {agentName}
+        </span>
+        {truncated && (
+          <span className="text-[11px] text-muted truncate">{truncated}</span>
+        )}
+      </div>
+
+      {/* Depth badge */}
+      <Badge variant="info" className="shrink-0 text-[9px] px-1.5 py-0">
+        D{delegationDepth}
+      </Badge>
+
+      {/* Elapsed time */}
+      <span className="text-[11px] text-muted tabular-nums shrink-0">
+        <ElapsedTime startedAt={session.started_at} />
+      </span>
+
+      {/* Pause / Resume button */}
+      {session.background_task_id && (isRunning || isPaused) && (
+        <button
+          onClick={handlePauseResume}
+          disabled={pauseLoading}
+          className="inline-flex items-center justify-center w-5 h-5 rounded-md text-muted hover:text-warning hover:bg-warning/10 transition-colors cursor-pointer disabled:opacity-50 shrink-0"
+          title={isPaused ? 'Resume sub-agent' : 'Pause sub-agent'}
+          aria-label={isPaused ? 'Resume sub-agent' : 'Pause sub-agent'}
+        >
+          {isPaused ? (
+            <svg width="8" height="10" viewBox="0 0 8 10" fill="currentColor">
+              <polygon points="0,0 8,5 0,10" />
+            </svg>
+          ) : (
+            <svg width="8" height="10" viewBox="0 0 8 10" fill="none">
+              <rect x="0" y="0" width="3" height="10" rx="0.5" fill="currentColor" />
+              <rect x="5" y="0" width="3" height="10" rx="0.5" fill="currentColor" />
+            </svg>
+          )}
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Single agent row (top-level coordinator or standalone)
 // ---------------------------------------------------------------------------
 
 interface AgentRowProps {
   session: RunningSession;
   agentName: string;
+  childSessions: RunningSession[];
+  agentMap: Map<string, string>;
 }
 
-function AgentRow({ session, agentName }: AgentRowProps) {
+function AgentRow({ session, agentName, childSessions, agentMap }: AgentRowProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const addToast = useToastStore((s) => s.addToast);
   const [pauseLoading, setPauseLoading] = useState(false);
-  const [stopLoading, setStopLoading] = useState(false);
+  const [childrenExpanded, setChildrenExpanded] = useState(false);
 
   const runType = session.run_type ?? 'interactive';
   const badge = runTypeBadge[runType] ?? runTypeBadge.interactive;
@@ -73,6 +188,14 @@ function AgentRow({ session, agentName }: AgentRowProps) {
       ? instruction.slice(0, 80) + '...'
       : instruction
     : null;
+
+  const hasChildren = childSessions.length > 0;
+  const childRunningCount = childSessions.filter(
+    (c) => c.status === 'active' || c.status === 'background' || c.status === 'running',
+  ).length;
+  const childCompletedCount = childSessions.filter(
+    (c) => c.status === 'completed' || c.status === 'done',
+  ).length;
 
   const handlePause = async (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -95,31 +218,15 @@ function AgentRow({ session, agentName }: AgentRowProps) {
     }
   };
 
-  const handleStop = async (e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!session.background_task_id || stopLoading) return;
-    setStopLoading(true);
-    try {
-      const res = await api.POST('/api/v1/background-tasks/{task_id}/pause', {
-        params: { path: { task_id: session.background_task_id } },
-      });
-      if (res.error) {
-        addToast('Failed to stop task.', 'error');
-      } else {
-        addToast('Task stopped.', 'warning');
-        queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/agents/running'] });
-      }
-    } catch {
-      addToast('Failed to stop task.', 'error');
-    } finally {
-      setStopLoading(false);
-    }
-  };
-
   const handleRowClick = () => {
     if (session.conversation_id && session.space_id) {
       navigate(`/space/${session.space_id}`);
     }
+  };
+
+  const handleToggleChildren = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setChildrenExpanded((prev) => !prev);
   };
 
   return (
@@ -156,8 +263,24 @@ function AgentRow({ session, agentName }: AgentRowProps) {
               </div>
               <span className="text-xs text-muted tabular-nums whitespace-nowrap">
                 {session.completed_count}/{session.total_count}
+                {hasChildren && (
+                  <span className="text-[10px]"> + {childSessions.length} sub</span>
+                )}
               </span>
             </div>
+          )}
+
+          {/* Sub-agent count badge — clickable to expand */}
+          {hasChildren && (
+            <button
+              onClick={handleToggleChildren}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary hover:bg-primary/20 transition-colors cursor-pointer shrink-0"
+              aria-label={childrenExpanded ? 'Collapse sub-agents' : 'Expand sub-agents'}
+              title={`${childSessions.length} sub-agent${childSessions.length !== 1 ? 's' : ''} (${childRunningCount} running, ${childCompletedCount} done)`}
+            >
+              <span>{childSessions.length} sub-agent{childSessions.length !== 1 ? 's' : ''}</span>
+              <span className="text-[9px] select-none">{childrenExpanded ? '\u25B2' : '\u25BC'}</span>
+            </button>
           )}
 
           {/* Run type badge */}
@@ -198,19 +321,22 @@ function AgentRow({ session, agentName }: AgentRowProps) {
             {/* System-wide stop is available via the kill switch in the header */}
           </div>
         </div>
+
+        {/* Expanded sub-agent rows */}
+        {hasChildren && childrenExpanded && (
+          <div className="mt-2 pt-2 border-t border-border/50 space-y-0.5">
+            {childSessions.map((child) => (
+              <SubAgentRow
+                key={child.background_task_id ?? child.conversation_id}
+                session={child}
+                agentName={agentMap.get(child.agent_id) ?? 'Sub-agent'}
+              />
+            ))}
+          </div>
+        )}
       </CardBody>
     </Card>
   );
-}
-
-// ---------------------------------------------------------------------------
-// Format helpers
-// ---------------------------------------------------------------------------
-
-function formatTokenBudget(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k tok`;
-  return `${n} tok`;
 }
 
 // ---------------------------------------------------------------------------
@@ -250,6 +376,49 @@ export function ActiveAgents() {
 
   const isLoading = running.isLoading || agents.isLoading;
 
+  // Build agent name lookup
+  const agentMap = useMemo(() => {
+    const map = new Map<string, string>();
+    if (agents.data) {
+      for (const agent of agents.data) {
+        map.set(agent.id, agent.name);
+      }
+    }
+    return map;
+  }, [agents.data]);
+
+  // Build hierarchy: separate top-level sessions from child sessions
+  const { topLevel, childrenByParent } = useMemo(() => {
+    const sessions = running.data ?? [];
+    const top: RunningSession[] = [];
+    const byParent = new Map<string, RunningSession[]>();
+
+    // First pass: index by background_task_id so we can identify parents
+    const taskIdSet = new Set<string>();
+    for (const s of sessions) {
+      if (s.background_task_id) {
+        taskIdSet.add(s.background_task_id);
+      }
+    }
+
+    // Second pass: separate top-level from children
+    for (const s of sessions) {
+      if (s.parent_task_id && taskIdSet.has(s.parent_task_id)) {
+        // This is a child of a session that's in our list
+        const existing = byParent.get(s.parent_task_id) ?? [];
+        existing.push(s);
+        byParent.set(s.parent_task_id, existing);
+      } else if (s.parent_task_id) {
+        // Parent is not in our running list (maybe completed) — show as top-level
+        top.push(s);
+      } else {
+        top.push(s);
+      }
+    }
+
+    return { topLevel: top, childrenByParent: byParent };
+  }, [running.data]);
+
   if (isLoading) {
     return (
       <div className="space-y-1.5">
@@ -266,17 +435,7 @@ export function ActiveAgents() {
     );
   }
 
-  // Build agent name lookup
-  const agentMap = new Map<string, string>();
-  if (agents.data) {
-    for (const agent of agents.data) {
-      agentMap.set(agent.id, agent.name);
-    }
-  }
-
-  const sessions = running.data ?? [];
-
-  if (sessions.length === 0) {
+  if (topLevel.length === 0) {
     return (
       <p className="text-sm text-muted py-2">No active agents.</p>
     );
@@ -284,13 +443,31 @@ export function ActiveAgents() {
 
   return (
     <div className="space-y-1.5">
-      {sessions.map((session) => (
-        <AgentRow
-          key={session.conversation_id || session.background_task_id || session.agent_id}
-          session={session}
-          agentName={agentMap.get(session.agent_id) ?? 'Unknown Agent'}
-        />
-      ))}
+      {topLevel.map((session) => {
+        // Collect all descendants recursively for this session
+        const allDescendants: RunningSession[] = [];
+        const visited = new Set<string>();
+        const collectDescendants = (parentTaskId: string | undefined | null) => {
+          if (!parentTaskId || visited.has(parentTaskId)) return;
+          visited.add(parentTaskId);
+          const children = childrenByParent.get(parentTaskId) ?? [];
+          for (const child of children) {
+            allDescendants.push(child);
+            collectDescendants(child.background_task_id);
+          }
+        };
+        collectDescendants(session.background_task_id);
+
+        return (
+          <AgentRow
+            key={session.conversation_id || session.background_task_id || session.agent_id}
+            session={session}
+            agentName={agentMap.get(session.agent_id) ?? 'Unknown Agent'}
+            childSessions={allDescendants}
+            agentMap={agentMap}
+          />
+        );
+      })}
     </div>
   );
 }

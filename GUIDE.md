@@ -516,13 +516,9 @@ A fourth loop will be added for autonomous operations:
 
 All four use the same pattern: asyncio task started in the app lifespan, cancelled on shutdown.
 
-### Permission Narrowing
+### Permission Inheritance
 
-When an agent delegates to a sub-agent, the sub-agent inherits at most the parent's permissions. Each delegation level further restricts available tools:
-
-- **Depth 0 (coordinator):** Full agent permissions (everything configured on the agent)
-- **Depth 1:** Parent's permissions minus agent management, automation management, and permission management tools
-- **Depth 2+:** Restricted to reading and writing items and documents only
+When an agent delegates to a sub-agent, the sub-agent inherits the parent's full permissions by default. The only hard rule: permissions can never *widen* beyond the parent's scope. A sub-agent cannot have capabilities its parent doesn't have. The permission enforcer validates this at every `delegate_task()` call.
 
 The maximum delegation depth is configurable per agent (default: 1, meaning no nesting). The concurrency cap (8 total background sessions) prevents resource exhaustion regardless of depth.
 

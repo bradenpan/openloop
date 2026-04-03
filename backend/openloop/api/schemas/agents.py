@@ -116,3 +116,6 @@ class RunningSessionResponse(BaseModel):
     completed_count: int | None = None
     total_count: int | None = None
     token_budget: int | None = None
+    # Phase 10: fan-out hierarchy
+    parent_task_id: str | None = None
+    delegation_depth: int | None = None

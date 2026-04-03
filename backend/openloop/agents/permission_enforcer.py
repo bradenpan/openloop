@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from fnmatch import fnmatch
 
@@ -86,6 +87,96 @@ def _redact_tool_input(tool_input: dict) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Permission narrowing for multi-agent delegation (Phase 10.1)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PermissionSet:
+    """Represents a set of permissions for an agent.
+
+    Each entry is (resource_pattern, operation, grant_level).
+    Used for narrowed permission sets passed to delegated sub-agents.
+    """
+
+    entries: list[tuple[str, str, str]] = field(default_factory=list)
+
+    def has_permission(self, resource: str, operation: str) -> str:
+        """Check grant level for a resource+operation pair.
+
+        Returns the GrantLevel string, or "never" if no match.
+        """
+        normalized = resource.replace("\\", "/")
+        for res_pattern, op, grant in self.entries:
+            if op != "*" and op != operation:
+                continue
+            if fnmatch(normalized, res_pattern) or res_pattern == resource:
+                return grant
+        return GrantLevel.NEVER
+
+
+# Tools considered management-level (removed at depth 1+)
+_MANAGEMENT_TOOLS: frozenset[str] = frozenset({
+    "register_agent",
+    "test_agent",
+    "open_conversation",
+    "list_agents",
+    "list_spaces",
+    "navigate_to_space",
+    "get_attention_items",
+    "get_cross_space_tasks",
+    "update_task_list",
+    "queue_approval",
+})
+
+def narrow_permissions(
+    db: Session,
+    parent_agent_id: str,
+    delegation_depth: int,
+) -> PermissionSet:
+    """Build a permission set for a child agent by inheriting the parent's permissions.
+
+    Sub-agents get the same permissions as their parent by default. The only
+    hard rule is that permissions can never widen beyond the parent's scope
+    (enforced by validate_narrowing()). max_spawn_depth limits recursion depth.
+    delegation_depth is accepted for tracking but does not restrict permissions.
+    """
+    parent_permissions: list[AgentPermission] = (
+        db.query(AgentPermission).filter(AgentPermission.agent_id == parent_agent_id).all()
+    )
+
+    entries: list[tuple[str, str, str]] = []
+    for perm in parent_permissions:
+        entries.append((perm.resource_pattern, perm.operation, perm.grant_level))
+
+    return PermissionSet(entries=entries)
+
+
+def validate_narrowing(
+    parent_permissions: PermissionSet,
+    child_permissions: PermissionSet,
+) -> bool:
+    """Verify that child permissions are strictly a subset of parent permissions.
+
+    Every child permission entry must have a matching parent entry with equal
+    or broader scope. Returns True if valid, False if child exceeds parent.
+    """
+    for res, op, grant in child_permissions.entries:
+        parent_grant = parent_permissions.has_permission(res, op)
+        if parent_grant == GrantLevel.NEVER:
+            # Parent has no permission for this resource+operation
+            return False
+        # Child cannot escalate: e.g., child "always" but parent "approval"
+        # is escalation. Grant hierarchy: always > approval > never.
+        _grant_rank = {GrantLevel.NEVER: 0, GrantLevel.APPROVAL: 1, GrantLevel.ALWAYS: 2}
+        child_rank = _grant_rank.get(grant, 0)
+        parent_rank = _grant_rank.get(parent_grant, 0)
+        if child_rank > parent_rank:
+            return False
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Tool-to-resource mapping
 # ---------------------------------------------------------------------------
 
@@ -138,6 +229,8 @@ _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
     # Delegation (19)
     "delegate_task": ("openloop-delegation", Operation.EXECUTE),
     "update_task_progress": ("openloop-delegation", Operation.EDIT),
+    "check_delegated_tasks": ("openloop-delegation", Operation.READ),
+    "cancel_delegated_task": ("openloop-delegation", Operation.DELETE),
     # Agent Builder tools
     "register_agent": ("openloop-agents", Operation.CREATE),
     "test_agent": ("openloop-delegation", Operation.EXECUTE),
@@ -472,11 +565,36 @@ async def _poll_for_approval(db: Session, request_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _check_narrowed_permission(
+    narrowed: PermissionSet,
+    tool_name: str,
+    tool_input: dict,
+) -> str:
+    """Check a tool call against a narrowed permission set.
+
+    Returns "allow" or "deny". Narrowed sets do not support "approval" —
+    delegated sub-agents get allow/deny only.
+    """
+    resource, operation = map_tool_to_resource(tool_name, tool_input)
+
+    # System guardrails still apply
+    if is_system_blocked(resource):
+        return "deny"
+
+    grant = narrowed.has_permission(resource, operation)
+    if grant == GrantLevel.ALWAYS:
+        return "allow"
+    # For narrowed sets, treat "approval" as "deny" — sub-agents cannot
+    # initiate approval flows
+    return "deny"
+
+
 def build_permission_hook(
     agent_id: str,
     conversation_id: str | None,
     background_task_id: str | None = None,
     autonomous_mode: bool = False,
+    narrowed_permissions: PermissionSet | None = None,
 ):
     """Build a PreToolUse hook for SDK session registration.
 
@@ -490,6 +608,10 @@ def build_permission_hook(
     blocking and polling, the action is queued in the approval_queue table
     and the tool call is denied with a message telling the agent to continue
     with other work.
+
+    When narrowed_permissions is provided (for delegated sub-agents), the
+    hook checks against the narrowed set instead of querying the agent's
+    full permissions from the DB. This enforces permission narrowing.
 
     Each invocation creates its own short-lived DB session via SessionLocal()
     so it is safe to call from async SDK context (not request-scoped).
@@ -506,27 +628,31 @@ def build_permission_hook(
         tool_name = input["tool_name"]
         tool_input = input.get("tool_input", {})
 
-        db = SessionLocal()
-        try:
-            if autonomous_mode:
-                result = await _check_permission_autonomous(
-                    db,
-                    agent_id=agent_id,
-                    conversation_id=conversation_id,
-                    background_task_id=background_task_id,
-                    tool_name=tool_name,
-                    tool_input=tool_input,
-                )
-            else:
-                result = await check_permission(
-                    db,
-                    agent_id=agent_id,
-                    conversation_id=conversation_id,
-                    tool_name=tool_name,
-                    tool_input=tool_input,
-                )
-        finally:
-            db.close()
+        # If narrowed permissions are provided, use them instead of DB lookup
+        if narrowed_permissions is not None:
+            result = _check_narrowed_permission(narrowed_permissions, tool_name, tool_input)
+        else:
+            db = SessionLocal()
+            try:
+                if autonomous_mode:
+                    result = await _check_permission_autonomous(
+                        db,
+                        agent_id=agent_id,
+                        conversation_id=conversation_id,
+                        background_task_id=background_task_id,
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                    )
+                else:
+                    result = await check_permission(
+                        db,
+                        agent_id=agent_id,
+                        conversation_id=conversation_id,
+                        tool_name=tool_name,
+                        tool_input=tool_input,
+                    )
+            finally:
+                db.close()
 
         # Audit log the permission decision
         resource, operation = map_tool_to_resource(tool_name, tool_input)

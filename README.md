@@ -27,7 +27,7 @@ See [PROGRESS.md](PROGRESS.md) for detailed build status and [IMPLEMENTATION-PLA
 - **Conversations** — persistent chat threads with agents. Context survives across sessions via four-tier memory and conversation summaries.
 - **Documents** — uploaded files, scanned directories, or synced Google Drive folders. Text extracted and indexed for search.
 - **Automations** — scheduled or event-triggered agent runs (daily briefing, stale work check, follow-up reminders, etc.).
-- **Autonomous Agents** — Agents can pursue goals independently over hours. Give an agent an objective, it builds a task list, works through items, adapts its plan, and reports back. Built on three autonomy tiers (interactive, supervised, autonomous) with permission narrowing, compaction for indefinite sessions, and safety controls (kill switch, audit logging, approval queues).
+- **Autonomous Agents** — Agents can pursue goals independently over hours. Give an agent an objective, it builds a task list, works through items, adapts its plan, and reports back. Built on three autonomy tiers (interactive, supervised, autonomous) with permission inheritance (sub-agents inherit parent scope, never exceed it), compaction for indefinite sessions, and safety controls (kill switch, audit logging, approval queues).
 
 ## Memory Architecture
 

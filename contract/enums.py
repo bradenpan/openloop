@@ -78,6 +78,7 @@ class NotificationType(StrEnum):
     SYSTEM = "system"
     EMERGENCY_STOP = "emergency_stop"
     HEARTBEAT_ACTION = "heartbeat_action"
+    SUB_TASK_COMPLETED = "sub_task_completed"
 
 
 class SSEEventType(StrEnum):

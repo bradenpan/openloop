@@ -5,6 +5,7 @@ import { useSSEEvent, type SSEEvent } from '../../hooks/use-sse';
 import { ConversationHeader } from './conversation-header';
 import { AutonomousHeader } from './autonomous-header';
 import { TaskListSidebar } from './task-list-sidebar';
+import { DelegationTree } from './delegation-tree';
 import { ApproveLaunchBanner } from './approve-launch-banner';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
@@ -57,6 +58,7 @@ export function ConversationPanel({
   const isAutonomous = taskId != null;
   const [autonomousStatus, setAutonomousStatus] = useState(initialAutonomousStatus);
   const [taskListCollapsed, setTaskListCollapsed] = useState(false);
+  const [delegationTreeCollapsed, setDelegationTreeCollapsed] = useState(false);
 
   // Keep autonomous status in sync with prop changes
   useEffect(() => { setAutonomousStatus(initialAutonomousStatus); }, [initialAutonomousStatus]);
@@ -339,6 +341,15 @@ export function ConversationPanel({
           taskId={taskId}
           collapsed={taskListCollapsed}
           onToggle={() => setTaskListCollapsed((prev) => !prev)}
+        />
+      )}
+
+      {/* Delegation tree sidebar for autonomous runs with sub-agents */}
+      {isAutonomous && taskId && (
+        <DelegationTree
+          taskId={taskId}
+          collapsed={delegationTreeCollapsed}
+          onToggle={() => setDelegationTreeCollapsed((prev) => !prev)}
         />
       )}
     </div>

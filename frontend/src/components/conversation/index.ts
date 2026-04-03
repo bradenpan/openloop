@@ -4,3 +4,4 @@ export { AutonomousHeader } from './autonomous-header';
 export { AutonomousLaunch } from './autonomous-launch';
 export { ApproveLaunchBanner } from './approve-launch-banner';
 export { TaskListSidebar } from './task-list-sidebar';
+export { DelegationTree } from './delegation-tree';

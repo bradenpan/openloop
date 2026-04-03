@@ -1196,7 +1196,7 @@ async def get_conversation_messages(conversation_id: str, limit: str = "20", *, 
 async def delegate_task(
     agent_name: str, instruction: str,
     space_id: str = "", parent_task_id: str = "",
-    *, _db=None, _agent_id: str = "",
+    *, _db=None, _agent_id: str = "", _background_task_id: str = "",
 ) -> str:
     """Delegate a task to another agent to run in the background.
 
@@ -1209,6 +1209,7 @@ async def delegate_task(
         JSON with the background task ID.
     """
     from backend.openloop.agents import agent_runner
+    from backend.openloop.agents.permission_enforcer import narrow_permissions, validate_narrowing
 
     db = _get_db(_db)
     try:
@@ -1216,13 +1217,77 @@ async def delegate_task(
             denied = _validate_space_access(db, _agent_id, space_id)
             if denied:
                 return denied
+
+        # Determine parent delegation depth from the calling task
+        parent_depth = 0
+        effective_parent_task_id = parent_task_id or _background_task_id or None
+        if _background_task_id:
+            try:
+                parent_task = background_task_service.get_background_task(db, _background_task_id)
+                parent_depth = parent_task.delegation_depth or 0
+                # Use the calling task as parent if no explicit parent_task_id
+                if not parent_task_id:
+                    effective_parent_task_id = _background_task_id
+            except HTTPException:
+                pass  # Task not found — use depth 0
+
+        # Enforce per-run sub-agent cap
+        from backend.openloop.agents.concurrency_manager import (
+            MAX_SUBAGENTS_PER_RUN,
+            count_active_children,
+        )
+
+        if effective_parent_task_id:
+            active_children = count_active_children(db, effective_parent_task_id)
+            if active_children >= MAX_SUBAGENTS_PER_RUN:
+                return _err(
+                    f"Maximum concurrent sub-agents ({MAX_SUBAGENTS_PER_RUN}) reached "
+                    f"for this run. Retry after a sub-agent completes."
+                )
+
         agent = agent_service.get_agent_by_name(db, agent_name)
+
+        # Check delegation depth limit
+        child_depth = parent_depth + 1
+        if child_depth > agent.max_spawn_depth:
+            return _err(
+                f"Delegation depth limit reached: depth {child_depth} exceeds "
+                f"agent '{agent_name}' max_spawn_depth of {agent.max_spawn_depth}"
+            )
+
+        # Determine the root coordinator's agent_id by walking up the parent chain.
+        # Under the inheritance model, all descendants operate with the root's
+        # permissions — using the calling agent's DB permissions would allow
+        # escalation if the sub-agent has broader DB perms than what it inherited.
+        root_agent_id = _agent_id or agent.id
+        if _background_task_id:
+            walk_task_id: str | None = _background_task_id
+            while walk_task_id:
+                try:
+                    walk_task = background_task_service.get_background_task(db, walk_task_id)
+                    if not walk_task.parent_task_id:
+                        root_agent_id = walk_task.agent_id
+                        break
+                    walk_task_id = walk_task.parent_task_id
+                except HTTPException:
+                    break
+
+        # Narrow permissions for the child (inherit from root coordinator)
+        narrowed = narrow_permissions(db, root_agent_id, delegation_depth=child_depth)
+
+        # Safety check: validate child doesn't exceed root's permissions
+        parent_perms = narrow_permissions(db, root_agent_id, delegation_depth=0)
+        if not validate_narrowing(parent_perms, narrowed):
+            return _err("Permission narrowing validation failed: child would exceed parent permissions")
+
         task_id = await agent_runner.delegate_background(
             db,
             agent_id=agent.id,
             instruction=instruction,
             space_id=space_id or None,
-            parent_task_id=parent_task_id or None,
+            parent_task_id=effective_parent_task_id or None,
+            delegation_depth=child_depth,
+            narrowed_permissions=narrowed,
         )
         return _ok({"task_id": task_id, "agent": agent_name, "status": "running"})
     except HTTPException as exc:
@@ -1260,6 +1325,110 @@ async def update_task_progress(
         return _err(exc.detail)
     except ValueError:
         return _err("step and total_steps must be integers")
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 19c. check_delegated_tasks
+async def check_delegated_tasks(
+    task_ids: str,
+    *, _db=None, _background_task_id: str = "",
+) -> str:
+    """Check status of delegated sub-agent tasks.
+
+    Args:
+        task_ids: Comma-separated list of task IDs to check.
+    Returns:
+        JSON array with status of each task that is a child of the calling task.
+    """
+    db = _get_db(_db)
+    try:
+        if not _background_task_id:
+            return _err("No background task context — cannot check delegated tasks")
+
+        ids = [tid.strip() for tid in str(task_ids).split(",") if tid.strip()]
+        if not ids:
+            return _ok([])
+
+        results = []
+        for tid in ids:
+            try:
+                task = background_task_service.get_background_task(db, tid)
+            except HTTPException:
+                continue  # Task not found — skip silently
+            # Security: only return tasks that are children of the caller
+            if task.parent_task_id != _background_task_id:
+                continue
+            results.append({
+                "task_id": task.id,
+                "status": task.status,
+                "result_summary": task.result_summary,
+                "completed_count": task.completed_count or 0,
+                "total_count": task.total_count or 0,
+                "error": task.error,
+            })
+        return _ok(results)
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 19d. cancel_delegated_task
+async def cancel_delegated_task(
+    task_id: str,
+    *, _db=None, _background_task_id: str = "",
+) -> str:
+    """Cancel a delegated sub-agent task and all its descendants.
+
+    Args:
+        task_id: The task ID to cancel.
+    Returns:
+        JSON confirmation with the number of tasks cancelled.
+    """
+    db = _get_db(_db)
+    try:
+        if not _background_task_id:
+            return _err("No background task context — cannot cancel delegated tasks")
+
+        task_id = str(task_id).strip()
+        try:
+            task = background_task_service.get_background_task(db, task_id)
+        except HTTPException:
+            return _err(f"Task {task_id} not found")
+
+        # Security: only allow cancelling children of the caller
+        if task.parent_task_id != _background_task_id:
+            return _err(f"Task {task_id} is not a child of the current task")
+
+        # Cancel the task itself if it's still active
+        cancelled_count = 0
+        if task.status in ("running", "queued", "pending", "paused"):
+            task.status = "cancelled"
+            task.error = f"Cancelled by parent task {_background_task_id}"
+            task.completed_at = datetime.now(UTC)
+            cancelled_count += 1
+
+        # Cascade-cancel all descendants
+        descendant_count = background_task_service.cascade_update_status(
+            db, task_id,
+            new_status="cancelled",
+            error_note=f"Cancelled by parent task {_background_task_id}",
+        )
+        cancelled_count += descendant_count
+        db.commit()
+
+        return _ok({
+            "task_id": task_id,
+            "cancelled": True,
+            "total_cancelled": cancelled_count,
+        })
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
     finally:
         if _db is None:
             db.close()
@@ -2202,6 +2371,8 @@ _STANDARD_TOOLS = {
     "get_conversation_messages": get_conversation_messages,
     "delegate_task": delegate_task,
     "update_task_progress": update_task_progress,
+    "check_delegated_tasks": check_delegated_tasks,
+    "cancel_delegated_task": cancel_delegated_task,
     "read_drive_file": read_drive_file,
     "list_drive_files": list_drive_files,
     "create_drive_file": create_drive_file,

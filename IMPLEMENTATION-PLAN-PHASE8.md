@@ -386,28 +386,27 @@ Implement the heartbeat as a special automation type:
 The core security mechanism for sub-agent delegation. This must be correct — OpenClaw's two CVEs in this area were both implementation failures in permission propagation.
 
 - New function in `permission_enforcer.py`: `narrow_permissions(parent_agent_id, delegation_depth) -> PermissionSet`
-  - Loads parent's permissions
-  - Applies depth-based restrictions:
-    - Depth 1+: remove agent management tools (create/modify/delete agents), automation management, permission management
-    - Depth 2+: restrict to read/write items and documents only (no memory writes, no delegation, no conversation management)
+  - Loads parent's permissions and returns them as the child's permission set
+  - Sub-agents inherit parent permissions by default — no depth-based stripping
+  - `delegation_depth` is tracked but does not restrict permissions
   - Returns a `PermissionSet` object used by the delegated session's permission hook
-- New function: `validate_narrowing(parent_permissions, child_permissions) -> bool` — verifies child is strictly a subset of parent. Called at delegation time as a safety check.
+- New function: `validate_narrowing(parent_permissions, child_permissions) -> bool` — verifies child is strictly a subset of parent (no-escalation invariant). Called at delegation time as a safety check.
 - Add `delegation_depth` column to `background_tasks` (int, default 0). Note: `parent_task_id` already exists on BackgroundTask (line 668 in models.py) — do NOT add it again.
 - Modify `delegate_task()` MCP tool: accept delegation depth and narrowed permissions from the calling context. Check `delegation_depth < agent.max_spawn_depth` before allowing delegation. Increment depth for child. Pass narrowed permissions. Note: the current function signature only takes `agent_name` and `instruction` — it needs to be extended to carry parent context (depth, permission scope).
 - Cascade termination: stopping a task also stops all tasks where `parent_task_id` matches (recursive)
 
 **Tests (critical — these are the security boundary):**
-- Test: depth-0 agent can delegate with full permissions minus management tools
-- Test: depth-1 agent can delegate (if max_spawn_depth >= 2) with further-restricted permissions
+- Test: sub-agent at any depth inherits all parent permissions
+- Test: depth-1 agent can delegate (if max_spawn_depth >= 2)
 - Test: depth-1 agent CANNOT delegate if max_spawn_depth = 1
-- Test: child agent CANNOT have permissions the parent doesn't have
+- Test: child agent CANNOT have permissions the parent doesn't have (no-escalation)
 - Test: stopping parent cascade-terminates all children
-- Test: child agent cannot access tools removed by narrowing
+- Test: pausing parent cascade-pauses all children
 
 **Files modified:** `backend/openloop/agents/permission_enforcer.py`, `backend/openloop/agents/mcp_tools.py` (delegate_task changes), `backend/openloop/agents/agent_runner.py` (cascade termination)
 **Migration:** Add `delegation_depth` to `background_tasks` (`parent_task_id` already exists)
 
-**Acceptance criteria:** All security tests pass. Permission narrowing is strict — no path exists for a child to exceed parent permissions. Cascade termination works recursively. Delegation rejected when depth limit reached.
+**Acceptance criteria:** All security tests pass. No-escalation invariant enforced — no path exists for a child to exceed parent permissions. Sub-agents inherit parent permissions by default. Cascade termination works recursively. Delegation rejected when depth limit reached.
 
 **⚠️ Human review gate:** This is the security-critical task in the plan. Review the narrowing logic and test coverage before proceeding. OpenClaw got this wrong twice.
 

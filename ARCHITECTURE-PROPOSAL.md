@@ -235,7 +235,7 @@ Business logic. Stateless functions that operate on the database and coordinate 
   - `delegate_background(db, agent_id, instruction, ...)` → runs autonomous agent work in a managed turn loop
   - `steer(conversation_id, message)` → mid-task course correction for background tasks
   - `launch_autonomous(db, agent_id, space_id, goal, constraints, token_budget, time_budget)` → goal-driven autonomous run with compaction loop, self-directed task list, approval queue integration
-  - `narrow_permissions(parent_agent_id, delegation_depth)` → compute restricted permission set for sub-agents
+  - `narrow_permissions(parent_agent_id, delegation_depth)` → inherit parent permissions for sub-agents (validates no-escalation)
   - `list_running(db)` → returns all running/queued agent sessions (DB query, not in-memory state)
 - **ContextAssembler** — builds the prompt context for a new session:
   - Reads space memory (facts tier)
@@ -1610,15 +1610,14 @@ Coordinator calls delegate_task() N times:
   │
   ▼
 Each delegation:
-  → narrow_permissions(parent_agent_id, depth+1) computes restricted permission set
-  → Sub-agent spawned with narrowed permissions
+  → Sub-agent inherits parent's permissions (no-escalation validated)
   → Runs in sub-agent concurrency lane (cap 8)
   → Each sub-agent gets bounded task, not the full goal
   │
   ▼
 Sub-agents execute independently:
   → Write results to items/documents (briefs, status updates, notes)
-  → Operate within narrowed permission set
+  → Operate with inherited parent permissions
   → Cannot delegate further if at max_spawn_depth
   │
   ▼
@@ -1840,7 +1839,7 @@ Restore = replace the SQLite file with a backup copy and restart the backend. Co
 13. **Flexible spaces** — not everything is a "project." Knowledge bases, CRM systems, simple task lists. Template-based creation with widget-based layouts.
 14. **Agent-designed layouts** — agents can read, modify, and fully redesign space layouts via MCP tools. "Redesign my health space with Garmin charts" is a tool call, not a feature request. Templates provide defaults; agents and users customize from there.
 15. **Autonomous goal pursuit** — agents work independently for hours with context compaction, self-directed task lists, and adaptive planning. Token and time budgets prevent runaway usage.
-16. **Permission narrowing** — sub-agents safely inherit restricted permissions at each delegation level. Permissions only narrow, never widen. Enforced through a single codepath.
+16. **Permission inheritance** — sub-agents inherit the parent's full permissions by default. Permissions can never widen beyond the parent's scope. Enforced through a single codepath.
 17. **Lane-isolated concurrency** — background work (autonomous runs, automations, sub-agents) doesn't block interactive conversations. Independent lane caps with a shared hard ceiling.
 18. **Observable operations** — audit logging for every tool call during background/autonomous runs, token tracking per message, activity feeds, and approval queues. Full visibility into what agents did overnight.
 

@@ -23,6 +23,7 @@ def create_background_task(
     run_type: str = "task",
     run_summary: str | None = None,
     status: str = "running",
+    delegation_depth: int = 0,
 ) -> BackgroundTask:
     """Create a background task record."""
     task = BackgroundTask(
@@ -40,6 +41,7 @@ def create_background_task(
         run_type=run_type,
         run_summary=run_summary,
         status=status,
+        delegation_depth=delegation_depth,
         started_at=datetime.now(UTC),
     )
     db.add(task)
@@ -59,7 +61,7 @@ def get_background_task(db: Session, task_id: str) -> BackgroundTask:
 def update_background_task(db: Session, task_id: str, **kwargs) -> BackgroundTask:
     """Update background task fields."""
     task = get_background_task(db, task_id)
-    updatable = {"status", "result_summary", "error", "completed_at", "current_step", "total_steps", "step_results", "parent_task_id", "goal", "time_budget", "token_budget", "task_list", "task_list_version", "completed_count", "total_count", "queued_approvals_count", "run_type", "run_summary"}
+    updatable = {"status", "result_summary", "error", "completed_at", "current_step", "total_steps", "step_results", "parent_task_id", "goal", "time_budget", "token_budget", "task_list", "task_list_version", "completed_count", "total_count", "queued_approvals_count", "run_type", "run_summary", "delegation_depth"}
     for field, value in kwargs.items():
         if field in updatable:
             setattr(task, field, value)
@@ -146,3 +148,47 @@ def detect_stale_stuck(db: Session) -> list[BackgroundTask]:
         .all()
     )
     return stale + stuck
+
+
+def get_all_descendant_task_ids(db: Session, parent_task_id: str) -> list[str]:
+    """Recursively find all descendant task IDs (children, grandchildren, etc.)."""
+    result: list[str] = []
+    queue = [parent_task_id]
+    while queue:
+        current_id = queue.pop(0)
+        children = (
+            db.query(BackgroundTask.id)
+            .filter(BackgroundTask.parent_task_id == current_id)
+            .all()
+        )
+        for (child_id,) in children:
+            result.append(child_id)
+            queue.append(child_id)
+    return result
+
+
+def cascade_update_status(
+    db: Session,
+    parent_task_id: str,
+    *,
+    new_status: str,
+    error_note: str | None = None,
+) -> int:
+    """Recursively update status on all descendant tasks.
+
+    Returns the number of tasks updated.
+    """
+    descendant_ids = get_all_descendant_task_ids(db, parent_task_id)
+    count = 0
+    for task_id in descendant_ids:
+        task = db.query(BackgroundTask).filter(BackgroundTask.id == task_id).first()
+        if task and task.status in ("running", "queued", "pending", "paused"):
+            task.status = new_status
+            if error_note:
+                task.error = error_note
+            if new_status in ("cancelled", "failed", "interrupted"):
+                task.completed_at = datetime.now(UTC)
+            count += 1
+    if count > 0:
+        db.commit()
+    return count

@@ -531,13 +531,37 @@ All 6 tasks done across 3 waves of parallel execution. 86 new backend tests, 7 n
 - Task 9.2b is the largest single task in the plan (~130k tokens, 89 tool calls) — built the full autonomous loop, MCP tool, API routes, schemas, and PersistentData extractor in one pass
 - Code review caught a frontend field name mismatch that would have made the task list sidebar non-functional — fixed before proceeding
 
+## Phase 10: Multi-Agent Fan-Out — COMPLETE
+
+**Reference:** [IMPLEMENTATION-PLAN-PHASE8.md](IMPLEMENTATION-PLAN-PHASE8.md) (Phase 10 section) | [AUTONOMOUS-AGENTS.md](AUTONOMOUS-AGENTS.md) (Section 5)
+
+All 3 tasks done sequentially. 44 new backend tests. Autonomous agents can now delegate work to parallel sub-agents with permission inheritance and cascade control.
+
+**Task 10.1 — Permission Narrowing Engine:** `PermissionSet` dataclass and `narrow_permissions()` / `validate_narrowing()` in permission_enforcer.py. Sub-agents inherit the parent's full permissions by default — no depth-based stripping. The only hard rule: permissions can never widen beyond the parent's scope (no-escalation invariant). `delegation_depth` tracked on BackgroundTask for display. `cascade_update_status()` and `get_all_descendant_task_ids()` in background_task_service. Cascade termination and cascade pause/resume in agent_runner. Sub-agent completion notifications (`SUB_TASK_COMPLETED`). 30 tests.
+
+**Task 10.2 — Parallel Delegation + Result Collection:** `MAX_SUBAGENTS_PER_RUN = 3` per-coordinator cap. `count_active_children()` in concurrency_manager. Two new MCP tools: `check_delegated_tasks(task_ids)` (poll child status, security-scoped to caller's children) and `cancel_delegated_task(task_id)` (cancel child + descendants). Continuation prompts include "Sub-agent status:" section when child tasks exist. 14 tests.
+
+**Task 10.3 — Fan-Out UI:** New `delegation-tree.tsx` — tree sidebar in conversation view showing coordinator → sub-agent hierarchy with status dots, depth badges, progress bars, pause/resume buttons. Self-hides when no children. Real-time SSE updates. Active Agents panel updated — sub-agents nested under coordinators with collapsible "N sub-agents" badge, recursive descendant collection with cycle detection. `max_spawn_depth` field added to agent form (select 1-5 with descriptions).
+
+**Design change (during build):** Original plan specified depth-based permission tiers (depth 1 strips management tools, depth 2+ restricts to items/docs). Changed to inheritance model after discussion — sub-agents get the same permissions as their parent. No automatic stripping. Only the no-escalation invariant enforced. All docs (AUTONOMOUS-AGENTS.md, CAPABILITIES.md, ARCHITECTURE-PROPOSAL.md, guide.md, README.md, IMPLEMENTATION-PLAN-PHASE8.md) updated to reflect this.
+
+**Code review fixes (3 rounds):**
+- Round 1: Notification enum string → `NotificationType.SUB_TASK_COMPLETED`, SubAgentRow pause/resume (was pause-only), agent form PATCH error handling, recursive descendants in Active Agents (was direct children only)
+- Round 2: Cycle detection in `collectDescendants`, query invalidation moved outside depth conditional
+- Round 3 (security): Root coordinator permission anchoring — `delegate_task()` walks up parent chain to find root coordinator's permissions for the narrowed set (prevents escalation when sub-agent has broader DB permissions than inherited). Status config completeness for all backend statuses. Error toast on PATCH failure.
+
+**Deviations from plan:**
+- Permission model changed from depth-based narrowing to inheritance (all docs updated)
+- `RunningSessionResponse` enriched with `parent_task_id` and `delegation_depth` (not in original plan — needed for frontend hierarchy display)
+- `AgentCreate` schema doesn't include `max_spawn_depth`, so agent form uses a follow-up PATCH on create
+
 ## Current State
 
-- **~1190+ backend tests passing**, lint clean on new code
+- **~1230+ backend tests passing**, lint clean on new code
 - **63 Playwright E2E tests passing** (new comprehensive suite) + 39 prior component tests
 - **OpenAPI spec freshly regenerated** from current routes
-- Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes
-- Frontend: dashboard with skeleton loading + backup reminder, space view (widget-based layout), conversation panel with stream_end support, agent management, search modal, document panel + viewer, Space Settings (tabbed: layout editor + memory health + history), task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, toast notifications, keyboard shortcuts + help overlay, browser tab badge, page transitions, empty states, 3 palettes × 2 themes, Odin SSE filtering with race-condition handling, accessible sidebar/panel, agent dropdown fix, type-safe API calls, local column toggle, validated localStorage, aria-labels
+- Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes, permission inheritance with no-escalation enforcement, parallel sub-agent delegation with per-run caps, cascade termination/pause/resume, delegation monitoring MCP tools, audit-logged sub-agent completions
+- Frontend: dashboard with skeleton loading + backup reminder, space view (widget-based layout), conversation panel with stream_end support, agent management with max_spawn_depth, search modal, document panel + viewer, Space Settings (tabbed: layout editor + memory health + history), task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, toast notifications, keyboard shortcuts + help overlay, browser tab badge, page transitions, empty states, 3 palettes × 2 themes, Odin SSE filtering with race-condition handling, accessible sidebar/panel, agent dropdown fix, type-safe API calls, local column toggle, validated localStorage, aria-labels, delegation tree sidebar, nested sub-agents in Active Agents panel
 
 ---
 
@@ -564,3 +588,4 @@ All 6 tasks done across 3 waves of parallel execution. 86 new backend tests, 7 n
 19. **Autonomous launch is a conversation, not a form** — the user gives a goal, the agent asks clarifying questions, the user approves. The clarification IS the scoping mechanism. No per-run configuration UI needed.
 20. **Approval queue is non-blocking** — autonomous agents queue actions outside their permissions and continue with other work. The user approves/denies from the dashboard in batch. Agents don't wait.
 21. **Heartbeat cron expression controls working hours** — no separate working-hours feature needed. `*/30 9-17 * * 1-5` = business hours only.
+22. **Permission inheritance, not narrowing** — sub-agents inherit the parent's full permissions by default. No depth-based stripping. The only hard rule: child can never exceed parent scope (no-escalation invariant). Delegation walks up to the root coordinator to anchor permissions, preventing escalation when a sub-agent has broader DB permissions than what it inherited. `max_spawn_depth` limits recursion depth, not permissions.

@@ -34,6 +34,9 @@ MAX_TOTAL_BACKGROUND = 8
 
 BACKGROUND_LANES = {"autonomous", "automation", "subagent"}
 
+# Per-coordinator cap: max concurrent sub-agents spawned by a single run
+MAX_SUBAGENTS_PER_RUN = 3
+
 
 # ---------------------------------------------------------------------------
 # DB-based counting
@@ -184,3 +187,21 @@ def get_lane_status(db: Session) -> dict:
         "lanes": lanes,
         "total_background": {"current": total_bg, "max": MAX_TOTAL_BACKGROUND},
     }
+
+
+def count_active_children(db: Session, parent_task_id: str) -> int:
+    """Count RUNNING or QUEUED child tasks for a given parent task.
+
+    Used to enforce MAX_SUBAGENTS_PER_RUN per coordinator.
+    """
+    return (
+        db.query(BackgroundTask)
+        .filter(
+            BackgroundTask.parent_task_id == parent_task_id,
+            BackgroundTask.status.in_([
+                BackgroundTaskStatus.RUNNING,
+                BackgroundTaskStatus.QUEUED,
+            ]),
+        )
+        .count()
+    )
