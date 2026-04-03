@@ -5,8 +5,8 @@ import { useSSEEvent, type SSEEvent } from '../../hooks/use-sse';
 
 /** Shape of a single task item within the task_list array. */
 interface TaskItem {
-  label: string;
-  status: 'completed' | 'in_progress' | 'pending' | 'skipped' | 'blocked';
+  title: string;
+  status: 'completed' | 'done' | 'in_progress' | 'pending' | 'skipped' | 'blocked';
 }
 
 interface TaskListSidebarProps {
@@ -22,6 +22,7 @@ interface TaskListSidebarProps {
 function StatusIcon({ status }: { status: TaskItem['status'] }) {
   switch (status) {
     case 'completed':
+    case 'done':
       return (
         <span className="flex items-center justify-center w-5 h-5 rounded-full bg-success/15 text-success text-xs shrink-0">
           &#10003;
@@ -191,7 +192,7 @@ export function TaskListSidebar({ taskId, collapsed, onToggle }: TaskListSidebar
             </div>
             <span
               className={`text-sm leading-snug ${
-                item.status === 'completed'
+                item.status === 'completed' || item.status === 'done'
                   ? 'text-muted line-through'
                   : item.status === 'skipped'
                     ? 'text-muted/60'
@@ -202,7 +203,7 @@ export function TaskListSidebar({ taskId, collapsed, onToggle }: TaskListSidebar
                         : 'text-foreground'
               }`}
             >
-              {item.label}
+              {item.title}
             </span>
           </div>
         ))}

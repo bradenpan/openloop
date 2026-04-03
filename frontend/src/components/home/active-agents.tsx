@@ -195,20 +195,7 @@ function AgentRow({ session, agentName }: AgentRowProps) {
               </button>
             )}
 
-            {/* Stop button */}
-            {session.background_task_id && (
-              <button
-                onClick={handleStop}
-                disabled={stopLoading}
-                className="inline-flex items-center justify-center w-6 h-6 rounded-md text-muted hover:text-destructive hover:bg-destructive/10 transition-colors cursor-pointer disabled:opacity-50"
-                title="Stop"
-                aria-label="Stop task"
-              >
-                <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                  <rect x="1" y="1" width="8" height="8" rx="1" fill="currentColor" />
-                </svg>
-              </button>
-            )}
+            {/* System-wide stop is available via the kill switch in the header */}
           </div>
         </div>
       </CardBody>
