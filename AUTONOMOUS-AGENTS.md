@@ -324,11 +324,17 @@ Autonomous Agent (coordinator)
 
 4. **Configurable nesting depth:** Sub-agents can optionally spawn their own sub-agents, controlled by a per-agent `max_spawn_depth` setting. Default: 1 (no nesting — sub-agents are leaf workers). Can be increased to allow orchestrator patterns where a sub-agent decomposes its own work.
 
-5. **Permissions only narrow, never widen:** This is the core security invariant. A child inherits the parent's full permission set by default — the parent's configuration is the ceiling. There are no arbitrary depth-based restrictions (e.g., "depth 2 can only read/write items"). If the parent has memory write access, the child does too, because the task may need it.
+5. **Permissions only narrow, never widen:** This is the core security invariant. Each delegation level inherits at most the parent's permissions — a sub-agent cannot grant its children capabilities it doesn't have itself. Tool access restricts at each level:
 
-   The parent can optionally restrict a sub-agent further during delegation (via `restrict_tools` on `delegate_task`), but the system doesn't force it. The enforcement point is `validate_narrowing()` — called at every delegation, it rejects any case where a child would gain permissions the parent doesn't have.
+   | Depth | Role | Capabilities |
+   |-------|------|-------------|
+   | 0 | Coordinator | Full agent permissions (space scope + configured tools) |
+   | 1 | Orchestrator or leaf | Parent's permissions minus delegation/agent management tools |
+   | 2+ | Leaf worker | Further restricted — read/write items and documents only |
 
-   This means the blast radius is always bounded by the root agent's configuration, regardless of delegation depth. A 5-level-deep leaf worker can never do more than the top-level agent was configured to do.
+   The permission enforcer validates narrowing at each `delegate_task()` call. If a sub-agent attempts to delegate with permissions it doesn't hold, the delegation is rejected.
+
+6. **Scoped tool access:** Beyond permission narrowing, deeper agents lose access to sensitive tool categories. Sub-agents cannot: modify other agents, create automations, steer other conversations, or manage permissions. This is enforced by a `delegated` context in the permission enforcer that applies additional restrictions based on delegation depth.
 
 7. **Failure isolation:** If a sub-agent fails, the coordinator marks that item as failed in the task list and continues with other work. Sub-agent failures don't kill the parent run. Stopping a parent cascade-terminates all its children.
 
