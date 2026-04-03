@@ -17,15 +17,17 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import os
 import re
 from collections.abc import AsyncGenerator
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from backend.openloop.agents import context_assembler
+from backend.openloop.agents import concurrency_manager, context_assembler
 from backend.openloop.agents.mcp_tools import build_agent_tools, build_odin_tools
 from backend.openloop.agents.permission_enforcer import build_permission_hook
 from backend.openloop.services import (
@@ -34,6 +36,7 @@ from backend.openloop.services import (
     conversation_service,
     memory_service,
     notification_service,
+    system_service,
 )
 
 # ---------------------------------------------------------------------------
@@ -84,10 +87,8 @@ RATE_LIMIT_BACKOFF_SECONDS = [30, 60, 120]  # Exponential backoff schedule
 RATE_LIMIT_MAX_RETRIES = 3
 
 # ---------------------------------------------------------------------------
-# Concurrency limits
+# Concurrency limits (now managed by concurrency_manager.py)
 # ---------------------------------------------------------------------------
-MAX_INTERACTIVE_SESSIONS = 5
-MAX_AUTOMATION_SESSIONS = 2
 
 # Context window estimation (all models treated as 200K for now)
 CONTEXT_WINDOW_TOKENS = 200_000
@@ -146,9 +147,9 @@ def resolve_model(model_name: str) -> str:
     return MODEL_MAP.get(model_name, model_name)
 
 
-def _build_hooks_dict(agent_id: str, conversation_id: str | None) -> dict:
+def _build_hooks_dict(agent_id: str, conversation_id: str | None, background_task_id: str | None = None) -> dict:
     """Build the hooks dict for ClaudeAgentOptions from the permission hook."""
-    matcher, hook_fn = build_permission_hook(agent_id, conversation_id)
+    matcher, hook_fn = build_permission_hook(agent_id, conversation_id, background_task_id=background_task_id)
     matcher.hooks = [hook_fn]
     return {"PreToolUse": [matcher]}
 
@@ -213,38 +214,17 @@ def _build_mcp_server(agent, agent_id: str):
         return build_agent_tools(agent.name, agent_id)
 
 
-def _check_concurrency(db: Session, session_type: str = "active") -> None:
-    """Check concurrency limits and raise 429 if exceeded.
+def _check_concurrency(db: Session, lane: str) -> None:
+    """Check concurrency limits via the lane-based concurrency manager.
 
-    Uses DB queries instead of in-memory state.
+    Raises 429 if the requested lane is full or total background cap reached.
     """
-    from backend.openloop.db.models import BackgroundTask, Conversation
-
-    if session_type == "background":
-        bg_count = (
-            db.query(BackgroundTask)
-            .filter(BackgroundTask.status == "running")
-            .count()
-        )
-        if bg_count >= MAX_AUTOMATION_SESSIONS:
-            raise HTTPException(
-                status_code=429,
-                detail="Too many background sessions running. Please wait for one to complete.",
-            )
-    else:
-        interactive_count = (
-            db.query(Conversation)
-            .filter(
-                Conversation.status == "active",
-                Conversation.sdk_session_id.isnot(None),
-            )
-            .count()
-        )
-        if interactive_count >= MAX_INTERACTIVE_SESSIONS:
-            raise HTTPException(
-                status_code=429,
-                detail="Too many active sessions. Please close a conversation first.",
-            )
+    if not concurrency_manager.acquire_slot(db, lane):
+        if lane == "interactive":
+            detail = "Too many active sessions. Please close a conversation first."
+        else:
+            detail = f"Concurrency limit reached for '{lane}' lane. Please wait for a session to complete."
+        raise HTTPException(status_code=429, detail=detail)
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +350,41 @@ async def _query_with_retry(
 
 
 # ---------------------------------------------------------------------------
+# Token helpers (Phase 8.4)
+# ---------------------------------------------------------------------------
+
+
+def _extract_usage(result_message) -> tuple[int | None, int | None]:
+    """Extract input_tokens and output_tokens from a ResultMessage.
+
+    Returns (input_tokens, output_tokens) — both may be None.
+    """
+    if not result_message or not hasattr(result_message, "usage") or not result_message.usage:
+        return None, None
+    usage = result_message.usage
+    if not isinstance(usage, dict):
+        usage = vars(usage) if hasattr(usage, "__dict__") else {}
+    return usage.get("input_tokens"), usage.get("output_tokens")
+
+
+def _sum_conversation_tokens(db: Session, conversation_id: str) -> int:
+    """Sum total tokens (input + output) across all messages in a conversation."""
+    from sqlalchemy import func
+
+    from backend.openloop.db.models import ConversationMessage
+
+    row = (
+        db.query(
+            func.coalesce(func.sum(ConversationMessage.input_tokens), 0),
+            func.coalesce(func.sum(ConversationMessage.output_tokens), 0),
+        )
+        .filter(ConversationMessage.conversation_id == conversation_id)
+        .one()
+    )
+    return int(row[0]) + int(row[1])
+
+
+# ---------------------------------------------------------------------------
 # Context estimation
 # ---------------------------------------------------------------------------
 
@@ -399,6 +414,174 @@ def _estimate_conversation_context(
     pending_tokens = estimate_tokens(pending_message)
 
     return system_tokens + message_tokens + pending_tokens
+
+
+# ---------------------------------------------------------------------------
+# PersistentData — data that survives compaction (Phase 8.6a)
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class PersistentData:
+    """Data that must survive context compaction in long-running background tasks.
+
+    Attributes:
+        instruction: The original task goal/instruction.
+        constraints: Any user-specified constraints on the task.
+        extra: Extensible dict for future data.  Task 9.2b will add the
+            autonomous task list here via the ``_persistent_data_extractors``
+            registry.
+    """
+
+    instruction: str
+    constraints: list[str] = field(default_factory=list)
+    extra: dict = field(default_factory=dict)
+
+
+# Registry of callables that extract additional persistent data.
+#
+# Each extractor receives (instruction: str, turn_results: list[str]) and
+# returns a dict of key-value pairs to merge into PersistentData.extra.
+# Task 9.2b will register an extractor here for the autonomous task list.
+_persistent_data_extractors: list = []
+
+
+def register_persistent_extractor(fn) -> None:
+    """Register a callable that extracts data to survive compaction.
+
+    ``fn(instruction: str, turn_results: list[str]) -> dict``
+
+    The returned dict is merged into ``PersistentData.extra``.
+    """
+    _persistent_data_extractors.append(fn)
+
+
+def _build_persistent_data(instruction: str, turn_results: list[str]) -> PersistentData:
+    """Build a PersistentData instance for the current task.
+
+    Calls all registered extractors and merges their results into ``extra``.
+    """
+    pd = PersistentData(instruction=instruction)
+    for extractor in _persistent_data_extractors:
+        try:
+            extra = extractor(instruction, turn_results)
+            if isinstance(extra, dict):
+                pd.extra.update(extra)
+        except Exception:
+            logger.debug("Persistent data extractor failed", exc_info=True)
+    return pd
+
+
+# ---------------------------------------------------------------------------
+# Compaction cycle for background tasks (Phase 8.6a)
+# ---------------------------------------------------------------------------
+
+COMPACTION_SUMMARY_PROMPT = (
+    "Summarize the conversation so far: key actions taken, results achieved, "
+    "decisions made, and current status. Be thorough but concise — this "
+    "summary will replace older turns to free up context space."
+)
+
+
+async def _run_compaction_cycle(
+    *,
+    db: "Session",
+    task_id: str,
+    conversation_id: str,
+    agent_id: str,
+    agent_name: str,
+    space_id: str | None,
+    instruction: str,
+    turn_results: list[str],
+    sdk_session_id: str | None,
+    model: str,
+    hooks: dict,
+) -> tuple[bool, str | None, str | None]:
+    """Execute the compaction cycle for a background task.
+
+    Follows the OpenClaw pattern: instructions are stored externally (on the
+    BackgroundTask record's ``goal`` field) and re-injected each turn via
+    ``_build_continuation_prompt()``.  Compaction only affects conversation
+    history, not instructions.
+
+    Steps:
+    1. Flush memory (agent persists important working context)
+    2. Generate a conversation summary (replaces older turns)
+
+    After compaction, ``_build_continuation_prompt()`` re-injects the goal
+    from the DB and includes the compaction summary, so the agent never
+    loses its objective.
+
+    Returns (success, summary_text, new_sdk_session_id).
+    """
+    from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
+    logger.info(
+        "Compaction cycle triggered for task %s (conversation %s)",
+        task_id,
+        conversation_id,
+    )
+
+    # 1. Flush memory — agent saves important working context
+    await flush_memory(db, conversation_id=conversation_id)
+
+    # Re-read conversation in case flush_memory changed the session_id
+    conversation = conversation_service.get_conversation(db, conversation_id)
+    current_session_id = conversation.sdk_session_id or sdk_session_id
+
+    if not current_session_id:
+        logger.warning("No SDK session for compaction — skipping")
+        return True, None, None
+
+    # 2. Generate summary of completed work
+    mcp_server = _build_mcp_server_by_name(agent_name, agent_id)
+    summary_text = ""
+    new_session_id: str | None = None
+    try:
+        async for event in query(
+            prompt=COMPACTION_SUMMARY_PROMPT,
+            options=ClaudeAgentOptions(
+                resume=current_session_id,
+                model=model,
+                mcp_servers={mcp_server["name"]: mcp_server},
+                hooks=hooks,
+            ),
+        ):
+            if isinstance(event, ResultMessage):
+                summary_text = event.result or ""
+                if event.session_id and event.session_id != current_session_id:
+                    new_session_id = event.session_id
+    except (Exception, ExceptionGroup) as exc:
+        logger.warning(
+            "Compaction summary generation failed for task %s: %s",
+            task_id,
+            exc,
+        )
+        # Non-fatal — continue without compaction
+        return True, None, new_session_id
+
+    # Persist the summary as a checkpoint
+    if summary_text:
+        conversation_service.add_summary(
+            db,
+            conversation_id=conversation_id,
+            summary=summary_text,
+            is_checkpoint=True,
+        )
+
+    # Update session_id if changed
+    final_session_id = new_session_id or current_session_id
+    if new_session_id:
+        conversation_service.update_conversation(
+            db, conversation_id, sdk_session_id=new_session_id
+        )
+
+    logger.info(
+        "Compaction cycle completed for task %s — summary generated, "
+        "goal will be re-injected from DB on next continuation",
+        task_id,
+    )
+    return True, summary_text, final_session_id
 
 
 # ===================================================================
@@ -447,7 +630,7 @@ async def _run_interactive_inner(
     # Concurrency check for interactive sessions (first message only — resuming
     # an existing session doesn't count as a new concurrent session)
     if is_first_message:
-        _check_concurrency(db, "active")
+        _check_concurrency(db, "interactive")
 
     # Build MCP tools + model + hooks
     mcp_server = _build_mcp_server(agent, agent.id)
@@ -605,6 +788,9 @@ async def _run_interactive_inner(
             yield {"type": "error", "error": str(exc)}
             return
 
+    # Extract token usage from result (Phase 8.4)
+    input_tokens, output_tokens = _extract_usage(result_message)
+
     # Store assistant response in DB
     if full_response:
         conversation_service.add_message(
@@ -612,6 +798,8 @@ async def _run_interactive_inner(
             conversation_id=conversation_id,
             role="assistant",
             content=full_response,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
         )
 
     # Signal stream completion to frontend
@@ -789,6 +977,13 @@ async def steer(conversation_id: str, message: str) -> bool:
     """
     from backend.openloop.agents.event_bus import event_bus
 
+    # Validate steering message length
+    if len(message) > 2000:
+        raise HTTPException(
+            status_code=422,
+            detail="Steering message exceeds 2000-character limit",
+        )
+
     if conversation_id not in _background_conversations:
         return False
 
@@ -805,6 +1000,158 @@ async def steer(conversation_id: str, message: str) -> bool:
     })
     logger.info("Steering message queued for conversation %s", conversation_id)
     return True
+
+
+# ---------------------------------------------------------------------------
+# Soft budget constants (Phase 8.6b)
+# ---------------------------------------------------------------------------
+
+# Absolute safety limit — should almost never be hit if budgets + compaction work
+MAX_TURNS = 500
+
+# Default time budget: 4 hours (seconds).  Applied when time_budget is None.
+DEFAULT_TIME_BUDGET = 14400
+
+# Budget-exhausted final turn prompt
+BUDGET_EXHAUSTED_PROMPT = (
+    "Your budget is exhausted. Summarize your progress, save any important "
+    "context to memory, and report what's done and what remains."
+)
+
+
+def _format_time_remaining(seconds: float) -> str:
+    """Format remaining seconds as 'Xh Ym' or 'Ym' if under an hour."""
+    if seconds <= 0:
+        return "0m"
+    hours = int(seconds // 3600)
+    minutes = int(math.ceil((seconds % 3600) / 60))
+    if hours > 0:
+        return f"{hours}h {minutes}m"
+    return f"{minutes}m"
+
+
+def _check_budget_exhausted(
+    *,
+    db: "Session",
+    task_id: str,
+    conversation_id: str,
+    started_at: datetime,
+) -> tuple[bool, str | None]:
+    """Check whether the task's token or time budget has been exceeded.
+
+    Returns (exhausted, reason_string).
+    """
+    task_record = background_task_service.get_background_task(db, task_id)
+
+    # --- Token budget ---
+    if task_record.token_budget and task_record.token_budget > 0:
+        total_used = _sum_conversation_tokens(db, conversation_id)
+        if total_used >= task_record.token_budget:
+            return True, (
+                f"token budget exhausted ({total_used:,} / "
+                f"{task_record.token_budget:,} tokens used)"
+            )
+
+    # --- Time budget ---
+    effective_time_budget = task_record.time_budget or DEFAULT_TIME_BUDGET
+    # Ensure started_at is timezone-aware (SQLite may return naive datetimes)
+    aware_started = started_at if started_at.tzinfo else started_at.replace(tzinfo=UTC)
+    elapsed = (datetime.now(UTC) - aware_started).total_seconds()
+    if elapsed >= effective_time_budget:
+        return True, (
+            f"time budget exhausted ({_format_time_remaining(elapsed)} elapsed, "
+            f"budget was {_format_time_remaining(effective_time_budget)})"
+        )
+
+    return False, None
+
+
+def _build_continuation_prompt(
+    *,
+    db: "Session",
+    task_id: str,
+    conversation_id: str,
+    turn: int,
+    started_at: datetime,
+    compacted: bool = False,
+    compaction_summary: str | None = None,
+) -> str:
+    """Build a context-aware continuation prompt for the background turn loop.
+
+    The goal/instruction is re-injected from the DB on every continuation
+    prompt so it is never lost during compaction. This follows the OpenClaw
+    pattern: instructions stored externally, re-injected each turn.
+
+    Includes: original goal, turn number, progress (if available), budget
+    remaining, queued approvals (if any), and compaction note (if just
+    compacted).
+
+    For non-autonomous tasks (no task list / no progress tracking),
+    produces a simpler prompt.
+    """
+    task_record = background_task_service.get_background_task(db, task_id)
+    parts: list[str] = []
+
+    # --- Re-inject goal from DB (survives compaction) ---
+    goal_text = task_record.goal or task_record.instruction
+    if goal_text:
+        parts.append(f"Goal: {goal_text}")
+
+    # --- Compaction note ---
+    if compacted:
+        note = (
+            "Context was compacted — older turns have been summarized."
+        )
+        if compaction_summary:
+            note += f" Summary of prior work: {compaction_summary}"
+        parts.append(note)
+
+    # --- Progress info (only if total_count > 0, which is a Phase 9 field) ---
+    total_count = getattr(task_record, "total_count", 0) or 0
+    completed_count = getattr(task_record, "completed_count", 0) or 0
+    is_autonomous = total_count > 0
+
+    if is_autonomous:
+        parts.append(f"Turn {turn}. Progress: {completed_count}/{total_count} items completed.")
+    else:
+        parts.append(f"Turn {turn}.")
+
+    # --- Budget remaining ---
+    budget_parts: list[str] = []
+
+    # Token budget
+    if task_record.token_budget and task_record.token_budget > 0:
+        total_used = _sum_conversation_tokens(db, conversation_id)
+        remaining = max(0, task_record.token_budget - total_used)
+        budget_parts.append(f"{remaining:,} tokens remaining")
+
+    # Time budget
+    effective_time_budget = task_record.time_budget or DEFAULT_TIME_BUDGET
+    aware_started = started_at if started_at.tzinfo else started_at.replace(tzinfo=UTC)
+    elapsed = (datetime.now(UTC) - aware_started).total_seconds()
+    time_remaining = max(0.0, effective_time_budget - elapsed)
+    budget_parts.append(f"{_format_time_remaining(time_remaining)} remaining")
+
+    if budget_parts:
+        parts.append("Budget: " + ", ".join(budget_parts) + ".")
+
+    # --- Queued approvals (Phase 9 field, may not exist yet) ---
+    queued = getattr(task_record, "queued_approvals_count", 0) or 0
+    if queued > 0:
+        parts.append(f"{queued} approval(s) queued — check before continuing.")
+
+    # --- Closing instruction ---
+    if is_autonomous:
+        parts.append(
+            "Pick the next item to work on. If priorities have shifted "
+            "based on what you've learned, adjust your approach."
+        )
+    else:
+        parts.append("Continue working on the task.")
+
+    parts.append("Say TASK_COMPLETE or GOAL_COMPLETE when finished.")
+
+    return " ".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -828,7 +1175,30 @@ async def delegate_background(
     Creates a background_task record, fires a managed turn loop.
     Returns the background_task ID.
     """
-    _check_concurrency(db, "background")
+    # Kill switch guard — refuse new background work while paused
+    if system_service.is_paused(db):
+        raise HTTPException(
+            status_code=503,
+            detail="System is paused (emergency stop active). Resume before starting background work.",
+        )
+
+    # Determine the concurrency lane based on task type
+    if parent_task_id:
+        lane = "subagent"
+    elif automation_run_id:
+        lane = "automation"
+    else:
+        lane = "autonomous"
+    _check_concurrency(db, lane)
+
+    # Resolve automation_id from the run record (for lane tracking on BackgroundTask)
+    resolved_automation_id: str | None = None
+    if automation_run_id:
+        from backend.openloop.db.models import AutomationRun
+
+        run = db.query(AutomationRun).filter(AutomationRun.id == automation_run_id).first()
+        if run:
+            resolved_automation_id = run.automation_id
 
     task = background_task_service.create_background_task(
         db,
@@ -837,6 +1207,8 @@ async def delegate_background(
         space_id=space_id,
         item_id=item_id,
         parent_task_id=parent_task_id,
+        automation_id=resolved_automation_id,
+        goal=instruction,
         status="running",
     )
 
@@ -856,6 +1228,7 @@ async def delegate_background(
     _background_conversations.add(conv.id)
 
     # Fire-and-forget the actual execution.
+    # Pass start_time so the turn loop can compute elapsed wall-clock time
     bg = asyncio.create_task(
         _run_background_task(
             task_id=task.id,
@@ -893,24 +1266,43 @@ async def _run_background_task(
     2. Each subsequent turn: check steering queue, then continue or steer
     3. Agent signals completion with TASK_COMPLETE in its response
     4. Progress is tracked per-turn via background_task step updates
+    5. Context monitoring after each turn — triggers compaction at 70% (Phase 8.6a)
     """
-    from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+    from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, StreamEvent, query
 
     from backend.openloop.agents.event_bus import event_bus
-    from backend.openloop.database import SessionLocal
-
-    CONTINUATION_PROMPT = (
-        "Continue working on your task. Report what you accomplished in this step "
-        "and what you'll do next. Say TASK_COMPLETE when the entire task is finished."
-    )
-    MAX_TURNS = 20
+    from backend.openloop.services import audit_service
 
     mcp_server = _build_mcp_server_by_name(agent_name, agent_id)
     model = resolve_model(model_override or default_model)
 
-    db = SessionLocal()
+    db = _new_db_session()
     turn = 0
+    # Track all turn results for PersistentData extractors (Phase 8.6a)
+    all_turn_results: list[str] = []
+    # Track compaction count
+    compaction_count = 0
     try:
+        # Kill switch guard — abort if system is paused before starting
+        if system_service.is_paused(db):
+            logger.info("Background task %s skipped — system is paused", task_id)
+            background_task_service.update_background_task(
+                db,
+                task_id,
+                status="interrupted",
+                error="System paused (emergency stop)",
+                completed_at=datetime.now(UTC),
+            )
+            return
+
+        # Store the goal on the task record for compaction verification
+        background_task_service.update_background_task(db, task_id, goal=instruction)
+
+        # Record started_at for time budget tracking (ensure timezone-aware)
+        task_record = background_task_service.get_background_task(db, task_id)
+        raw_started = task_record.started_at or datetime.now(UTC)
+        started_at = raw_started if raw_started.tzinfo else raw_started.replace(tzinfo=UTC)
+
         # Assemble context for the system prompt
         system_prompt = context_assembler.assemble_context(
             db,
@@ -923,28 +1315,46 @@ async def _run_background_task(
             f"Task: {instruction}\n\n"
             "Work incrementally. Complete one meaningful step per turn. "
             "Report what you did and what you plan to do next. "
-            "Say TASK_COMPLETE when the entire task is finished."
+            "Say TASK_COMPLETE or GOAL_COMPLETE when the entire task is finished."
         )
 
-        hooks = _build_hooks_dict(agent_id, conversation_id)
+        hooks = _build_hooks_dict(agent_id, conversation_id, background_task_id=task_id)
 
         sdk_session_id: str | None = None
         result_text = ""
         completed = False
+        budget_exhausted = False
+        # Flag: set after compaction so next continuation uses special prompt
+        just_compacted = False
+        compaction_summary: str | None = None
 
-        while turn < MAX_TURNS and not completed:
+        while not completed and not budget_exhausted and turn < MAX_TURNS:
             turn += 1
 
             # Determine what to send this turn
             if turn == 1:
                 prompt_message = task_instruction
             else:
+                # Check for steering messages first
                 queue = _steering_queues.get(conversation_id, [])
                 if queue:
-                    prompt_message = queue.pop(0)
+                    raw_steering = queue.pop(0)
+                    prompt_message = f"<steering>{raw_steering}</steering>"
                     logger.info("Steering message applied for task %s at turn %d", task_id, turn)
                 else:
-                    prompt_message = CONTINUATION_PROMPT
+                    prompt_message = _build_continuation_prompt(
+                        db=db,
+                        task_id=task_id,
+                        conversation_id=conversation_id,
+                        turn=turn,
+                        started_at=started_at,
+                        compacted=just_compacted,
+                        compaction_summary=compaction_summary if just_compacted else None,
+                    )
+                # Reset compaction flags after building prompt
+                if just_compacted:
+                    just_compacted = False
+                    compaction_summary = None
 
             # Build query kwargs — system_prompt on turn 1, resume on subsequent turns
             if turn == 1:
@@ -970,28 +1380,59 @@ async def _run_background_task(
 
             # Execute one turn with rate limit retry
             turn_result = ""
+            turn_result_message = None
             async for event in _query_with_retry(
                 query,
                 query_kwargs,
                 conversation_id=conversation_id,
                 space_id=space_id,
             ):
-                if isinstance(event, ResultMessage):
+                if isinstance(event, StreamEvent):
+                    # StreamEvent processing — tool calls are audited by the
+                    # permission hook (which now has background_task_id), so
+                    # no duplicate logging here.
+                    pass
+                elif isinstance(event, ResultMessage):
                     sdk_session_id = event.session_id
                     turn_result = event.result or ""
+                    turn_result_message = event
 
             result_text = turn_result
+            all_turn_results.append(turn_result)
 
-            # Check for completion signal
-            if "TASK_COMPLETE" in (turn_result or "").upper():
+            # --- Token extraction (Phase 8.4) ---
+            turn_input_tokens: int | None = None
+            turn_output_tokens: int | None = None
+            if turn_result_message and hasattr(turn_result_message, "usage") and turn_result_message.usage:
+                usage = turn_result_message.usage
+                if not isinstance(usage, dict):
+                    usage = vars(usage) if hasattr(usage, "__dict__") else {}
+                turn_input_tokens = usage.get("input_tokens")
+                turn_output_tokens = usage.get("output_tokens")
+
+            # Store assistant message with token counts
+            if turn_result:
+                conversation_service.add_message(
+                    db,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=turn_result,
+                    input_tokens=turn_input_tokens,
+                    output_tokens=turn_output_tokens,
+                )
+
+            # Check for completion signal (TASK_COMPLETE or GOAL_COMPLETE)
+            upper_result = (turn_result or "").upper()
+            if "TASK_COMPLETE" in upper_result or "GOAL_COMPLETE" in upper_result:
                 completed = True
 
-            # Update step progress
+            # Update step progress (don't predict total_steps from MAX_TURNS —
+            # with soft budgets the total is unknown until completion)
             background_task_service.update_task_progress(
                 db,
                 task_id=task_id,
                 current_step=turn,
-                total_steps=turn if completed else MAX_TURNS,
+                total_steps=turn if completed else 0,
                 step_summary=turn_result[:500] if turn_result else f"Turn {turn}",
             )
 
@@ -1005,11 +1446,123 @@ async def _run_background_task(
                 "summary": turn_result[:200] if turn_result else "",
             })
 
+            # --- Kill switch check at turn boundary (Phase 8.4) ---
+            if not completed and system_service.is_paused(db):
+                logger.info("Background task %s interrupted by kill switch at turn %d", task_id, turn)
+                background_task_service.update_background_task(
+                    db,
+                    task_id,
+                    status="interrupted",
+                    error="System paused (emergency stop) at turn boundary",
+                    completed_at=datetime.now(UTC),
+                )
+                return
+
+            # --- Soft budget check (Phase 8.6b — replaces 8.4 token-only check) ---
+            if not completed:
+                exhausted, reason = _check_budget_exhausted(
+                    db=db,
+                    task_id=task_id,
+                    conversation_id=conversation_id,
+                    started_at=started_at,
+                )
+                if exhausted:
+                    logger.info(
+                        "Budget exhausted for task %s (%s) — giving agent "
+                        "one final turn",
+                        task_id,
+                        reason,
+                    )
+                    budget_exhausted = True
+                    # Give the agent one final turn to wrap up
+                    final_kwargs = {
+                        "prompt": BUDGET_EXHAUSTED_PROMPT,
+                        "options": ClaudeAgentOptions(
+                            resume=sdk_session_id,
+                            model=model,
+                            mcp_servers={mcp_server["name"]: mcp_server},
+                            hooks=hooks,
+                        ),
+                    }
+                    final_result = ""
+                    async for evt in _query_with_retry(
+                        query,
+                        final_kwargs,
+                        conversation_id=conversation_id,
+                        space_id=space_id,
+                    ):
+                        if isinstance(evt, ResultMessage):
+                            sdk_session_id = evt.session_id
+                            final_result = evt.result or ""
+                            # Extract final turn tokens
+                            if hasattr(evt, "usage") and evt.usage:
+                                f_usage = evt.usage
+                                if not isinstance(f_usage, dict):
+                                    f_usage = vars(f_usage) if hasattr(f_usage, "__dict__") else {}
+                                conversation_service.add_message(
+                                    db,
+                                    conversation_id=conversation_id,
+                                    role="assistant",
+                                    content=final_result,
+                                    input_tokens=f_usage.get("input_tokens"),
+                                    output_tokens=f_usage.get("output_tokens"),
+                                )
+                            elif final_result:
+                                conversation_service.add_message(
+                                    db,
+                                    conversation_id=conversation_id,
+                                    role="assistant",
+                                    content=final_result,
+                                )
+
+                    result_text = final_result or result_text
+
+            # --- Context monitoring & compaction (Phase 8.6a) ---
+            if not completed and not budget_exhausted:
+                estimated_context = _estimate_conversation_context(
+                    db, conversation_id, ""
+                )
+                utilization = estimated_context / CONTEXT_WINDOW_TOKENS
+                if utilization > CHECKPOINT_THRESHOLD:
+                    logger.info(
+                        "Background task %s context at ~%.0f%% — triggering "
+                        "compaction cycle (turn %d)",
+                        task_id,
+                        utilization * 100,
+                        turn,
+                    )
+                    success, cycle_summary, new_sid = await _run_compaction_cycle(
+                        db=db,
+                        task_id=task_id,
+                        conversation_id=conversation_id,
+                        agent_id=agent_id,
+                        agent_name=agent_name,
+                        space_id=space_id,
+                        instruction=instruction,
+                        turn_results=all_turn_results,
+                        sdk_session_id=sdk_session_id,
+                        model=model,
+                        hooks=hooks,
+                    )
+                    if new_sid:
+                        sdk_session_id = new_sid
+                    if not success:
+                        # Verification failed — session already marked interrupted
+                        return
+                    compaction_count += 1
+                    just_compacted = True
+                    compaction_summary = cycle_summary
+
         # Persist sdk_session_id
         conversation_service.update_conversation(db, conversation_id, sdk_session_id=sdk_session_id)
 
         # Mark task as completed
-        status_note = "" if completed else " (max turns reached)"
+        if completed:
+            status_note = ""
+        elif budget_exhausted:
+            status_note = " (budget exhausted)"
+        else:
+            status_note = " (max turns reached)"
         background_task_service.update_background_task(
             db,
             task_id,

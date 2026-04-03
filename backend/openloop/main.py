@@ -124,6 +124,7 @@ app.add_middleware(
 
 # --- Routers ---
 from backend.openloop.api.routes.agents import router as agents_router  # noqa: E402
+from backend.openloop.api.routes.audit import router as audit_router  # noqa: E402
 from backend.openloop.api.routes.automations import router as automations_router  # noqa: E402
 from backend.openloop.api.routes.behavioral_rules import router as behavioral_rules_router  # noqa: E402
 from backend.openloop.api.routes.conversations import router as conversations_router  # noqa: E402
@@ -141,6 +142,7 @@ from backend.openloop.api.routes.odin import router as odin_router  # noqa: E402
 from backend.openloop.api.routes.running import router as running_router  # noqa: E402
 from backend.openloop.api.routes.search import router as search_router  # noqa: E402
 from backend.openloop.api.routes.spaces import router as spaces_router  # noqa: E402
+from backend.openloop.api.routes.stats import router as stats_router  # noqa: E402
 from backend.openloop.api.routes.system import router as system_router  # noqa: E402
 
 # NOTE: running_router must be included BEFORE agents_router because both use
@@ -148,6 +150,7 @@ from backend.openloop.api.routes.system import router as system_router  # noqa: 
 # capture the literal path "running" if it were registered first.
 app.include_router(running_router)
 app.include_router(agents_router)
+app.include_router(audit_router)
 app.include_router(automations_router)
 app.include_router(behavioral_rules_router)
 app.include_router(conversations_router)
@@ -164,6 +167,7 @@ app.include_router(odin_router)
 app.include_router(layout_router)
 app.include_router(search_router)
 app.include_router(spaces_router)
+app.include_router(stats_router)
 app.include_router(system_router)
 
 

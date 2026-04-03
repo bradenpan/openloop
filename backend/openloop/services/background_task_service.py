@@ -15,6 +15,9 @@ def create_background_task(
     item_id: str | None = None,
     conversation_id: str | None = None,
     parent_task_id: str | None = None,
+    automation_id: str | None = None,
+    goal: str | None = None,
+    time_budget: int | None = None,
     status: str = "running",
 ) -> BackgroundTask:
     """Create a background task record."""
@@ -25,6 +28,9 @@ def create_background_task(
         item_id=item_id,
         conversation_id=conversation_id,
         parent_task_id=parent_task_id,
+        automation_id=automation_id,
+        goal=goal,
+        time_budget=time_budget,
         status=status,
         started_at=datetime.now(UTC),
     )
@@ -45,7 +51,7 @@ def get_background_task(db: Session, task_id: str) -> BackgroundTask:
 def update_background_task(db: Session, task_id: str, **kwargs) -> BackgroundTask:
     """Update background task fields."""
     task = get_background_task(db, task_id)
-    updatable = {"status", "result_summary", "error", "completed_at", "current_step", "total_steps", "step_results", "parent_task_id"}
+    updatable = {"status", "result_summary", "error", "completed_at", "current_step", "total_steps", "step_results", "parent_task_id", "goal", "time_budget"}
     for field, value in kwargs.items():
         if field in updatable:
             setattr(task, field, value)

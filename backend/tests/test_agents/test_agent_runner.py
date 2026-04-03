@@ -20,7 +20,6 @@ from sqlalchemy.orm import Session
 
 from backend.openloop.agents.agent_runner import (
     CONTEXT_WINDOW_TOKENS,
-    MAX_INTERACTIVE_SESSIONS,
     MODEL_MAP,
     close_conversation,
     delegate_background,

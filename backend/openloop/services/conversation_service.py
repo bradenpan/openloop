@@ -124,6 +124,8 @@ def add_message(
     role: str,
     content: str,
     tool_calls: dict | None = None,
+    input_tokens: int | None = None,
+    output_tokens: int | None = None,
 ) -> ConversationMessage:
     """Add a message to a conversation."""
     get_conversation(db, conversation_id)  # Verify exists
@@ -132,6 +134,8 @@ def add_message(
         role=role,
         content=content,
         tool_calls=tool_calls,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
     )
     db.add(msg)
     db.commit()

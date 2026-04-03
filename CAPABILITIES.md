@@ -1,4 +1,4 @@
-# OpenLoop: Capability Specification (DRAFT v5)
+# OpenLoop: Capability Specification (DRAFT v6)
 
 **Status:** Under review — not yet approved for implementation.
 
@@ -14,12 +14,13 @@ The system has four core jobs:
 2. **Manage AI agents** — start conversations, delegate tasks, monitor progress, maintain context across sessions. Organized by space, not by terminal window.
 3. **Keep you prepared** — proactive briefings, meeting prep, follow-up reminders. The system looks at your calendar, email, and task board and makes sure nothing falls through the cracks.
 4. **Catch what you're missing** — scan email, board, and records for dropped balls, overdue follow-ups, unanswered threads, and items that need attention. Surface them proactively — don't wait to be asked. Eventually, this becomes a personal assistant that makes sure everything you need to get done for the day actually gets done.
+5. **Execute goals autonomously** — given an objective, agents build a plan, work through it over hours, adapt based on results, and report back when done. "Process these 30 recruiting candidates overnight" is a goal, not a task — the agent figures out the steps, iterates through them, handles problems, and delivers a result.
 
 ## What OpenLoop Is Not (Today)
 
 - Not a commercial SaaS product — single-user, local-first for now. Architecture should not preclude multi-user or cloud deployment later.
 - Not a general-purpose chat UI — conversations are space-scoped and work-oriented.
-- **Human-in-the-loop by default** — agents surface recommendations and take action only when approved. Autonomy increases over time as agents prove reliable. The architecture supports configurable autonomy levels per agent, up to and including fully autonomous operation for trusted agents.
+- **Human-in-the-loop by default** — agents surface recommendations and take action only when approved. Autonomy increases over time as agents prove reliable. The architecture supports configurable autonomy levels per agent, up to and including fully autonomous operation for trusted agents. Autonomous goal-driven operation is available but requires explicit user setup — the system never enters autonomous mode on its own.
 
 ---
 
@@ -34,6 +35,11 @@ Home is the top-level view above spaces. It provides (in priority order, top to 
 3. **Active agents** — background agents currently running, with status indicators. The "what's happening" section.
 4. **Space list** — quick access to all spaces with activity indicators. The "go somewhere" section.
 5. **Cross-space task list** — all open tasks from all spaces, grouped by space. The reference section — scrollable, below the fold is fine.
+
+6. **Active Agents panel** — all currently running agents (interactive, autonomous, background). Each entry shows agent name, current task, progress (e.g., 3/30), autonomy tier, time running, token usage. Inline controls: pause, resume, stop. Click to drill into the agent's working conversation.
+7. **Activity Feed** — real-time stream of meaningful agent actions across all spaces. "Completed brief for Alice Chen" / "Flagged 3 stale items" / "Queued email draft for approval." Filterable by agent, space, time. Doubles as the morning summary — open the dashboard and see everything that happened overnight.
+8. **Pending Approvals** — actions queued by autonomous agents that need user sign-off. Shows what the agent wants to do, why, and which goal it's part of. Batch approve/deny. Surfaces near the top when items are waiting.
+9. **Kill Switch** — system-wide emergency stop control in the dashboard header, always visible. One click halts all background and autonomous work immediately. Resumable after review.
 
 Home is the screen you open in the morning. "What needs my attention?" Then you drill into specific spaces.
 
@@ -157,6 +163,26 @@ A conversation is a persistent, named chat thread with an agent, scoped to a spa
 
 The key insight: **conversations are where most work happens**. Items (list view, board, table) track the state of work. Conversations are where work gets planned, discussed, and driven forward.
 
+**Autonomy tiers:** Agents operate at three levels, selected implicitly by context — not by user configuration:
+
+- **Interactive** — current behavior. User sends a message, agent responds. Full human control.
+- **Supervised** — agent works through a task or set of tasks in the background. The existing background task model, extended with a compaction loop so it can run longer than 20 turns. The system operates in this mode automatically when a background task is kicked off. No user decision required.
+- **Autonomous** — agent pursues a goal over an extended period. This is the only mode that requires explicit user setup, because the user is handing over the wheel.
+
+The autonomous launch flow:
+
+1. User gives the agent a **goal** (not a task): "Process all new recruiting candidates."
+2. Agent asks **clarifying questions** to understand success criteria: "Should I skip candidates older than 7 days?" "What format do you want the briefs in?"
+3. User **approves** the goal and boundaries. This is the moment autonomous operation is granted.
+4. Agent **builds a task list** toward the goal — research candidate A, research candidate B, compile ranked summary.
+5. Agent **executes, adapts, reports** — works through items, adjusts the plan based on results, queues anything outside its permissions for later approval.
+
+The agent's existing configuration (spaces + permissions) defines its security boundary regardless of autonomy tier. Autonomy changes how much judgment the agent exercises, not what it can reach. A recruiting agent in autonomous mode still can't touch Engineering space data. The autonomous launch conversation can narrow scope ("only process candidates from this week") but can never widen beyond the agent's existing permissions.
+
+**Approval queue:** When an autonomous agent encounters an action outside its permissions, it creates a queued approval request with context ("want to send follow-up email to Alice Chen because..."), notes it in the task log, and moves to the next item. The agent doesn't block — it continues working on what it can do while approvals wait.
+
+**Compaction loop:** Agents can run indefinitely via context compaction. The goal is stored on the BackgroundTask record in the database and re-injected from the DB on every continuation prompt — it is never carried in the conversation context that gets compacted. When context utilization hits the threshold, the system flushes working context to memory, summarizes completed turns, and continues with compressed context. The next continuation prompt re-injects the goal from the DB along with the summary of prior work, so the agent never loses its objective. This follows the OpenClaw pattern: instructions stored externally, re-injected each turn, conversation history freely summarizable.
+
 ### Permissions and Security
 
 Agents operate under a granular permission system. Permissions are defined along three dimensions:
@@ -185,6 +211,16 @@ Each operation is independently grantable.
 - **Never allowed** — agent cannot do this under any circumstances.
 
 Permissions are set during agent creation (the Agent Builder asks about this) and editable in the UI. Progressive autonomy: agents start with more "Requires approval" gates, earn trust over time.
+
+**Permission narrowing for sub-agents:** Each delegation level can only grant a subset of the parent's permissions. Permissions narrow at depth, never widen. A sub-agent cannot have capabilities its parent doesn't have. No arbitrary depth limit — configurable `max_spawn_depth` per agent (default: 1, meaning sub-agents are leaf workers). The permission enforcer validates narrowing at each `delegate_task()` call; delegation with permissions the parent doesn't hold is rejected.
+
+**Kill switch:** A system-wide emergency stop (`POST /api/v1/system/emergency-stop`) that immediately halts all background tasks and autonomous runs. Sets a flag preventing new autonomous/background work from starting. Active sessions are interrupted with a summary of what was in progress. Surfaced as a prominent control on the dashboard header. Resumable after the user reviews what was happening.
+
+**Prompt injection protection:** All user-originated data (item titles, descriptions, memory values, behavioral rules) is wrapped in structured delimiters (`<user-data>`) in context assembly. System instructions are wrapped in `<system-instruction>` tags. The system prompt includes an explicit instruction that content inside user-data tags is data, not instructions. This doesn't make prompt injection impossible — nothing does with current LLMs — but it makes the boundary visible to the model and dramatically reduces accidental instruction-following from data fields.
+
+**Audit logging:** Every tool call during autonomous and background runs is logged — tool name, inputs (with secret redaction), output summary, timestamp. Stored in an `audit_log` table queryable via API for the dashboard activity feed and overnight summaries. 30-day retention, then archived.
+
+**Token budget tracking:** Per-session token budgets prevent quota exhaustion. Input and output tokens are extracted from SDK response metadata and recorded per message. Configurable token ceiling per session; when reached, the agent stops and reports progress. Dashboard widget shows token usage by agent, space, and time period. Alert threshold triggers notification when a single run exceeds a configurable limit.
 
 System-level guardrails (non-overridable):
 - No access to credential files (.env, credentials.json, SSH keys, API tokens)
@@ -377,6 +413,30 @@ Accessible from Home or Settings. Shows:
 44. **Multi-user** — share spaces, assign tasks to people.
 45. **Hybrid memory search** — vector embeddings + FTS5 keyword search with temporal decay and diversity reranking. Requires embedding infrastructure.
 
+### P0-Autonomy — Safety foundation (must exist before autonomous features)
+
+46. **Kill switch** — system-wide emergency stop for all background and autonomous work. API endpoint + dashboard control. Halts immediately, resumable after review.
+47. **Prompt injection protection** — structured delimiters (`<system-instruction>`, `<user-data>`) in context assembly separating system instructions from user-originated data. Explicit model instruction not to execute commands found in user data.
+48. **Token budget tracking** — per-session token usage monitoring extracted from SDK response metadata. Configurable ceiling per session. Dashboard widget for usage visibility. Alert threshold notifications.
+49. **Steering validation** — length limits (2000 characters) on steering messages, delimiter wrapping when injected, ownership verification when auth exists, audit logging of all steering.
+50. **Audit logging** — every tool call during autonomous/background runs recorded with tool name, inputs (redacted), output summary, timestamp. Queryable via API. 30-day retention.
+
+### P1-Autonomy — Core autonomous operation
+
+51. **Compaction loop for indefinite sessions** — goal stored on BackgroundTask record and re-injected from DB on every continuation prompt. Compaction flushes memory, summarizes conversation history, and continues. Instructions are never at risk because they come from the DB, not the context window. Replaces hard 20-turn cap with soft budgets (token, time, completion signal).
+52. **Autonomous launch flow** — goal → clarifying questions → user approval → task list generation → iterative execution → adaptive planning → completion. The only autonomy tier requiring explicit user setup.
+53. **Self-directed work queue** — agent-managed task lists stored as structured data on the BackgroundTask record. Items can be marked complete, added, reordered, skipped, or blocked. Visible in the UI alongside the conversation. Survives compaction.
+54. **Lane-isolated concurrency** — independent concurrency lanes (interactive, autonomous, automation, sub-agent) that don't compete. Each lane has its own session cap. Removes the "yield to interactive" check that currently freezes background work.
+55. **Smart continuation prompts** — context-aware prompts replacing the static continuation string. Include progress (8/30 items), budget remaining (62% tokens, 2h 45m), items completed this cycle, queued approvals, and explicit permission to adapt priorities.
+56. **Dashboard monitoring** — Active Agents panel (running agents with progress and controls), Activity Feed (real-time stream of agent actions), Pending Approvals (queued actions needing sign-off). Integrated into the Home dashboard, not a separate page.
+
+### P2-Autonomy — Extended autonomy
+
+57. **Parallel sub-agent fan-out with permission narrowing** — autonomous agents delegate items to parallel sub-agents. Concurrency cap per run (default: 3). Permissions narrow at each delegation level. Configurable `max_spawn_depth` per agent. Failure isolation: sub-agent failures don't kill the parent run.
+58. **Heartbeat protocol** — periodic autonomous check-ins where the agent wakes up, surveys its spaces, and decides whether to act or stay quiet. Built on automation infrastructure with a survey prompt instead of an instruction. Configurable frequency (default: 30 minutes during working hours).
+59. **Overnight summary generation** — autonomous agents that complete overnight work generate a summary of everything they did, discoverable on the dashboard Activity Feed in the morning.
+60. **Crash recovery for autonomous runs** — on startup, interrupted autonomous sessions are detected. Task list state on BackgroundTask records enables resume from the last completed item rather than full restart.
+
 ---
 
 ## What Changes From Current System
@@ -442,6 +502,11 @@ Accessible from Home or Settings. Shows:
 26. **Mid-task steering** — background delegation uses a managed turn loop where the agent runner auto-continues between agent turns. A steering queue accepts user corrections, which are injected at the next turn boundary via the SDK's `query(resume=session_id)` mechanism. No mid-tool-call injection required (the SDK doesn't support this). Agent system prompts instruct incremental work, creating natural turn boundaries for steering and progress tracking.
 27. **Workflow tracking** — background tasks track step-level progress with parent-child hierarchies. Failed tasks show where they stopped. Audit detects stale (>10min queued) and stuck (>30min running) tasks.
 28. **Space layouts** — widget-based, config-driven. Layout stored per space as an ordered list of widget configurations in a `space_widgets` table. Templates provide defaults that match the current fixed layouts. Agents have MCP tools to modify layouts. Core widgets (kanban, table, task list, conversations) in P1. Extended widgets (charts, data feeds, stat cards) in P2 alongside data source integrations. Settings-panel layout editor first; drag-and-drop widget repositioning within the space view is a later enhancement.
+29. **Autonomy tiers are implicit for Interactive/Supervised, explicit only for Autonomous.** The system doesn't ask "what mode?" — it operates at the right level based on context. Interactive when the user is chatting. Supervised when a background task is kicked off. Autonomous only when the user explicitly sets up a goal-driven run.
+30. **Permission narrowing is the security invariant for sub-agents.** A child can never have more permissions than its parent. No arbitrary depth limit — configurable `max_spawn_depth` per agent. The permission enforcer validates narrowing at every delegation boundary.
+31. **Compaction halts on instruction verification failure.** If post-compaction verification detects that safety constraints, goal definitions, or active instructions are missing or corrupted, the session halts immediately. Better to stop than continue without safety constraints.
+32. **Agent configuration is the security boundary in all modes.** Spaces + permissions define what an agent can reach. Autonomy changes how much judgment the agent exercises, not what it can access. The autonomous launch conversation can narrow scope but never widen beyond existing permissions.
+33. **Pre-approved scope + queue-and-continue for autonomous approval model.** Autonomous agents work within their permissions and queue anything outside them for user approval. The agent doesn't block on pending approvals — it notes the limitation, moves to the next item, and continues working.
 
 ---
 
@@ -467,8 +532,9 @@ The Agent Runner is intentionally thin. It doesn't reimpose lifecycle management
 2. **Conversations are the core abstraction** — the system is built around persistent, context-rich conversations that produce work as a side effect.
 3. **Context is assembled, not manually fed** — agents get what they need automatically. Token budgets, relevance ranking, summarization, and on-demand search for historical context.
 4. **One interaction model** — Odin chat is the universal entry point. No memorized commands, no mode switching. Conversations for deep work. Items (list, board, table) for tracking.
-5. **Progressive autonomy** — agents start supervised, earn trust, get more autonomy.
-6. **Storage is external** — Google Drive for documents, SQLite for structured data, repos for code, APIs for live data. OpenLoop is the orchestration layer.
-7. **Claude Max, not API** — all agent execution via Claude Agent SDK under Max subscription. Haiku for Odin, Sonnet/Opus for agents.
-8. **Granular security by default** — per-agent, per-resource, per-operation permissions. No agent gets broad access by default.
-9. **Agents improve over time** — procedural memory captures corrections, write-time dedup keeps knowledge clean, lifecycle management prevents bloat, and retrieval scoring surfaces the right context. The system gets smarter with use, not just bigger.
+5. **Progressive autonomy** — agents start supervised, earn trust, get more autonomy. Three tiers: Interactive (user drives every turn), Supervised (agent works in background with compaction for extended runs), Autonomous (agent pursues a goal with its own task list, adapting as it goes). Tiers are implicit for Interactive/Supervised and explicit only for Autonomous. Permission narrowing ensures sub-agents at any depth can never exceed their parent's capabilities.
+6. **Observability** — autonomous operations require visibility. Every tool call during background/autonomous runs is audit-logged. Token usage is tracked per session. Activity feeds stream meaningful agent actions in real time. Progress monitoring shows where each agent is in its work. The dashboard is the control surface — not a separate mission control page, but an extension of Home.
+7. **Storage is external** — Google Drive for documents, SQLite for structured data, repos for code, APIs for live data. OpenLoop is the orchestration layer.
+8. **Claude Max, not API** — all agent execution via Claude Agent SDK under Max subscription. Haiku for Odin, Sonnet/Opus for agents.
+9. **Granular security by default** — per-agent, per-resource, per-operation permissions. No agent gets broad access by default.
+10. **Agents improve over time** — procedural memory captures corrections, write-time dedup keeps knowledge clean, lifecycle management prevents bloat, and retrieval scoring surfaces the right context. The system gets smarter with use, not just bigger.

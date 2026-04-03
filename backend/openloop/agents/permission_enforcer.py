@@ -56,6 +56,35 @@ def is_system_blocked(resource: str) -> bool:
     return False
 
 
+# Keys whose values should be fully redacted in audit input summaries
+_SECRET_KEYS = frozenset({
+    "password", "secret", "token", "api_key", "apikey", "api-key",
+    "authorization", "auth", "credential", "credentials",
+})
+
+# Maximum length for any single value in the redacted summary
+_MAX_VALUE_LEN = 200
+
+
+def _redact_tool_input(tool_input: dict) -> str:
+    """Build a redacted string summary of tool inputs for audit logging.
+
+    Truncates long values and masks keys that look like secrets.
+    """
+    if not tool_input:
+        return "{}"
+    parts: list[str] = []
+    for key, value in tool_input.items():
+        if key.lower() in _SECRET_KEYS:
+            parts.append(f"{key}: [REDACTED]")
+        else:
+            val_str = str(value)
+            if len(val_str) > _MAX_VALUE_LEN:
+                val_str = val_str[:_MAX_VALUE_LEN] + "..."
+            parts.append(f"{key}: {val_str}")
+    return ", ".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # Tool-to-resource mapping
 # ---------------------------------------------------------------------------
@@ -353,7 +382,7 @@ async def _poll_for_approval(db: Session, request_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_permission_hook(agent_id: str, conversation_id: str | None):
+def build_permission_hook(agent_id: str, conversation_id: str | None, background_task_id: str | None = None):
     """Build a PreToolUse hook for SDK session registration.
 
     Returns a tuple of (HookMatcher, hook_function) compatible with the
@@ -389,11 +418,35 @@ def build_permission_hook(agent_id: str, conversation_id: str | None):
         finally:
             db.close()
 
+        # Audit log the permission decision
+        resource, operation = map_tool_to_resource(tool_name, tool_input)
+        audit_action = result  # "allow", "deny", or "pending" (resolved)
+        # Build a redacted summary of tool inputs (strip long values, mask secrets)
+        input_summary = _redact_tool_input(tool_input)
+
+        audit_db = SessionLocal()
+        try:
+            from backend.openloop.services import audit_service
+
+            audit_service.log_tool_call(
+                audit_db,
+                agent_id=agent_id,
+                conversation_id=conversation_id,
+                background_task_id=background_task_id,
+                tool_name=tool_name,
+                action=audit_action,
+                resource_id=resource,
+                input_summary=input_summary,
+            )
+        except Exception:
+            logger.debug("Failed to write audit log for %s", tool_name, exc_info=True)
+        finally:
+            audit_db.close()
+
         if result == "allow":
             # Empty dict = allow the tool call to proceed
             return {}
         else:
-            resource, operation = map_tool_to_resource(tool_name, tool_input)
             return {
                 "decision": "block",
                 "reason": f"Permission denied: {operation} on {resource} for agent {agent_id}",

@@ -34,6 +34,7 @@ def create_rule(
         rule=body.rule,
         source_type=body.source_type.value,
         source_conversation_id=body.source_conversation_id,
+        origin=body.origin.value if body.origin else "user_confirmed",
     )
     return BehavioralRuleResponse.model_validate(rule)
 

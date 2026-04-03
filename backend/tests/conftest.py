@@ -4,6 +4,7 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
+import backend.openloop.database as database_module
 import backend.openloop.db.models  # noqa: F401 — register models with Base.metadata
 from backend.openloop.database import Base, get_db
 from backend.openloop.main import app
@@ -14,6 +15,18 @@ _test_engine = create_engine(
     connect_args={"check_same_thread": False},
     poolclass=StaticPool,
 )
+
+# Override SessionLocal everywhere so that app lifespan (recover_from_crash,
+# FTS checks, etc.) uses the test database instead of the production one.
+# We must patch both the database module AND main.py since main.py does
+# `from backend.openloop.database import SessionLocal` (binds the name locally).
+_TestSessionLocalFactory = sessionmaker(
+    autocommit=False, autoflush=False, bind=_test_engine
+)
+database_module.SessionLocal = _TestSessionLocalFactory
+
+import backend.openloop.main as main_module  # noqa: E402
+main_module.SessionLocal = _TestSessionLocalFactory
 
 
 @event.listens_for(_test_engine, "connect")

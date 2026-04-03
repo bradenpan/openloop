@@ -1,4 +1,4 @@
-# OpenLoop: Architecture Proposal (DRAFT v4)
+# OpenLoop: Architecture Proposal (DRAFT v5)
 
 **Status:** Under review — not yet approved for implementation.
 **Companion document:** CAPABILITIES.md (defines what the system does; this document defines how it's built)
@@ -234,6 +234,8 @@ Business logic. Stateless functions that operate on the database and coordinate 
   - `close_conversation(db, conversation_id)` → triggers summary generation, memory flush, consolidation check, and closes the conversation in the DB
   - `delegate_background(db, agent_id, instruction, ...)` → runs autonomous agent work in a managed turn loop
   - `steer(conversation_id, message)` → mid-task course correction for background tasks
+  - `launch_autonomous(db, agent_id, space_id, goal, constraints, token_budget, time_budget)` → goal-driven autonomous run with compaction loop, self-directed task list, approval queue integration
+  - `narrow_permissions(parent_agent_id, delegation_depth)` → compute restricted permission set for sub-agents
   - `list_running(db)` → returns all running/queued agent sessions (DB query, not in-memory state)
 - **ContextAssembler** — builds the prompt context for a new session:
   - Reads space memory (facts tier)
@@ -252,7 +254,7 @@ Business logic. Stateless functions that operate on the database and coordinate 
 - **AgentService** — agent CRUD. Configuration management. Permission matrix storage.
 - **~~ToolRegistryService~~** — *Deferred. Agent tool configurations live in the `agents` table (`tools` and `mcp_tools` JSON fields). A dedicated registry is not needed for P0/P1.*
 - **AutomationService** — CRUD for automation definitions. Runs the cron scheduler (checks every minute for matching automations). Fires matching automations as background tasks. Tracks run history. Event listener for event-based automations (P2).
-- **AutomationScheduler** — background loop within the FastAPI process. Every 60 seconds, checks all enabled cron-based automations against the current time. When matched, creates a background task with the automation's agent + instruction. Lightweight — no external dependencies (no Celery, no Redis). On startup, checks for missed runs during downtime and surfaces notifications. Max concurrent automation sessions configurable (default 2); user conversations always take priority.
+- **AutomationScheduler** — background loop within the FastAPI process. Every 60 seconds, checks all enabled cron-based automations against the current time. When matched, creates a background task with the automation's agent + instruction. Lightweight — no external dependencies (no Celery, no Redis). On startup, checks for missed runs during downtime and surfaces notifications. Max concurrent automation sessions configurable (default 3). Automations run in their own concurrency lane, independent of interactive sessions (see Lane-Isolated Concurrency).
 
 ### Layer 4: Agent Runner (Detail)
 
@@ -373,19 +375,40 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 │  ├── delegate_background()                      │
 │  │   Managed turn loop — agent works in         │
 │  │   discrete turns with steering checkpoints.  │
+│  │   Soft budgets replace hard turn cap:        │
+│  │   token budget + time budget + GOAL_COMPLETE │
+│  │   signal (or TASK_COMPLETE for simple tasks).│
+│  │   Existing background tasks still work with  │
+│  │   default soft budgets.                      │
+│  │                                              │
 │  │   1. Create background_task, assemble context│
 │  │      call SDK query() with system_prompt     │
 │  │   2. Enter turn loop:                        │
 │  │      a. query(resume=session_id, message=    │
-│  │         steering_queue.pop() or "continue")  │
+│  │         steering_queue.pop() or smart        │
+│  │         continuation prompt — context-aware  │
+│  │         with progress, budget remaining,     │
+│  │         completed items, queued approvals)   │
 │  │      b. Agent completes one turn of work     │
 │  │      c. Log activity, update step progress   │
 │  │         (current_step, step_results on task) │
 │  │      d. Stream activity to SSE for monitoring│
 │  │      e. Check: agent reported completion?    │
 │  │         → exit loop                          │
-│  │      f. Check steering queue for user msgs   │
-│  │      g. Loop back to (a)                     │
+│  │      f. Check: token or time budget exceeded?│
+│  │         → exit loop with progress report     │
+│  │      g. COMPACTION CYCLE: at 70% context →   │
+│  │         extract persistent instructions      │
+│  │         (goal, constraints, task list,        │
+│  │         permission boundaries) → flush       │
+│  │         memory → summarize → verify          │
+│  │         persistent instructions survived →   │
+│  │         if verification fails: HALT →        │
+│  │         if passes: continue with compressed  │
+│  │         context (persistent instructions +   │
+│  │         summary + recent turns)              │
+│  │      h. Check steering queue for user msgs   │
+│  │      i. Loop back to (a)                     │
 │  │   3. On completion: write results to task,   │
 │  │      notify via SSE event                    │
 │  │   Agent system prompts include: "Work        │
@@ -439,16 +462,21 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 │  │   running background tasks. Survives server  │
 │  │   restarts — no in-memory state to lose.     │
 │  │                                              │
-│  Concurrency Control:                           │
+│  Concurrency Control (lane-isolated):           │
 │  - Per-conversation asyncio lock prevents       │
 │    concurrent sends to the same conversation    │
 │    (_conversation_locks dict). Cleaned up on    │
 │    conversation close.                          │
-│  - Max concurrent interactive sessions: 5       │
-│  - Interactive conversations have priority over │
-│    background tasks and automations             │
-│  - Max concurrent automation sessions: 2        │
-│  - When limit hit: 429 with notification        │
+│  - Interactive lane: cap 5                      │
+│  - Autonomous lane: cap 2                       │
+│  - Automation lane: cap 3                       │
+│  - Sub-agent lane: cap 8                        │
+│  - MAX_TOTAL_BACKGROUND: 8 (hard cap across    │
+│    all non-interactive lanes)                   │
+│  - Lanes are independent — interactive sessions │
+│    don't block background work. No yield-to-    │
+│    interactive model.                           │
+│  - When lane limit hit: 429 with notification   │
 │                                                 │
 │  Rate Limit Retry:                              │
 │  - All SDK query() calls wrapped in             │
@@ -851,6 +879,9 @@ agents
 ├── skill_path (string, nullable — path to agent skill file for Agent Builder-created agents)
 ├── tools (JSON array — which Claude tools are enabled)
 ├── mcp_tools (JSON array — which OpenLoop MCP tools are enabled)
+├── max_spawn_depth (integer, default 1 — how deep sub-agent delegation can go; 1 = no nesting)
+├── heartbeat_enabled (boolean, default false — whether this agent runs periodic check-ins)
+├── heartbeat_cron (string, nullable — cron expression for heartbeat schedule, e.g., "*/30 * * * *")
 ├── status ("active" | "inactive")
 ├── created_at
 └── updated_at
@@ -896,6 +927,8 @@ conversation_messages
 ├── role ("user" | "assistant" | "tool")
 ├── content (text)
 ├── tool_calls (JSON, nullable)
+├── input_tokens (integer, nullable — extracted from SDK response metadata)
+├── output_tokens (integer, nullable — extracted from SDK response metadata)
 ├── created_at
 
 conversation_summaries
@@ -1006,6 +1039,16 @@ background_tasks
 ├── item_id (FK → items, nullable)
 ├── parent_task_id (FK → background_tasks, nullable — for sub-task hierarchies)
 ├── instruction (text)
+├── goal (text, nullable — original goal text and success criteria for autonomous runs)
+├── task_list (JSON, nullable — agent-managed work queue: [{id, title, status, notes}])
+├── task_list_version (integer, default 0 — incremented on each modification, for UI diffing)
+├── completed_count (integer, default 0 — completed items in task_list, for progress display)
+├── total_count (integer, default 0 — total items in task_list, for progress display)
+├── queued_approvals_count (integer, default 0 — actions waiting for user approval)
+├── run_type ("task" | "autonomous" | "heartbeat", default "task")
+├── time_budget (integer, nullable — maximum wall-clock seconds for this run)
+├── token_budget (integer, nullable — maximum total tokens for this run)
+├── run_summary (text, nullable — generated summary of what the run accomplished)
 ├── status ("queued" | "running" | "completed" | "failed" | "cancelled")
 ├── current_step (integer, nullable — for multi-step tracking)
 ├── total_steps (integer, nullable)
@@ -1020,6 +1063,7 @@ behavioral_rules (procedural memory — learned from corrections and validated a
 ├── agent_id (FK → agents, indexed)
 ├── rule (text — the behavioral instruction, e.g., "Always check CRM before drafting follow-ups")
 ├── source_type (string — "correction" | "validation" — whether this came from fixing a mistake or confirming a good approach)
+├── source (string — "agent_inferred" | "user_confirmed" | "system", default "agent_inferred")
 ├── source_conversation_id (FK → conversations, nullable — where this rule was learned)
 ├── confidence (float, default 0.5 — asymmetric updates: +0.1 on confirmation, -0.2 on override)
 ├── apply_count (integer, default 0 — how many times injected into context)
@@ -1027,6 +1071,34 @@ behavioral_rules (procedural memory — learned from corrections and validated a
 ├── is_active (boolean, default true — false when demoted due to low confidence/usage)
 ├── created_at
 └── updated_at
+
+audit_log (tool call audit trail for autonomous/background runs)
+├── id (UUID, PK)
+├── agent_id (FK → agents, indexed)
+├── conversation_id (FK → conversations, indexed)
+├── background_task_id (FK → background_tasks, nullable, indexed)
+├── tool_name (string)
+├── action (string)
+├── resource_id (string, nullable)
+├── input_summary (text)
+├── timestamp (datetime)
+
+approval_queue (actions queued by autonomous agents pending user sign-off)
+├── id (UUID, PK)
+├── background_task_id (FK → background_tasks, indexed)
+├── agent_id (FK → agents, indexed)
+├── action_type (string)
+├── action_detail (JSON)
+├── reason (text)
+├── status ("pending" | "approved" | "denied" | "expired")
+├── resolved_at (datetime, nullable)
+├── resolved_by (string, nullable)
+├── created_at
+
+system_state (global key-value store for system-wide flags and configuration)
+├── key (string, PK)
+├── value (JSON)
+├── updated_at
 
 ```
 
@@ -1082,6 +1154,15 @@ Behavioral Rule ──N:1──> Agent
 Behavioral Rule ──N:1──> Conversation (source, nullable)
 
 Conversation Summary ──N:1──> Conversation Summary (consolidated_into, nullable)
+
+Audit Log ──N:1──> Agent
+Audit Log ──N:1──> Conversation
+Audit Log ──N:1──> Background Task (nullable)
+
+Approval Queue ──N:1──> Background Task
+Approval Queue ──N:1──> Agent
+
+System State: standalone key-value store (kill switch flag, global config)
 
 Memory Entry: standalone, keyed by (namespace, key). Temporal: valid_from/valid_until track when facts were true.
 Notification: standalone, optionally linked to space/conversation
@@ -1410,6 +1491,182 @@ TIER 2 — Reactive (after LLM response):
   └── Over 90% → notification: suggest closing and starting fresh
 ```
 
+### Flow 10: Autonomous Launch
+
+```
+User gives agent a goal: "Process all new recruiting candidates and prepare briefs"
+  │
+  ▼
+Frontend: POST /api/v1/agents/{id}/autonomous
+  { space_id, goal, constraints, token_budget?, time_budget? }
+  │
+  ▼
+Backend: AgentRunner.launch_autonomous()
+  → Creates BackgroundTask (run_type="autonomous") + Conversation
+  → Agent receives goal + space state (via ContextAssembler)
+  │
+  ▼
+Agent generates task list:
+  → Surveys space (board state, items, memory)
+  → Builds structured work queue: [{id, title, status}]
+  → Stored on BackgroundTask.task_list (survives compaction, visible to UI)
+  │
+  ▼
+Enters managed turn loop with smart continuation:
+  → Each turn: pick next item → execute → update progress → adapt plan
+  → Continuation prompts include: progress, budget remaining,
+    completed items, queued approvals
+  → At 70% context: compaction cycle preserves goal + constraints +
+    task list + permission boundaries through compression
+  → If action outside permissions: queue_approval() → continue with next item
+  │
+  ▼
+Agent signals GOAL_COMPLETE (or budget exhausted):
+  → Run summary generated and stored on BackgroundTask.run_summary
+  → Notification created with summary
+  → Task status updated to "completed"
+```
+
+### Flow 11: Compaction Cycle (within autonomous/background runs)
+
+Follows the OpenClaw pattern: instructions are stored externally (on the
+BackgroundTask record) and re-injected each turn via continuation prompts.
+Compaction only affects conversation history, not instructions — the goal
+is never at risk because it comes from the DB, not the context window.
+
+```
+Context utilization hits 70%
+  │
+  ▼
+flush_memory():
+  → Agent saves important working context to persistent memory
+  → Existing flush_memory() infrastructure
+  │
+  ▼
+Generate conversation summary:
+  → Summarize turns so far (existing summary infrastructure)
+  → Compresses the WORK (what the agent did, what it found)
+  │
+  ▼
+Resume with compressed context:
+  → Goal re-injected from BackgroundTask.goal on next continuation prompt
+  → Summary of prior work included in continuation prompt
+  → Recent turns preserved in context
+  → Cycle repeats as needed — no hard turn limit
+
+No post-compaction verification needed: the goal lives in the DB and is
+re-injected every turn by _build_continuation_prompt(). The conversation
+history can be freely summarized because it contains results, not instructions.
+```
+
+### Flow 12: Approval Queue
+
+```
+Autonomous agent attempts action outside permissions
+  │
+  ▼
+PermissionEnforcer.check() returns approval_queued
+  → Agent calls queue_approval() MCP tool
+  → Creates approval_queue entry:
+    { action_type, action_detail, reason: "want to send follow-up email
+      to Alice Chen because research indicates strong fit" }
+  → BackgroundTask.queued_approvals_count incremented
+  │
+  ▼
+SSE event pushed to dashboard:
+  → { type: "approval_queued", agent, action, reason, goal_context }
+  → Appears in Pending Approvals section on Home dashboard
+  │
+  ▼
+Agent continues with next task list item:
+  → Does not block — moves on to other work
+  → Queued action noted in task log
+  │
+  ▼
+User reviews from dashboard:
+  → Sees action + reason + goal context
+  → Approves or denies (batch approve/deny supported)
+  │
+  ▼
+If approved and run still active:
+  → Approval result re-injected as steering message
+  → Agent retries the action on next turn boundary
+If denied:
+  → Agent notified via steering message, skips the action
+If run already completed:
+  → Approval expires, action not taken
+```
+
+### Flow 13: Parallel Sub-Agent Fan-Out
+
+```
+Coordinator agent processing 30 candidates decides to parallelize
+  │
+  ▼
+Coordinator calls delegate_task() N times:
+  → delegate_task("research-alice", "Research + brief for Alice Chen", space_id)
+  → delegate_task("research-bob", "Research + brief for Bob Park", space_id)
+  → delegate_task("research-carol", "Research + brief for Carol Davis", space_id)
+  │
+  ▼
+Each delegation:
+  → narrow_permissions(parent_agent_id, depth+1) computes restricted permission set
+  → Sub-agent spawned with narrowed permissions
+  → Runs in sub-agent concurrency lane (cap 8)
+  → Each sub-agent gets bounded task, not the full goal
+  │
+  ▼
+Sub-agents execute independently:
+  → Write results to items/documents (briefs, status updates, notes)
+  → Operate within narrowed permission set
+  → Cannot delegate further if at max_spawn_depth
+  │
+  ▼
+Coordinator polls for completion:
+  → Calls check_delegated_tasks() to check sub-agent status
+  → When all complete: coordinator continues with collected results
+  → Coordinator picks next batch of items to parallelize
+  │
+  ▼
+Lifecycle:
+  → Stopping coordinator cascade-terminates all children
+  → Sub-agent failure → coordinator marks item as failed, continues with others
+  → Sub-agent failures don't kill the parent run
+```
+
+### Flow 14: Heartbeat
+
+```
+Agent has heartbeat_enabled=True, heartbeat_cron="*/30 9-17 * * 1-5"
+  │
+  ▼
+AutomationScheduler detects due heartbeat (every 60s check cycle)
+  │
+  ▼
+Creates BackgroundTask (run_type="heartbeat")
+  → Agent receives survey prompt:
+    "HEARTBEAT — 2026-04-03 14:30
+     You have been woken for a periodic check-in.
+     Review the current state of your spaces. Consider:
+     - Are there overdue items that need attention?
+     - Has anything changed since your last check-in?
+     - Are there items you've been assigned that are stale?
+     - Is there anything the user should know about?"
+  │
+  ▼
+Agent evaluates state and responds:
+  │
+  ├── HEARTBEAT_OK (nothing needs attention):
+  │   → Silent — no notification created
+  │   → Task marked complete
+  │   → Logged in audit_log
+  │
+  └── Takes action (updates items, creates notifications, flags issues):
+      → Actions logged in audit_log
+      → Notification created: "Recruiting Agent flagged 3 overdue candidates"
+      → Task marked complete with result summary
+```
+
 ---
 
 ## Context Pruning and Memory Lifecycle Strategy
@@ -1582,6 +1839,10 @@ Restore = replace the SQLite file with a backup copy and restart the backend. Co
 12. **Tasks everywhere** — lightweight checklist (list view) in every space plus cross-space aggregation on Home.
 13. **Flexible spaces** — not everything is a "project." Knowledge bases, CRM systems, simple task lists. Template-based creation with widget-based layouts.
 14. **Agent-designed layouts** — agents can read, modify, and fully redesign space layouts via MCP tools. "Redesign my health space with Garmin charts" is a tool call, not a feature request. Templates provide defaults; agents and users customize from there.
+15. **Autonomous goal pursuit** — agents work independently for hours with context compaction, self-directed task lists, and adaptive planning. Token and time budgets prevent runaway usage.
+16. **Permission narrowing** — sub-agents safely inherit restricted permissions at each delegation level. Permissions only narrow, never widen. Enforced through a single codepath.
+17. **Lane-isolated concurrency** — background work (autonomous runs, automations, sub-agents) doesn't block interactive conversations. Independent lane caps with a shared hard ceiling.
+18. **Observable operations** — audit logging for every tool call during background/autonomous runs, token tracking per message, activity feeds, and approval queues. Full visibility into what agents did overnight.
 
 ---
 

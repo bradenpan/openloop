@@ -474,9 +474,38 @@ Code review of refactor found 1 critical + 5 important issues, all fixed:
 - **Important:** Stale `sdk_session_id` in close_conversation after flush_memory — re-read from DB; `ExceptionGroup` not caught in conversation route — added; redundant orphaned task cleanup in main.py — removed; duplicate `stream_end` — verified not a real issue (only published once internally, not yielded)
 - Reopen context: summary-only approach accepted (simpler, sufficient)
 
+## Phase 8: Security Foundation + Core Infrastructure — COMPLETE
+
+**Reference:** [IMPLEMENTATION-PLAN-PHASE8.md](IMPLEMENTATION-PLAN-PHASE8.md) | [AUTONOMOUS-AGENTS.md](AUTONOMOUS-AGENTS.md)
+
+All 8 tasks done across 4 waves of parallel execution. 195 new tests. Security hardening and session infrastructure for autonomous agent operations.
+
+**Task 8.1 — Prompt Injection Delimiters:** Modified `context_assembler.py` to wrap all user-originated data in `<user-data type="...">` tags and system instructions in `<system-instruction>` tags. Anti-injection instruction added to both agent and Odin paths. Covers: board state, memory entries, summaries, behavioral rules, tool docs, agent config. 29 tests.
+
+**Task 8.2 — Steering Validation + Audit Log:** Added 2000-char limit on steering messages with `<steering>` delimiters. Built `audit_log` table + `audit_service.py` + `GET /api/v1/audit-log` API. Wired into permission_enforcer (logs every tool call decision) and agent_runner background loop (captures individual tool use events from StreamEvent, not just ResultMessage). Secret redaction on logged tool inputs. 21 tests.
+
+**Task 8.3 — Memory Integrity:** Added `origin` column to `behavioral_rules` (named `origin` to avoid collision with existing `source_type`). Values: `agent_inferred`, `user_confirmed`, `system`. Context assembler places user-confirmed rules in high-attention BEGINNING section, agent-inferred rules in lower-attention MIDDLE section. Added imperative pattern detection on memory writes — entries matching `/^(ignore|override|you must|...)/i` create a notification for human review. 30 tests.
+
+**Task 8.4 — Kill Switch + Token Tracking:** Built `system_state` table + `system_service.py`. `POST /system/emergency-stop` halts all background work, `POST /system/resume` clears. Guards in agent_runner and automation_scheduler. Added `input_tokens`/`output_tokens` to conversation_messages, `token_budget` to background_tasks. Token extraction added to both interactive path (extended existing) and background loop (built new). Budget enforcement stops tasks when token limit exceeded. `GET /api/v1/stats/tokens` for aggregated usage. 38 tests.
+
+**Task 8.5 — Lane-Isolated Concurrency:** Created `concurrency_manager.py` with 4 independent lanes: interactive (5), autonomous (2), automation (3), subagent (8). `MAX_TOTAL_BACKGROUND = 8` hard cap. Removed yield-to-interactive behavior from automation_scheduler — automations now run regardless of active conversations. Replaced inline DB queries in agent_runner with `acquire_slot()` calls. 22 tests.
+
+**Task 8.6a — Compaction Loop:** Added context estimation to background task loop (previously only existed in interactive path). Compaction triggers at 70% context utilization: flushes memory, generates checkpoint summary, continues with compressed context. Defined `PersistentData` dataclass and `register_persistent_extractor()` for Phase 9 extension. Added `goal` and `time_budget` columns to background_tasks. 14 tests (after simplification, see below).
+
+**Task 8.6b — Soft Budgets + Continuation Prompts:** Replaced `MAX_TURNS = 20` hard cap with soft budgets: token budget, time budget (default 4h), and `GOAL_COMPLETE`/`TASK_COMPLETE` completion signals. `MAX_TURNS` raised to 500 as absolute safety fallback. Built `_build_continuation_prompt()` with context-aware content: turn number, progress, budget remaining, compaction notes. Budget-exhausted message gives agent one final turn to summarize. 29 tests.
+
+**Task 8.7 — Security UI:** Three frontend components: (1) System status indicator in app header — subtle dot + label ("Active" / "2 agents running" / "Paused"), expands to show stop button when background work active, resume button when paused. (2) Token usage sparkline — compact 7-day SVG sparkline with hover tooltips, "Last 24h" summary. (3) Integration into existing Home dashboard and app shell.
+
+**Compaction simplification (post-8.6a):** Original implementation included post-compaction verification — string-matching key phrases from the original instruction against the post-compaction context. Removed after recognizing this solves a problem that doesn't exist if we follow the OpenClaw pattern: instructions are stored externally (on the BackgroundTask record's `goal` field) and re-injected each turn via continuation prompts. Compaction only affects conversation history, not instructions. The goal is never in the summarizable context — it comes from the DB. Flush memory + generate summary is sufficient. Verification was adding complexity and false-positive halt risk for no safety benefit.
+
+**Deviations from plan:**
+- Agents consistently produced plans and waited for approval before implementing (following global CLAUDE.md rule). Required a round-trip per agent to push them to implement.
+- Task 8.2 agent also created merge migrations for parallel alembic heads from concurrent tasks.
+- Compaction verification logic stripped post-implementation based on OpenClaw pattern analysis — simpler model, same safety properties.
+
 ## Current State
 
-- **919 backend tests passing**, lint clean on new code
+- **~1100+ backend tests passing**, lint clean on new code
 - **63 Playwright E2E tests passing** (new comprehensive suite) + 39 prior component tests
 - **OpenAPI spec freshly regenerated** from current routes
 - Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes
@@ -501,3 +530,6 @@ Code review of refactor found 1 critical + 5 important issues, all fixed:
 13. **Naive UTC for all SQLite datetimes** — `datetime.now(UTC).replace(tzinfo=None)` is the standard pattern. SQLite strips tzinfo anyway, but explicit naive UTC prevents comparison bugs.
 14. **Agent runner replaces session manager** — `agent_runner.py` (~400 lines) replaced `session_manager.py` (1,728 lines). No in-memory session state; DB is single source of truth for `sdk_session_id`. First message creates session automatically via `ClaudeAgentOptions.system_prompt`. The SDK was always stateless per-call — the old lifecycle model was unnecessary.
 15. **`system_prompt` via SDK options, not as prompt** — the assembled context (memory, rules, board state) is passed via `ClaudeAgentOptions.system_prompt`, not as the `prompt` parameter. This matches how Claude CLI works and avoids wasting an API call on session initialization.
+16. **Compaction follows the OpenClaw pattern** — instructions stored externally (BackgroundTask.goal), re-injected each turn via continuation prompts. Compaction only summarizes conversation history, never instructions. No post-compaction verification needed — the goal is never at risk because it comes from the DB, not the context window.
+17. **Concurrency lanes are independent** — interactive, autonomous, automation, and subagent work each have their own lane with separate caps. No lane blocks another. The old yield-to-interactive model (automations paused during user conversations) was removed.
+18. **Audit logging via permission enforcer** — every tool call decision (allow/deny) is logged in the audit_log table with redacted inputs. Provides the data foundation for the activity feed and overnight summaries in Phase 9+.

@@ -2,6 +2,7 @@ import { useState, useCallback } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { Sidebar } from './sidebar';
 import { OdinBar } from './odin-bar';
+import { SystemStatus } from './system-status';
 import { ConnectionStatus } from './connection-status';
 import { SearchModal } from '../search-modal';
 import { ToastContainer, ShortcutsHelp } from '../ui';
@@ -50,7 +51,10 @@ export function AppShell() {
     <div className="flex h-screen bg-background text-foreground font-sans">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0">
-        <main className="flex-1 overflow-auto p-6">
+        <div className="flex items-center justify-end px-6 pt-3 pb-0">
+          <SystemStatus />
+        </div>
+        <main className="flex-1 overflow-auto px-6 pb-6 pt-3">
           <FadeIn key={location.pathname}>
             <Outlet />
           </FadeIn>

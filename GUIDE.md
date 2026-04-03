@@ -197,6 +197,47 @@ The system comes with three pre-built templates (disabled by default):
 
 To activate templates: `make register-automations`, then enable them in the dashboard.
 
+## Autonomous Agents
+
+Regular conversations are back-and-forth — you send a message, the agent responds, you send another. Automations run a fixed instruction on a schedule. Autonomous agents sit between: you give them a goal, they figure out how to achieve it, and they work through it independently.
+
+### When to Use Autonomous Mode
+
+Use it when you have a goal that involves multiple steps and you don't need to guide every decision:
+- "Process all new recruiting candidates and prepare briefs for each one"
+- "Work through the Q2 planning backlog — update statuses, flag blockers, archive stale items"
+- "Research these 5 companies and write competitive analysis docs"
+- "Monitor my email every 30 minutes and categorize incoming messages"
+
+### How It Works
+
+1. **Give the agent a goal.** Not a single task — a goal. "Process all new candidates" rather than "research Alice Chen."
+2. **Answer clarifying questions.** The agent will ask what success looks like and what boundaries matter. "Should I skip candidates older than 7 days?" / "What format for the briefs?"
+3. **Approve and launch.** Once you're aligned on the goal and constraints, the agent starts working.
+4. **The agent builds its own task list.** It surveys the space, generates a plan, and starts executing. You can see the task list updating in real time on the dashboard.
+5. **It adapts as it goes.** If it learns something from the first few items that changes its approach, it adjusts the plan for the remaining ones.
+6. **You monitor from the dashboard.** The Active Agents panel shows progress. The Activity Feed shows what it's doing. If it needs your permission for something, it appears in Pending Approvals.
+
+### Safety Controls
+
+- **Kill switch:** The red button in the dashboard header stops all background work immediately. Always visible.
+- **Approval queue:** When an agent hits something outside its permissions, it queues the action and moves on. You approve or deny from the dashboard when you're ready.
+- **Token budget:** Each run has a budget. When it's used up, the agent stops and reports progress.
+- **Time budget:** Maximum run duration (default: 4 hours). Prevents runaway sessions.
+- **Pause/resume:** You can pause an autonomous run and resume later without losing progress.
+
+### Steering Mid-Run
+
+If you see the agent going in the wrong direction, you can steer it. Open the agent's conversation from the dashboard and send a message — "skip the junior candidates and focus on senior ones." The agent adjusts on its next turn.
+
+### Sub-Agent Delegation
+
+For large goals, agents can delegate work to sub-agents that run in parallel. An agent processing 30 candidates might spawn 3 sub-agents to research candidates simultaneously. Sub-agents can only do what the parent agent can do — permissions always narrow, never widen.
+
+### Heartbeats
+
+Agents can be configured to check in periodically — every 30 minutes, every hour, whatever you set. During a heartbeat, the agent surveys its spaces, checks for overdue items or changes, and decides whether to act or stay quiet. If nothing needs attention, you don't hear anything.
+
 ## Permissions
 
 Agents operate under a permission system. Each agent has per-resource, per-operation permissions:
@@ -412,6 +453,16 @@ The agent runner bridges OpenLoop conversations with Claude SDK sessions. It rep
 
 **Graceful shutdown:** On SIGTERM, active interactive sessions are closed cleanly (summaries saved) with a 30-second timeout.
 
+### Autonomous Sessions
+
+Autonomous runs extend the background task model with three key additions:
+
+**Compaction loop:** When context fills up (70% threshold), the agent flushes important working context to memory, generates a summary of completed work, and continues with compressed context. The goal is stored on the BackgroundTask record in the database and re-injected from the DB on every continuation prompt — it never lives in the conversation context that gets compacted. After compaction, the next turn receives the goal fresh from the DB plus a summary of prior work, so the agent never loses its objective. This follows the same pattern as OpenClaw: instructions stored externally, re-injected each turn, conversation history freely summarizable.
+
+**Self-directed task list:** The agent generates and manages its own task list stored on the BackgroundTask record. This survives compaction and is visible in the UI. The agent picks items, executes them, marks them done, and can add or reorder items as it learns.
+
+**Soft budgets:** Instead of a hard 20-turn cap, autonomous runs use token budgets and time budgets. The agent sees its remaining budget in each continuation prompt and can prioritize accordingly.
+
 ## MCP Tools
 
 Agents interact with the system through MCP (Model Context Protocol) tools. These are async functions decorated with `@tool` that create short-lived DB sessions for each operation.
@@ -425,6 +476,7 @@ Key tool categories:
 - **Search** — `search_conversations`, `search_summaries` (cross-space capable)
 - **Layout** — `get_space_layout`, `add_widget`, `update_widget`, `remove_widget`, `set_space_layout`
 - **Delegation** — `delegate_task`, `update_task_progress`
+- **Autonomous operations** — `queue_approval` (queue an action for user review during autonomous runs), `check_delegated_tasks` (check status of parallel sub-agent work), `cancel_delegated_task` (stop a specific sub-agent)
 - **Drive** — `read_drive_file`, `list_drive_files`, `create_drive_file`
 
 Odin gets all tools. Space-scoped agents get tools filtered to their accessible spaces.
@@ -458,7 +510,25 @@ Three asyncio background loops run alongside the web server:
 2. **Task Monitor** (60s interval) — detects stale tasks (queued >10 min) and stuck tasks (running >30 min), creates notifications.
 3. **Lifecycle Scheduler** (60s interval) — daily fact archival, monthly memory consolidation.
 
-All three use the same pattern: asyncio task started in the app lifespan, cancelled on shutdown.
+A fourth loop will be added for autonomous operations:
+
+4. **Heartbeat Scheduler** (60s interval) — evaluates heartbeat schedules, wakes agents for periodic check-ins, runs alongside the automation scheduler and task monitor.
+
+All four use the same pattern: asyncio task started in the app lifespan, cancelled on shutdown.
+
+### Permission Narrowing
+
+When an agent delegates to a sub-agent, the sub-agent inherits at most the parent's permissions. Each delegation level further restricts available tools:
+
+- **Depth 0 (coordinator):** Full agent permissions (everything configured on the agent)
+- **Depth 1:** Parent's permissions minus agent management, automation management, and permission management tools
+- **Depth 2+:** Restricted to reading and writing items and documents only
+
+The maximum delegation depth is configurable per agent (default: 1, meaning no nesting). The concurrency cap (8 total background sessions) prevents resource exhaustion regardless of depth.
+
+### Audit Logging
+
+Every tool call during autonomous and background runs is recorded in the audit log: tool name, action, resource affected, and timestamp. The audit log feeds the Activity Feed on the dashboard and provides the data for overnight summaries. Entries are retained for 30 days.
 
 ## File Structure
 

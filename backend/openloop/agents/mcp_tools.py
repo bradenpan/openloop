@@ -707,6 +707,7 @@ async def save_rule(
             rule=rule,
             source_type=source_type or "correction",
             source_conversation_id=source_context or None,
+            origin="agent_inferred",
         )
         return _ok(
             {

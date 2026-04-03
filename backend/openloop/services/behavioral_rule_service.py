@@ -6,13 +6,14 @@ Confidence adjusts asymmetrically: confirmations boost slowly, overrides decay f
 
 from datetime import UTC, datetime
 
-from contract.enums import RuleSourceType
+from contract.enums import RuleOrigin, RuleSourceType
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from backend.openloop.db.models import BehavioralRule
 
 _VALID_SOURCE_TYPES = {e.value for e in RuleSourceType}
+_VALID_ORIGINS = {e.value for e in RuleOrigin}
 
 
 def create_rule(
@@ -22,6 +23,7 @@ def create_rule(
     rule: str,
     source_type: str = "correction",
     source_conversation_id: str | None = None,
+    origin: str = "agent_inferred",
 ) -> BehavioralRule:
     """Create a new behavioral rule for an agent."""
     if source_type not in _VALID_SOURCE_TYPES:
@@ -29,11 +31,17 @@ def create_rule(
             status_code=422,
             detail=f"Invalid source_type '{source_type}'. Must be one of: {sorted(_VALID_SOURCE_TYPES)}",
         )
+    if origin not in _VALID_ORIGINS:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid origin '{origin}'. Must be one of: {sorted(_VALID_ORIGINS)}",
+        )
     entry = BehavioralRule(
         agent_id=agent_id,
         rule=rule,
         source_type=source_type,
         source_conversation_id=source_conversation_id,
+        origin=origin,
     )
     db.add(entry)
     db.commit()
@@ -113,7 +121,7 @@ def apply_rules(db: Session, *, agent_id: str, read_only: bool = False) -> list[
 def update_rule(db: Session, rule_id: str, **kwargs) -> BehavioralRule:
     """Update a behavioral rule. Uses exclude_unset pattern."""
     entry = get_rule(db, rule_id)
-    updatable = {"rule", "is_active"}
+    updatable = {"rule", "is_active", "origin"}
     for field, value in kwargs.items():
         if field in updatable:
             setattr(entry, field, value)

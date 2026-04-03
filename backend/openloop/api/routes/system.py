@@ -1,9 +1,17 @@
 from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
 
-from backend.openloop.api.schemas.system import BackupStatusResponse
+from backend.openloop.api.schemas.system import (
+    BackupStatusResponse,
+    EmergencyStopResponse,
+    SystemResumeResponse,
+    SystemStatusResponse,
+)
+from backend.openloop.database import get_db
+from backend.openloop.services import system_service
 
 router = APIRouter(prefix="/api/v1/system", tags=["system"])
 
@@ -42,3 +50,29 @@ def get_backup_status() -> BackupStatusResponse:
             hours_since_backup=None,
             needs_backup=True,
         )
+
+
+# ---------------------------------------------------------------------------
+# Kill switch endpoints (Phase 8.4)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/emergency-stop", response_model=EmergencyStopResponse)
+def emergency_stop(db: Session = Depends(get_db)) -> EmergencyStopResponse:
+    """Activate the system-wide kill switch. Halts all background work."""
+    result = system_service.emergency_stop(db)
+    return EmergencyStopResponse(**result)
+
+
+@router.post("/resume", response_model=SystemResumeResponse)
+def resume_system(db: Session = Depends(get_db)) -> SystemResumeResponse:
+    """Clear the kill switch and re-enable background work."""
+    result = system_service.resume(db)
+    return SystemResumeResponse(**result)
+
+
+@router.get("/status", response_model=SystemStatusResponse)
+def get_system_status(db: Session = Depends(get_db)) -> SystemStatusResponse:
+    """Return current system state (paused/active, active session count)."""
+    result = system_service.get_status(db)
+    return SystemStatusResponse(**result)

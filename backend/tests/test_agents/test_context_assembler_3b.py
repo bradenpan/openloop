@@ -45,9 +45,12 @@ def _make_conversation(db: Session, agent_id: str, space_id: str, **kwargs):
 class TestAttentionOptimizedOrdering:
     def test_section_ordering(self, db_session: Session):
         """Sections should follow the attention-optimized order:
-        BEGINNING: Agent identity > Behavioral rules > Tool docs
-        MIDDLE: Summaries > Space facts > Global facts
+        BEGINNING: Agent identity > Confirmed rules > Tool docs
+        MIDDLE: Inferred rules > Summaries > Space facts > Global facts
         END: Todos/Board state
+
+        Task 8.3: Rules are now split by origin — user_confirmed/system rules
+        go in BEGINNING, agent_inferred rules go in MIDDLE.
         """
         space = _make_space(db_session)
         agent = _make_agent(
@@ -58,9 +61,15 @@ class TestAttentionOptimizedOrdering:
             mcp_tools=["search"],
         )
 
-        # Create a behavioral rule
+        # Create a user-confirmed rule (BEGINNING section)
         behavioral_rule_service.create_rule(
-            db_session, agent_id=agent.id, rule="Always be concise"
+            db_session, agent_id=agent.id, rule="Always be concise",
+            origin="user_confirmed",
+        )
+        # Create an agent-inferred rule (MIDDLE section)
+        behavioral_rule_service.create_rule(
+            db_session, agent_id=agent.id, rule="Use markdown formatting",
+            origin="agent_inferred",
         )
 
         # Create conversation with summary
@@ -84,17 +93,22 @@ class TestAttentionOptimizedOrdering:
 
         result = assemble_context(db_session, agent_id=agent.id, space_id=space.id)
 
-        # Verify ordering: Agent identity < Behavioral Rules < Tools < Summaries < Facts < Todos
+        # Verify ordering:
+        # BEGINNING: Agent identity < Confirmed Rules < Tools
+        # MIDDLE: Inferred Rules < Summaries < Space facts < Global facts
+        # END: Todos
         agent_pos = result.index("## Agent: OrderAgent")
-        rules_pos = result.index("## Behavioral Rules")
+        confirmed_rules_pos = result.index("## Behavioral Rules (Confirmed)")
         tools_pos = result.index("## Available Tools")
+        inferred_rules_pos = result.index("## Behavioral Rules (Inferred)")
         summary_pos = result.index("## Recent Conversations")
         space_facts_pos = result.index("## Space Facts")
         global_facts_pos = result.index("## Global Facts")
         todo_pos = result.index("## Current Tasks")
 
-        assert agent_pos < rules_pos < tools_pos
-        assert tools_pos < summary_pos < space_facts_pos < global_facts_pos
+        assert agent_pos < confirmed_rules_pos < tools_pos
+        assert tools_pos < inferred_rules_pos < summary_pos
+        assert summary_pos < space_facts_pos < global_facts_pos
         assert global_facts_pos < todo_pos
 
 

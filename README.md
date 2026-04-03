@@ -4,7 +4,7 @@ Personal AI command center. Manage work across multiple spaces, interact with AI
 
 ## Status
 
-**Phases 0–7 complete.** Core backend, agent system, frontend, memory architecture, records/documents/search, space layouts, unified item model, agent builder, sub-agent delegation, steering, automations, polish, backup, and E2E tests all built and reviewed.
+**Phases 0–7 complete.** Core backend, agent system, frontend, memory architecture, records/documents/search, space layouts, unified item model, agent builder, sub-agent delegation, steering, automations, polish, backup, and E2E tests all built and reviewed. **Phase 8+ (Autonomous Agent Operations) in planning** — see [AUTONOMOUS-AGENTS.md](AUTONOMOUS-AGENTS.md).
 
 See [PROGRESS.md](PROGRESS.md) for detailed build status and [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) for the full task breakdown. See [guide.md](guide.md) for usage documentation.
 
@@ -15,6 +15,8 @@ See [PROGRESS.md](PROGRESS.md) for detailed build status and [IMPLEMENTATION-PLA
 - **[ARCHITECTURE-PROPOSAL.md](ARCHITECTURE-PROPOSAL.md)** — how it's built (v4, updated with four-tier memory, context safety, and new flows)
 - **[CAPABILITIES-ADDENDUM.md](CAPABILITIES-ADDENDUM.md)** — product-level research report on the agent intelligence capabilities (rationale, user experience descriptions, competitive context, sources)
 - **[IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)** — phase-by-phase build plan (59 tasks across 9 phases)
+- **[AUTONOMOUS-AGENTS.md](AUTONOMOUS-AGENTS.md)** — autonomous agent operations design (Phase 8+, draft)
+- **[IMPLEMENTATION-PLAN-PHASE8.md](IMPLEMENTATION-PLAN-PHASE8.md)** — Phase 8 implementation plan
 
 ## Key Concepts
 
@@ -25,6 +27,7 @@ See [PROGRESS.md](PROGRESS.md) for detailed build status and [IMPLEMENTATION-PLA
 - **Conversations** — persistent chat threads with agents. Context survives across sessions via four-tier memory and conversation summaries.
 - **Documents** — uploaded files, scanned directories, or synced Google Drive folders. Text extracted and indexed for search.
 - **Automations** — scheduled or event-triggered agent runs (daily briefing, stale work check, follow-up reminders, etc.).
+- **Autonomous Agents** — Agents can pursue goals independently over hours. Give an agent an objective, it builds a task list, works through items, adapts its plan, and reports back. Built on three autonomy tiers (interactive, supervised, autonomous) with permission narrowing, compaction for indefinite sessions, and safety controls (kill switch, audit logging, approval queues).
 
 ## Memory Architecture
 

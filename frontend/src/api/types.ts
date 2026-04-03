@@ -13,7 +13,7 @@ export interface paths {
         };
         /**
          * Get Running Sessions
-         * @description Return all active/queued sessions from in-memory tracking.
+         * @description Return all running sessions from DB queries.
          */
         get: operations["get_running_sessions_api_v1_agents_running_get"];
         put?: never;
@@ -129,6 +129,23 @@ export interface paths {
         patch: operations["resolve_permission_request_api_v1_agents_permission_requests__request_id__patch"];
         trace?: never;
     };
+    "/api/v1/audit-log": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Audit Log */
+        get: operations["list_audit_log_api_v1_audit_log_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/automations": {
         parameters: {
             query?: never;
@@ -198,6 +215,42 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/{agent_id}/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Rules */
+        get: operations["list_rules_api_v1_agents__agent_id__rules_get"];
+        put?: never;
+        /** Create Rule */
+        post: operations["create_rule_api_v1_agents__agent_id__rules_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agents/{agent_id}/rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Delete Rule */
+        delete: operations["delete_rule_api_v1_agents__agent_id__rules__rule_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Rule */
+        patch: operations["update_rule_api_v1_agents__agent_id__rules__rule_id__patch"];
         trace?: never;
     };
     "/api/v1/conversations": {
@@ -1043,6 +1096,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/stats/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Token Stats
+         * @description Return aggregated token usage, optionally filtered by agent, space, period.
+         */
+        get: operations["get_token_stats_api_v1_stats_tokens_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/stats/tokens/daily": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Daily Token Stats
+         * @description Return token usage bucketed by day for sparkline rendering.
+         */
+        get: operations["get_daily_token_stats_api_v1_stats_tokens_daily_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/system/backup-status": {
         parameters: {
             query?: never;
@@ -1055,6 +1148,66 @@ export interface paths {
          * @description Return the last backup timestamp and whether a backup is needed.
          */
         get: operations["get_backup_status_api_v1_system_backup_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/emergency-stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Emergency Stop
+         * @description Activate the system-wide kill switch. Halts all background work.
+         */
+        post: operations["emergency_stop_api_v1_system_emergency_stop_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume System
+         * @description Clear the kill switch and re-enable background work.
+         */
+        post: operations["resume_system_api_v1_system_resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/system/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get System Status
+         * @description Return current system state (paused/active, active session count).
+         */
+        get: operations["get_system_status_api_v1_system_status_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1139,9 +1292,11 @@ export interface components {
             /** Default Model */
             default_model: string;
             /** Tools */
-            tools: unknown[] | null;
+            tools: string[] | null;
             /** Mcp Tools */
-            mcp_tools: unknown[] | null;
+            mcp_tools: string[] | null;
+            /** Skill Path */
+            skill_path?: string | null;
             /** Status */
             status: string;
             /**
@@ -1171,6 +1326,30 @@ export interface components {
             mcp_tools?: string[] | null;
             /** Status */
             status?: string | null;
+        };
+        /** AuditLogResponse */
+        AuditLogResponse: {
+            /** Id */
+            id: string;
+            /** Agent Id */
+            agent_id: string;
+            /** Conversation Id */
+            conversation_id: string | null;
+            /** Background Task Id */
+            background_task_id: string | null;
+            /** Tool Name */
+            tool_name: string;
+            /** Action */
+            action: string;
+            /** Resource Id */
+            resource_id: string | null;
+            /** Input Summary */
+            input_summary: string | null;
+            /**
+             * Timestamp
+             * Format: date-time
+             */
+            timestamp: string;
         };
         /** AutomationCreate */
         AutomationCreate: {
@@ -1299,6 +1478,58 @@ export interface components {
             /** Needs Backup */
             needs_backup: boolean;
         };
+        /** BehavioralRuleCreate */
+        BehavioralRuleCreate: {
+            /** Rule */
+            rule: string;
+            /** @default correction */
+            source_type: components["schemas"]["RuleSourceType"];
+            /** Source Conversation Id */
+            source_conversation_id?: string | null;
+            /** @default user_confirmed */
+            origin: components["schemas"]["RuleOrigin"] | null;
+        };
+        /** BehavioralRuleResponse */
+        BehavioralRuleResponse: {
+            /** Id */
+            id: string;
+            /** Agent Id */
+            agent_id: string;
+            /** Rule */
+            rule: string;
+            /** Source Type */
+            source_type: string;
+            /** Origin */
+            origin: string;
+            /** Source Conversation Id */
+            source_conversation_id: string | null;
+            /** Confidence */
+            confidence: number;
+            /** Apply Count */
+            apply_count: number;
+            /** Last Applied */
+            last_applied: string | null;
+            /** Is Active */
+            is_active: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /** BehavioralRuleUpdate */
+        BehavioralRuleUpdate: {
+            /** Rule */
+            rule?: string | null;
+            /** Is Active */
+            is_active?: boolean | null;
+            origin?: components["schemas"]["RuleOrigin"] | null;
+        };
         /** Body_upload_document_api_v1_documents_upload_post */
         Body_upload_document_api_v1_documents_upload_post: {
             /** File */
@@ -1350,13 +1581,13 @@ export interface components {
             /** Space Id */
             space_id: string | null;
             /** Conversation Id */
-            conversation_id: string;
+            conversation_id: string | null;
             /** Summary */
             summary: string;
             /** Decisions */
-            decisions: unknown[] | null;
+            decisions: string[] | null;
             /** Open Questions */
-            open_questions: unknown[] | null;
+            open_questions: string[] | null;
             /** Is Meta Summary */
             is_meta_summary: boolean;
             /**
@@ -1411,6 +1642,37 @@ export interface components {
             updated_at: string;
             /** Closed At */
             closed_at: string | null;
+        };
+        /**
+         * ConversationStatus
+         * @enum {string}
+         */
+        ConversationStatus: "active" | "closed" | "interrupted";
+        /**
+         * DailyTokenBucket
+         * @description Token usage for a single day.
+         */
+        DailyTokenBucket: {
+            /** Date */
+            date: string;
+            /** Total Input Tokens */
+            total_input_tokens: number;
+            /** Total Output Tokens */
+            total_output_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+        };
+        /**
+         * DailyTokenStatsResponse
+         * @description Daily-bucketed token usage for sparkline rendering.
+         */
+        DailyTokenStatsResponse: {
+            /** Days */
+            days: number;
+            /** Buckets */
+            buckets: components["schemas"]["DailyTokenBucket"][];
+            /** Total Tokens */
+            total_tokens: number;
         };
         /** DashboardResponse */
         DashboardResponse: {
@@ -1583,6 +1845,15 @@ export interface components {
             /** Removed */
             removed: number;
         };
+        /** EmergencyStopResponse */
+        EmergencyStopResponse: {
+            /** Paused */
+            paused: boolean;
+            /** Tasks Interrupted */
+            tasks_interrupted: number;
+            /** Interrupted Task Ids */
+            interrupted_task_ids: string[];
+        };
         /**
          * GrantLevel
          * @enum {string}
@@ -1652,11 +1923,8 @@ export interface components {
         ItemLinkCreate: {
             /** Target Item Id */
             target_item_id: string;
-            /**
-             * Link Type
-             * @default related_to
-             */
-            link_type: string;
+            /** @default related_to */
+            link_type: components["schemas"]["LinkType"];
         };
         /** ItemLinkResponse */
         ItemLinkResponse: {
@@ -1666,8 +1934,7 @@ export interface components {
             source_item_id: string;
             /** Target Item Id */
             target_item_id: string;
-            /** Link Type */
-            link_type: string;
+            link_type: components["schemas"]["LinkType"];
             /**
              * Created At
              * Format: date-time
@@ -1685,8 +1952,7 @@ export interface components {
             id: string;
             /** Space Id */
             space_id: string;
-            /** Item Type */
-            item_type: string;
+            item_type: components["schemas"]["ItemType"];
             /** Is Agent Task */
             is_agent_task: boolean;
             /** Is Done */
@@ -1768,6 +2034,11 @@ export interface components {
             /** Widgets */
             widgets: components["schemas"]["WidgetResponse"][];
         };
+        /**
+         * LinkType
+         * @enum {string}
+         */
+        LinkType: "related_to";
         /** MemoryCreate */
         MemoryCreate: {
             /** Namespace */
@@ -1783,13 +2054,6 @@ export interface components {
              * @default user
              */
             source: string;
-            /**
-             * Importance
-             * @default 0.5
-             */
-            importance: number;
-            /** Category */
-            category?: string | null;
         };
         /** MemoryHealthResponse */
         MemoryHealthResponse: {
@@ -1963,6 +2227,33 @@ export interface components {
             /** Linked Items */
             linked_items: components["schemas"]["ItemResponse"][];
         };
+        /**
+         * RuleOrigin
+         * @enum {string}
+         */
+        RuleOrigin: "agent_inferred" | "user_confirmed" | "system";
+        /**
+         * RuleSourceType
+         * @enum {string}
+         */
+        RuleSourceType: "correction" | "validation";
+        /** RunningSessionResponse */
+        RunningSessionResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Agent Id */
+            agent_id: string;
+            /** Space Id */
+            space_id: string | null;
+            /** Sdk Session Id */
+            sdk_session_id: string | null;
+            /** Status */
+            status: string;
+            /** Started At */
+            started_at: string;
+            /** Last Activity */
+            last_activity: string;
+        };
         /** ScanResponse */
         ScanResponse: {
             /** New Count */
@@ -2070,6 +2361,13 @@ export interface components {
             /** Message */
             message: string;
         };
+        /** SteerResponse */
+        SteerResponse: {
+            /** Status */
+            status: string;
+            /** Conversation Id */
+            conversation_id: string;
+        };
         /** SummaryResponse */
         SummaryResponse: {
             /** Id */
@@ -2081,9 +2379,9 @@ export interface components {
             /** Summary */
             summary: string;
             /** Decisions */
-            decisions: unknown[] | null;
+            decisions: string[] | null;
             /** Open Questions */
-            open_questions: unknown[] | null;
+            open_questions: string[] | null;
             /** Is Checkpoint */
             is_checkpoint: boolean;
             /** Is Meta Summary */
@@ -2095,6 +2393,56 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** SystemResumeResponse */
+        SystemResumeResponse: {
+            /** Paused */
+            paused: boolean;
+        };
+        /** SystemStatusResponse */
+        SystemStatusResponse: {
+            /** Paused */
+            paused: boolean;
+            /** Active Sessions */
+            active_sessions: number;
+        };
+        /**
+         * TokenStatsBucket
+         * @description A single bucket of aggregated token usage.
+         */
+        TokenStatsBucket: {
+            /** Agent Id */
+            agent_id?: string | null;
+            /** Agent Name */
+            agent_name?: string | null;
+            /** Space Id */
+            space_id?: string | null;
+            /** Space Name */
+            space_name?: string | null;
+            /** Total Input Tokens */
+            total_input_tokens: number;
+            /** Total Output Tokens */
+            total_output_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
+            /** Message Count */
+            message_count: number;
+        };
+        /**
+         * TokenStatsResponse
+         * @description Aggregated token usage stats.
+         */
+        TokenStatsResponse: {
+            /** Period */
+            period: string;
+            /** Buckets */
+            buckets: components["schemas"]["TokenStatsBucket"][];
+            /** Total Input Tokens */
+            total_input_tokens: number;
+            /** Total Output Tokens */
+            total_output_tokens: number;
+            /** Total Tokens */
+            total_tokens: number;
         };
         /** TriggerResponse */
         TriggerResponse: {
@@ -2196,9 +2544,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: unknown;
-                    }[];
+                    "application/json": components["schemas"]["RunningSessionResponse"][];
                 };
             };
         };
@@ -2491,6 +2837,43 @@ export interface operations {
             };
         };
     };
+    list_audit_log_api_v1_audit_log_get: {
+        parameters: {
+            query?: {
+                agent_id?: string | null;
+                conversation_id?: string | null;
+                tool_name?: string | null;
+                after?: string | null;
+                before?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditLogResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_automations_api_v1_automations_get: {
         parameters: {
             query?: {
@@ -2717,11 +3100,145 @@ export interface operations {
             };
         };
     };
+    list_rules_api_v1_agents__agent_id__rules_get: {
+        parameters: {
+            query?: {
+                active_only?: boolean;
+            };
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BehavioralRuleResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_rule_api_v1_agents__agent_id__rules_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BehavioralRuleCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BehavioralRuleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_rule_api_v1_agents__agent_id__rules__rule_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_rule_api_v1_agents__agent_id__rules__rule_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BehavioralRuleUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BehavioralRuleResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_conversations_api_v1_conversations_get: {
         parameters: {
             query?: {
                 space_id?: string | null;
-                status?: string | null;
+                status?: components["schemas"]["ConversationStatus"] | null;
                 limit?: number;
                 offset?: number;
             };
@@ -2817,7 +3334,10 @@ export interface operations {
     };
     get_messages_api_v1_conversations__conversation_id__messages_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
             header?: never;
             path: {
                 conversation_id: string;
@@ -2902,7 +3422,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["SteerResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2980,7 +3500,10 @@ export interface operations {
     };
     get_summaries_api_v1_conversations__conversation_id__summaries_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+                offset?: number;
+            };
             header?: never;
             path: {
                 conversation_id: string;
@@ -3441,6 +3964,8 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                    "text/plain": unknown;
+                    "application/octet-stream": unknown;
                 };
             };
             /** @description Validation Error */
@@ -3959,6 +4484,7 @@ export interface operations {
             query?: {
                 namespace?: string | null;
                 search?: string | null;
+                include_archived?: boolean;
                 limit?: number;
                 offset?: number;
             };
@@ -4540,6 +5066,7 @@ export interface operations {
                 /** @description Filter by type: messages, summaries, memory, documents */
                 type?: string | null;
                 limit?: number;
+                offset?: number;
             };
             header?: never;
             path?: never;
@@ -4766,7 +5293,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": unknown[];
                 };
             };
             /** @description Validation Error */
@@ -4811,6 +5338,70 @@ export interface operations {
             };
         };
     };
+    get_token_stats_api_v1_stats_tokens_get: {
+        parameters: {
+            query?: {
+                agent_id?: string | null;
+                space_id?: string | null;
+                period?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenStatsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_daily_token_stats_api_v1_stats_tokens_daily_get: {
+        parameters: {
+            query?: {
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DailyTokenStatsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_backup_status_api_v1_system_backup_status_get: {
         parameters: {
             query?: never;
@@ -4827,6 +5418,66 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupStatusResponse"];
+                };
+            };
+        };
+    };
+    emergency_stop_api_v1_system_emergency_stop_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EmergencyStopResponse"];
+                };
+            };
+        };
+    };
+    resume_system_api_v1_system_resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemResumeResponse"];
+                };
+            };
+        };
+    };
+    get_system_status_api_v1_system_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SystemStatusResponse"];
                 };
             };
         };

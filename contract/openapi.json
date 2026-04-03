@@ -11,7 +11,7 @@
           "agents"
         ],
         "summary": "Get Running Sessions",
-        "description": "Return all active/queued sessions from in-memory tracking.",
+        "description": "Return all running sessions from DB queries.",
         "operationId": "get_running_sessions_api_v1_agents_running_get",
         "responses": {
           "200": {
@@ -411,6 +411,147 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PermissionRequestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/audit-log": {
+      "get": {
+        "tags": [
+          "audit"
+        ],
+        "summary": "List Audit Log",
+        "operationId": "list_audit_log_api_v1_audit_log_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "conversation_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "tool_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Tool Name"
+            }
+          },
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AuditLogResponse"
+                  },
+                  "title": "Response List Audit Log Api V1 Audit Log Get"
                 }
               }
             }
@@ -4318,6 +4459,128 @@
         }
       }
     },
+    "/api/v1/stats/tokens": {
+      "get": {
+        "tags": [
+          "stats"
+        ],
+        "summary": "Get Token Stats",
+        "description": "Return aggregated token usage, optionally filtered by agent, space, period.",
+        "operationId": "get_token_stats_api_v1_stats_tokens_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "space_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Space Id"
+            }
+          },
+          {
+            "name": "period",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "24h",
+              "title": "Period"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenStatsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/stats/tokens/daily": {
+      "get": {
+        "tags": [
+          "stats"
+        ],
+        "summary": "Get Daily Token Stats",
+        "description": "Return token usage bucketed by day for sparkline rendering.",
+        "operationId": "get_daily_token_stats_api_v1_stats_tokens_daily_get",
+        "parameters": [
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 90,
+              "minimum": 1,
+              "default": 7,
+              "title": "Days"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DailyTokenStatsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/system/backup-status": {
       "get": {
         "tags": [
@@ -4333,6 +4596,72 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/BackupStatusResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/emergency-stop": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Emergency Stop",
+        "description": "Activate the system-wide kill switch. Halts all background work.",
+        "operationId": "emergency_stop_api_v1_system_emergency_stop_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EmergencyStopResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/resume": {
+      "post": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Resume System",
+        "description": "Clear the kill switch and re-enable background work.",
+        "operationId": "resume_system_api_v1_system_resume_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemResumeResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/system/status": {
+      "get": {
+        "tags": [
+          "system"
+        ],
+        "summary": "Get System Status",
+        "description": "Return current system state (paused/active, active session count).",
+        "operationId": "get_system_status_api_v1_system_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SystemStatusResponse"
                 }
               }
             }
@@ -4699,6 +5028,88 @@
         },
         "type": "object",
         "title": "AgentUpdate"
+      },
+      "AuditLogResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conversation Id"
+          },
+          "background_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background Task Id"
+          },
+          "tool_name": {
+            "type": "string",
+            "title": "Tool Name"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "resource_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resource Id"
+          },
+          "input_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Input Summary"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "conversation_id",
+          "background_task_id",
+          "tool_name",
+          "action",
+          "resource_id",
+          "input_summary",
+          "timestamp"
+        ],
+        "title": "AuditLogResponse"
       },
       "AutomationCreate": {
         "properties": {
@@ -5177,6 +5588,17 @@
               }
             ],
             "title": "Source Conversation Id"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "user_confirmed"
           }
         },
         "type": "object",
@@ -5202,6 +5624,10 @@
           "source_type": {
             "type": "string",
             "title": "Source Type"
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin"
           },
           "source_conversation_id": {
             "anyOf": [
@@ -5255,6 +5681,7 @@
           "agent_id",
           "rule",
           "source_type",
+          "origin",
           "source_conversation_id",
           "confidence",
           "apply_count",
@@ -5288,6 +5715,16 @@
               }
             ],
             "title": "Is Active"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuleOrigin"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
@@ -5694,6 +6131,62 @@
           "interrupted"
         ],
         "title": "ConversationStatus"
+      },
+      "DailyTokenBucket": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date"
+          },
+          "total_input_tokens": {
+            "type": "integer",
+            "title": "Total Input Tokens"
+          },
+          "total_output_tokens": {
+            "type": "integer",
+            "title": "Total Output Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "total_input_tokens",
+          "total_output_tokens",
+          "total_tokens"
+        ],
+        "title": "DailyTokenBucket",
+        "description": "Token usage for a single day."
+      },
+      "DailyTokenStatsResponse": {
+        "properties": {
+          "days": {
+            "type": "integer",
+            "title": "Days"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/DailyTokenBucket"
+            },
+            "type": "array",
+            "title": "Buckets"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "days",
+          "buckets",
+          "total_tokens"
+        ],
+        "title": "DailyTokenStatsResponse",
+        "description": "Daily-bucketed token usage for sparkline rendering."
       },
       "DashboardResponse": {
         "properties": {
@@ -6219,6 +6712,32 @@
           "removed"
         ],
         "title": "DriveRefreshResponse"
+      },
+      "EmergencyStopResponse": {
+        "properties": {
+          "paused": {
+            "type": "boolean",
+            "title": "Paused"
+          },
+          "tasks_interrupted": {
+            "type": "integer",
+            "title": "Tasks Interrupted"
+          },
+          "interrupted_task_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Interrupted Task Ids"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paused",
+          "tasks_interrupted",
+          "interrupted_task_ids"
+        ],
+        "title": "EmergencyStopResponse"
       },
       "GrantLevel": {
         "type": "string",
@@ -7369,6 +7888,15 @@
         ],
         "title": "RecordChildrenResponse"
       },
+      "RuleOrigin": {
+        "type": "string",
+        "enum": [
+          "agent_inferred",
+          "user_confirmed",
+          "system"
+        ],
+        "title": "RuleOrigin"
+      },
       "RuleSourceType": {
         "type": "string",
         "enum": [
@@ -7888,6 +8416,147 @@
           "created_at"
         ],
         "title": "SummaryResponse"
+      },
+      "SystemResumeResponse": {
+        "properties": {
+          "paused": {
+            "type": "boolean",
+            "title": "Paused"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paused"
+        ],
+        "title": "SystemResumeResponse"
+      },
+      "SystemStatusResponse": {
+        "properties": {
+          "paused": {
+            "type": "boolean",
+            "title": "Paused"
+          },
+          "active_sessions": {
+            "type": "integer",
+            "title": "Active Sessions"
+          }
+        },
+        "type": "object",
+        "required": [
+          "paused",
+          "active_sessions"
+        ],
+        "title": "SystemStatusResponse"
+      },
+      "TokenStatsBucket": {
+        "properties": {
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          },
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Name"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          },
+          "space_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Name"
+          },
+          "total_input_tokens": {
+            "type": "integer",
+            "title": "Total Input Tokens"
+          },
+          "total_output_tokens": {
+            "type": "integer",
+            "title": "Total Output Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          },
+          "message_count": {
+            "type": "integer",
+            "title": "Message Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "total_input_tokens",
+          "total_output_tokens",
+          "total_tokens",
+          "message_count"
+        ],
+        "title": "TokenStatsBucket",
+        "description": "A single bucket of aggregated token usage."
+      },
+      "TokenStatsResponse": {
+        "properties": {
+          "period": {
+            "type": "string",
+            "title": "Period"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/TokenStatsBucket"
+            },
+            "type": "array",
+            "title": "Buckets"
+          },
+          "total_input_tokens": {
+            "type": "integer",
+            "title": "Total Input Tokens"
+          },
+          "total_output_tokens": {
+            "type": "integer",
+            "title": "Total Output Tokens"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "title": "Total Tokens"
+          }
+        },
+        "type": "object",
+        "required": [
+          "period",
+          "buckets",
+          "total_input_tokens",
+          "total_output_tokens",
+          "total_tokens"
+        ],
+        "title": "TokenStatsResponse",
+        "description": "Aggregated token usage stats."
       },
       "TriggerResponse": {
         "properties": {

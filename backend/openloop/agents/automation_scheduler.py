@@ -1,8 +1,8 @@
 """Automation Scheduler — background asyncio loop that fires due cron automations.
 
 Runs every 60 seconds.
-- Skips if any active user conversations exist (they take priority).
-- Respects concurrency limit of MAX_AUTOMATION_SESSIONS (2) running simultaneously.
+- Uses lane-based concurrency manager (automation lane cap: 3).
+- Does NOT yield to interactive conversations — lanes are independent.
 - On startup, detects missed runs and creates notifications for each.
 """
 
@@ -15,9 +15,10 @@ from datetime import UTC, datetime
 from contract.enums import AutomationTriggerType, BackgroundTaskStatus, NotificationType
 from croniter import croniter
 
+from backend.openloop.agents import concurrency_manager
 from backend.openloop.database import SessionLocal
 from backend.openloop.db.models import Notification
-from backend.openloop.services import automation_service, conversation_service, notification_service
+from backend.openloop.services import automation_service, notification_service
 
 logger = logging.getLogger(__name__)
 
@@ -89,20 +90,16 @@ async def _tick() -> None:
     """Single scheduler tick — evaluate all enabled cron automations."""
     db = SessionLocal()
     try:
-        # User conversations take priority — skip this cycle if any are active
-        active_convs = conversation_service.list_conversations(db, status="active", limit=1)
-        if active_convs:
-            logger.debug("Active conversations present — skipping automation cycle")
+        # Kill switch guard (Phase 8.4) — skip all automations while paused
+        from backend.openloop.services import system_service
+
+        if system_service.is_paused(db):
+            logger.debug("System paused — skipping automation cycle")
             return
 
-        # Check running automations count against the concurrency limit
-        # We count by summing running runs across all automations.
-        running_count = _count_running_automations(db)
-        if running_count >= 2:
-            logger.debug(
-                "Automation concurrency limit reached (%d running) — skipping cycle",
-                running_count,
-            )
+        # Check automation lane concurrency via the lane-based manager
+        if not concurrency_manager.acquire_slot(db, "automation"):
+            logger.debug("Automation lane full — skipping cycle")
             return
 
         # Get enabled cron automations
@@ -126,10 +123,9 @@ async def _tick() -> None:
             if not is_due:
                 continue
 
-            # Re-check concurrency limit before each trigger using a fresh DB query
-            running_count = _count_running_automations(db)
-            if running_count >= 2:
-                logger.debug("Concurrency limit reached mid-cycle — stopping")
+            # Re-check concurrency limit before each trigger
+            if not concurrency_manager.acquire_slot(db, "automation"):
+                logger.debug("Automation lane full mid-cycle — stopping")
                 break
 
             logger.info("Triggering automation '%s' (id=%s)", automation.name, automation.id)

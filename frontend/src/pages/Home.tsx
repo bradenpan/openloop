@@ -9,6 +9,7 @@ import { TaskOverview } from '../components/home/todo-overview';
 import { ConversationList } from '../components/home/conversation-list';
 import { WelcomeCard } from '../components/home/welcome-card';
 import { CreateSpaceModal } from '../components/home/create-space-modal';
+import { TokenSparkline } from '../components/home/token-sparkline';
 
 function HomeSkeleton() {
   return (
@@ -113,6 +114,16 @@ export default function Home() {
           Active Agents
         </h2>
         <BackgroundTaskPanel />
+      </section>
+
+      {/* 2b. Token Usage */}
+      <section>
+        <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
+          Token Usage
+        </h2>
+        <div className="max-w-xs">
+          <TokenSparkline />
+        </div>
       </section>
 
       {/* 3. Spaces */}

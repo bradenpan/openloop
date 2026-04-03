@@ -308,7 +308,9 @@ def test_agent_identity_always_present(db_session: Session):
 
     result = assemble_context(db_session, agent_id=agent.id, space_id=space.id)
 
-    assert result.startswith("## Agent: Minimal Agent")
+    # Identity is always the first section (starts the output)
+    assert "## Agent: Minimal Agent" in result
+    assert result.index("## Agent: Minimal Agent") == 0
 
 
 def test_odin_empty_system(db_session: Session):

@@ -294,6 +294,32 @@ def archive_entry(db: Session, entry_id: str) -> MemoryEntry:
 # ---------------------------------------------------------------------------
 
 
+_IMPERATIVE_PATTERN = re.compile(
+    r"^(ignore|override|you must|from now on|disregard|forget)",
+    re.IGNORECASE,
+)
+
+
+def _check_imperative_content(db: Session, namespace: str, content: str) -> None:
+    """Flag memory content that matches imperative instruction patterns.
+
+    Creates a notification for human review. Does NOT block the save.
+    """
+    if _IMPERATIVE_PATTERN.search(content.strip()):
+        from backend.openloop.services import notification_service
+
+        notification_service.create_notification(
+            db,
+            type="context_warning",
+            title="Suspicious memory content detected",
+            body=(
+                f"A memory entry in namespace '{namespace}' matches an imperative "
+                f"instruction pattern and may be a prompt injection attempt.\n\n"
+                f"Content: {content[:500]}"
+            ),
+        )
+
+
 async def save_fact_with_dedup(
     db: Session,
     namespace: str,
@@ -307,9 +333,15 @@ async def save_fact_with_dedup(
     Loads all active facts in the namespace, asks the LLM to compare,
     then executes the appropriate action (ADD, UPDATE, DELETE/supersede, NOOP).
 
+    Before saving, checks content for imperative instruction patterns and
+    creates a notification if suspicious content is detected (does not block save).
+
     Returns (decision, entry) where entry is the resulting MemoryEntry.
     """
     from backend.openloop.services.llm_utils import llm_compare_facts
+
+    # Content validation: flag imperative patterns
+    _check_imperative_content(db, namespace, content)
 
     now = datetime.now(UTC).replace(tzinfo=None)
 

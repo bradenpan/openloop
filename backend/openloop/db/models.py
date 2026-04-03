@@ -395,6 +395,8 @@ class ConversationMessage(Base):
     role: Mapped[str] = mapped_column(String, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     tool_calls: Mapped[dict | None] = mapped_column(SA_JSON, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
 
     # Relationships
@@ -478,6 +480,7 @@ class BehavioralRule(Base):
     )
     rule: Mapped[str] = mapped_column(Text, nullable=False)
     source_type: Mapped[str] = mapped_column(String, nullable=False)
+    origin: Mapped[str] = mapped_column(String, default="agent_inferred", nullable=False)
     source_conversation_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True
     )
@@ -668,6 +671,11 @@ class BackgroundTask(Base):
     parent_task_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("background_tasks.id", ondelete="SET NULL"), nullable=True
     )
+    # Phase 8.4: token budget for background tasks
+    token_budget: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Phase 8.6a: compaction loop fields
+    goal: Mapped[str | None] = mapped_column(Text, nullable=True)
+    time_budget: Mapped[int | None] = mapped_column(Integer, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -682,3 +690,46 @@ class BackgroundTask(Base):
     parent_task: Mapped["BackgroundTask | None"] = relationship(
         "BackgroundTask", remote_side="BackgroundTask.id", lazy="select"
     )
+
+
+# ---------------------------------------------------------------------------
+# 17. audit_log
+# ---------------------------------------------------------------------------
+
+
+class AuditLog(Base):
+    __tablename__ = "audit_log"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    agent_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    conversation_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    background_task_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("background_tasks.id", ondelete="SET NULL"), nullable=True
+    )
+    tool_name: Mapped[str] = mapped_column(String, nullable=False)
+    action: Mapped[str] = mapped_column(String, nullable=False)
+    resource_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    input_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+
+    # Relationships
+    agent: Mapped["Agent"] = relationship("Agent", lazy="select")
+    conversation: Mapped["Conversation | None"] = relationship("Conversation", lazy="select")
+    background_task: Mapped["BackgroundTask | None"] = relationship("BackgroundTask", lazy="select")
+
+
+# ---------------------------------------------------------------------------
+# 18. system_state (Phase 8.4 — kill switch + system flags)
+# ---------------------------------------------------------------------------
+
+
+class SystemState(Base):
+    __tablename__ = "system_state"
+
+    key: Mapped[str] = mapped_column(String, primary_key=True)
+    value: Mapped[dict | None] = mapped_column(SA_JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)

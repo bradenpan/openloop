@@ -49,6 +49,7 @@ class BackgroundTaskStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
 
 
 class NotificationType(StrEnum):
@@ -60,6 +61,7 @@ class NotificationType(StrEnum):
     CONTEXT_WARNING = "context_warning"
     MEMORY_CONSOLIDATION = "memory_consolidation"
     SYSTEM = "system"
+    EMERGENCY_STOP = "emergency_stop"
 
 
 class SSEEventType(StrEnum):
@@ -107,6 +109,12 @@ class MemoryNamespace(StrEnum):
 class RuleSourceType(StrEnum):
     CORRECTION = "correction"
     VALIDATION = "validation"
+
+
+class RuleOrigin(StrEnum):
+    AGENT_INFERRED = "agent_inferred"
+    USER_CONFIRMED = "user_confirmed"
+    SYSTEM = "system"
 
 
 class DedupDecision(StrEnum):
