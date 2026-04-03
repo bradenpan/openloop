@@ -503,9 +503,37 @@ All 8 tasks done across 4 waves of parallel execution. 195 new tests. Security h
 - Task 8.2 agent also created merge migrations for parallel alembic heads from concurrent tasks.
 - Compaction verification logic stripped post-implementation based on OpenClaw pattern analysis — simpler model, same safety properties.
 
+## Phase 9: Autonomous Operations — COMPLETE
+
+**Reference:** [IMPLEMENTATION-PLAN-PHASE8.md](IMPLEMENTATION-PLAN-PHASE8.md) (Phase 9 section) | [AUTONOMOUS-AGENTS.md](AUTONOMOUS-AGENTS.md)
+
+All 6 tasks done across 3 waves of parallel execution. 86 new backend tests, 7 new frontend components. Agents can now pursue goals autonomously.
+
+**Task 9.1 — Schema Extensions:** Added task_list, task_list_version, completed_count, total_count, queued_approvals_count, run_type, run_summary to BackgroundTask. Added max_spawn_depth, heartbeat_enabled, heartbeat_cron to Agent. Created ApprovalQueue table. Added BackgroundTaskRunType, ApprovalStatus enums, SSE event types. 10 tests.
+
+**Task 9.2a — Approval Queue:** Built approval_service.py with create/resolve/batch_resolve/list_pending/expire_stale. Added queue_approval MCP tool. Modified permission_enforcer with autonomous_mode: when enabled, approval-required actions create ApprovalQueue entries instead of blocking. API routes for listing, resolving, and batch operations. 23 tests.
+
+**Task 9.2b — Autonomous Launch Flow:** The core autonomous execution path. launch_autonomous() creates a pending task + clarification conversation. Agent asks clarifying questions, user approves via approve_autonomous_launch(). Agent builds a JSON task list, stores on BackgroundTask, iterates through items with compaction/budgets/progress tracking. PersistentData extractor preserves task list through compaction. update_task_list MCP tool for agent self-management. Per-agent pause/resume. One autonomous run per agent guard. 32 tests.
+
+**Task 9.3 — Heartbeat Protocol:** Added _evaluate_heartbeats to automation_scheduler alongside existing cron evaluation. Agents with heartbeat_enabled=True and heartbeat_cron fire periodic survey prompts. HEARTBEAT_OK = silent completion (no notification). Actions logged in audit + notification. Uses automation concurrency lane. delegate_background now accepts run_type parameter. 21 tests.
+
+**Task 9.4a — Dashboard UI:** Active Agents panel (conditional top placement when agents running, progress bars, pause controls, SSE updates). Activity Feed (audit log stream, agent/time filters, pagination). Pending Approvals (per-entry approve/deny, batch actions, badge count, hidden when empty). Enriched RunningSessionResponse with autonomous fields.
+
+**Task 9.4b — Conversation UI:** Task list sidebar (right side, collapsible, status icons, progress summary, 5s polling + SSE refetch). Autonomous progress header (goal, budget, elapsed time, pause/resume controls). Inline autonomous launch component (goal textarea, optional constraints/budgets). Approve-launch banner (fixed bottom, transitions to autonomous execution). Integration into conversation-panel and conversation-sidebar.
+
+**Code review fixes (post-build):**
+- task-list-sidebar.tsx: `item.label` → `item.title` (field name mismatch with backend)
+- task-list-sidebar.tsx: added `"done"` to status type union (MCP tool uses "done", not "completed")
+- active-agents.tsx: removed misleading "Stop" button that actually called pause endpoint
+
+**Deviations from plan:**
+- Task 9.2a agent also added the autonomous_mode permission path that was spec'd for the task
+- Task 9.2b is the largest single task in the plan (~130k tokens, 89 tool calls) — built the full autonomous loop, MCP tool, API routes, schemas, and PersistentData extractor in one pass
+- Code review caught a frontend field name mismatch that would have made the task list sidebar non-functional — fixed before proceeding
+
 ## Current State
 
-- **~1100+ backend tests passing**, lint clean on new code
+- **~1190+ backend tests passing**, lint clean on new code
 - **63 Playwright E2E tests passing** (new comprehensive suite) + 39 prior component tests
 - **OpenAPI spec freshly regenerated** from current routes
 - Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes
@@ -533,3 +561,6 @@ All 8 tasks done across 4 waves of parallel execution. 195 new tests. Security h
 16. **Compaction follows the OpenClaw pattern** — instructions stored externally (BackgroundTask.goal), re-injected each turn via continuation prompts. Compaction only summarizes conversation history, never instructions. No post-compaction verification needed — the goal is never at risk because it comes from the DB, not the context window.
 17. **Concurrency lanes are independent** — interactive, autonomous, automation, and subagent work each have their own lane with separate caps. No lane blocks another. The old yield-to-interactive model (automations paused during user conversations) was removed.
 18. **Audit logging via permission enforcer** — every tool call decision (allow/deny) is logged in the audit_log table with redacted inputs. Provides the data foundation for the activity feed and overnight summaries in Phase 9+.
+19. **Autonomous launch is a conversation, not a form** — the user gives a goal, the agent asks clarifying questions, the user approves. The clarification IS the scoping mechanism. No per-run configuration UI needed.
+20. **Approval queue is non-blocking** — autonomous agents queue actions outside their permissions and continue with other work. The user approves/denies from the dashboard in batch. Agents don't wait.
+21. **Heartbeat cron expression controls working hours** — no separate working-hours feature needed. `*/30 9-17 * * 1-5` = business hours only.
