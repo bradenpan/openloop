@@ -42,6 +42,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agents/{agent_id}/autonomous": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Launch Autonomous
+         * @description Start an autonomous launch conversation for an agent.
+         *
+         *     Creates a conversation for goal clarification. The agent does NOT
+         *     start autonomous execution until approve-launch is called.
+         */
+        post: operations["launch_autonomous_api_v1_agents__agent_id__autonomous_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/agents/{agent_id}": {
         parameters: {
             query?: never;
@@ -127,6 +150,141 @@ export interface paths {
         head?: never;
         /** Resolve Permission Request */
         patch: operations["resolve_permission_request_api_v1_agents_permission_requests__request_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/approval-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Pending */
+        get: operations["list_pending_api_v1_approval_queue_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/approval-queue/{approval_id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve Approval */
+        post: operations["resolve_approval_api_v1_approval_queue__approval_id__resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/approval-queue/batch-resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Batch Resolve */
+        post: operations["batch_resolve_api_v1_approval_queue_batch_resolve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/background-tasks/{task_id}/approve-launch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve Launch
+         * @description Approve an autonomous launch — transitions from clarification to execution.
+         */
+        post: operations["approve_launch_api_v1_background_tasks__task_id__approve_launch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/background-tasks/{task_id}/task-list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Task List
+         * @description Return the current task list for an autonomous run.
+         */
+        get: operations["get_task_list_api_v1_background_tasks__task_id__task_list_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Task List
+         * @description User can modify the task list mid-run.
+         */
+        patch: operations["update_task_list_api_v1_background_tasks__task_id__task_list_patch"];
+        trace?: never;
+    };
+    "/api/v1/background-tasks/{task_id}/pause": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Pause Task
+         * @description Pause a running autonomous task at the next turn boundary.
+         */
+        post: operations["pause_task_api_v1_background_tasks__task_id__pause_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/background-tasks/{task_id}/resume": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resume Task
+         * @description Resume a paused autonomous task.
+         */
+        post: operations["resume_task_api_v1_background_tasks__task_id__resume_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/audit-log": {
@@ -1300,6 +1458,18 @@ export interface components {
             /** Status */
             status: string;
             /**
+             * Max Spawn Depth
+             * @default 1
+             */
+            max_spawn_depth: number;
+            /**
+             * Heartbeat Enabled
+             * @default false
+             */
+            heartbeat_enabled: boolean;
+            /** Heartbeat Cron */
+            heartbeat_cron?: string | null;
+            /**
              * Created At
              * Format: date-time
              */
@@ -1326,7 +1496,66 @@ export interface components {
             mcp_tools?: string[] | null;
             /** Status */
             status?: string | null;
+            /** Max Spawn Depth */
+            max_spawn_depth?: number | null;
+            /** Heartbeat Enabled */
+            heartbeat_enabled?: boolean | null;
+            /** Heartbeat Cron */
+            heartbeat_cron?: string | null;
         };
+        /** ApprovalBatchResolveRequest */
+        ApprovalBatchResolveRequest: {
+            /** Approval Ids */
+            approval_ids: string[];
+            status: components["schemas"]["ApprovalStatus"];
+            /**
+             * Resolved By
+             * @default user
+             */
+            resolved_by: string | null;
+        };
+        /** ApprovalQueueResponse */
+        ApprovalQueueResponse: {
+            /** Id */
+            id: string;
+            /** Background Task Id */
+            background_task_id: string;
+            /** Agent Id */
+            agent_id: string;
+            /** Action Type */
+            action_type: string;
+            /** Action Detail */
+            action_detail: {
+                [key: string]: unknown;
+            } | null;
+            /** Reason */
+            reason: string | null;
+            /** Status */
+            status: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** Resolved By */
+            resolved_by: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+        };
+        /** ApprovalResolveRequest */
+        ApprovalResolveRequest: {
+            status: components["schemas"]["ApprovalStatus"];
+            /**
+             * Resolved By
+             * @default user
+             */
+            resolved_by: string | null;
+        };
+        /**
+         * ApprovalStatus
+         * @enum {string}
+         */
+        ApprovalStatus: "pending" | "approved" | "denied" | "expired";
         /** AuditLogResponse */
         AuditLogResponse: {
             /** Id */
@@ -1468,6 +1697,24 @@ export interface components {
             model_override?: string | null;
             /** Enabled */
             enabled?: boolean | null;
+        };
+        /** AutonomousLaunchRequest */
+        AutonomousLaunchRequest: {
+            /** Goal */
+            goal: string;
+            /** Constraints */
+            constraints?: string | null;
+            /** Token Budget */
+            token_budget?: number | null;
+            /** Time Budget */
+            time_budget?: number | null;
+        };
+        /** AutonomousLaunchResponse */
+        AutonomousLaunchResponse: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Task Id */
+            task_id: string;
         };
         /** BackupStatusResponse */
         BackupStatusResponse: {
@@ -2253,6 +2500,18 @@ export interface components {
             started_at: string;
             /** Last Activity */
             last_activity: string;
+            /** Run Type */
+            run_type?: string | null;
+            /** Background Task Id */
+            background_task_id?: string | null;
+            /** Instruction */
+            instruction?: string | null;
+            /** Completed Count */
+            completed_count?: number | null;
+            /** Total Count */
+            total_count?: number | null;
+            /** Token Budget */
+            token_budget?: number | null;
         };
         /** ScanResponse */
         ScanResponse: {
@@ -2405,6 +2664,31 @@ export interface components {
             paused: boolean;
             /** Active Sessions */
             active_sessions: number;
+        };
+        /** TaskListResponse */
+        TaskListResponse: {
+            /** Task List */
+            task_list?: unknown[] | null;
+            /**
+             * Task List Version
+             * @default 0
+             */
+            task_list_version: number;
+            /**
+             * Completed Count
+             * @default 0
+             */
+            completed_count: number;
+            /**
+             * Total Count
+             * @default 0
+             */
+            total_count: number;
+        };
+        /** TaskListUpdateRequest */
+        TaskListUpdateRequest: {
+            /** Task List */
+            task_list: unknown[];
         };
         /**
          * TokenStatsBucket
@@ -2601,6 +2885,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AgentResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    launch_autonomous_api_v1_agents__agent_id__autonomous_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agent_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AutonomousLaunchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutonomousLaunchResponse"];
                 };
             };
             /** @description Validation Error */
@@ -2825,6 +3144,263 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["PermissionRequestResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_pending_api_v1_approval_queue_get: {
+        parameters: {
+            query?: {
+                agent_id?: string | null;
+                background_task_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalQueueResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resolve_approval_api_v1_approval_queue__approval_id__resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                approval_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalQueueResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    batch_resolve_api_v1_approval_queue_batch_resolve_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApprovalBatchResolveRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalQueueResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    approve_launch_api_v1_background_tasks__task_id__approve_launch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AutonomousLaunchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_task_list_api_v1_background_tasks__task_id__task_list_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_task_list_api_v1_background_tasks__task_id__task_list_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TaskListUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TaskListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    pause_task_api_v1_background_tasks__task_id__pause_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resume_task_api_v1_background_tasks__task_id__resume_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                task_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

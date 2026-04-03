@@ -3,6 +3,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
 import { useSSEEvent, type SSEEvent } from '../../hooks/use-sse';
 import { ConversationHeader } from './conversation-header';
+import { AutonomousHeader } from './autonomous-header';
+import { TaskListSidebar } from './task-list-sidebar';
+import { ApproveLaunchBanner } from './approve-launch-banner';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
 
@@ -23,11 +26,56 @@ export interface ApprovalRequestState {
 
 interface ConversationPanelProps {
   conversationId: string;
+  /** If this conversation is linked to an autonomous run, pass the task ID */
+  taskId?: string | null;
+  /** Goal text for autonomous header display */
+  autonomousGoal?: string | null;
+  /** ISO timestamp when the autonomous run started */
+  autonomousStartedAt?: string | null;
+  /** Token budget for the autonomous run (null = unlimited) */
+  autonomousTokenBudget?: number | null;
+  /** Time budget in seconds (null = unlimited) */
+  autonomousTimeBudget?: number | null;
+  /** Current status of the background task */
+  autonomousStatus?: 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'pending' | null;
   onClose?: () => void;
 }
 
-export function ConversationPanel({ conversationId, onClose }: ConversationPanelProps) {
+export function ConversationPanel({
+  conversationId,
+  taskId = null,
+  autonomousGoal = null,
+  autonomousStartedAt = null,
+  autonomousTokenBudget = null,
+  autonomousTimeBudget = null,
+  autonomousStatus: initialAutonomousStatus = null,
+  onClose,
+}: ConversationPanelProps) {
   const queryClient = useQueryClient();
+
+  // Autonomous run state
+  const isAutonomous = taskId != null;
+  const [autonomousStatus, setAutonomousStatus] = useState(initialAutonomousStatus);
+  const [taskListCollapsed, setTaskListCollapsed] = useState(false);
+
+  // Keep autonomous status in sync with prop changes
+  useEffect(() => { setAutonomousStatus(initialAutonomousStatus); }, [initialAutonomousStatus]);
+
+  // Fetch task list counts for the autonomous header
+  const taskListQuery = $api.useQuery(
+    'get',
+    '/api/v1/background-tasks/{task_id}/task-list',
+    { params: { path: { task_id: taskId! } } },
+    { enabled: isAutonomous, refetchInterval: 5_000 },
+  );
+
+  const completedCount = taskListQuery.data?.completed_count ?? 0;
+  const totalCount = taskListQuery.data?.total_count ?? 0;
+
+  const isRunningAutonomous = isAutonomous && (autonomousStatus === 'running' || autonomousStatus === 'paused');
+  const isPendingApproval = isAutonomous && autonomousStatus === 'pending';
+  const showAutonomousHeader = isAutonomous && autonomousStatus != null && autonomousStatus !== 'pending';
+  const showTaskListSidebar = isRunningAutonomous || (isAutonomous && autonomousStatus === 'completed');
 
   // Streaming state
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
@@ -137,6 +185,22 @@ export function ConversationPanel({ conversationId, onClose }: ConversationPanel
     ),
   );
 
+  // Listen for background_update SSE events to track autonomous status changes
+  useSSEEvent(
+    useCallback(
+      (event: SSEEvent) => {
+        if (event.type === 'background_update' && taskId && event.task_id === taskId) {
+          setAutonomousStatus(event.status as typeof autonomousStatus);
+          // Refresh task list on status change
+          queryClient.invalidateQueries({
+            queryKey: ['get', '/api/v1/background-tasks/{task_id}/task-list'],
+          });
+        }
+      },
+      [taskId, queryClient],
+    ),
+  );
+
   // Detect streaming completion: when the messages query returns a new assistant
   // message that matches our streaming content, the backend has persisted it.
   // We use the query's data updates to detect this.
@@ -213,23 +277,70 @@ export function ConversationPanel({ conversationId, onClose }: ConversationPanel
     setApprovalRequests((prev) => prev.filter((r) => r.requestId !== requestId));
   };
 
+  const handleLaunchApproved = (_conversationId: string, _taskId: string) => {
+    setAutonomousStatus('running');
+    // Refetch task list now that execution has started
+    queryClient.invalidateQueries({
+      queryKey: ['get', '/api/v1/background-tasks/{task_id}/task-list'],
+    });
+  };
+
   const inputDisabled = isStreaming || sendMessage.isPending;
 
   return (
-    <div className="flex flex-col h-full bg-background">
-      <ConversationHeader conversationId={conversationId} onClose={onClose} />
-      <MessageList
-        conversationId={conversationId}
-        streamingContent={streamingContent}
-        streamingToolCalls={streamingToolCalls}
-        approvalRequests={approvalRequests}
-        onApprovalRespond={handleApprovalRespond}
-      />
-      <MessageInput
-        conversationId={conversationId}
-        disabled={inputDisabled}
-        onSend={handleSend}
-      />
+    <div className="flex h-full bg-background">
+      {/* Main conversation column */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Header: autonomous or standard */}
+        {showAutonomousHeader ? (
+          <AutonomousHeader
+            taskId={taskId!}
+            goal={autonomousGoal ?? 'Autonomous run'}
+            startedAt={autonomousStartedAt ?? new Date().toISOString()}
+            tokenBudget={autonomousTokenBudget}
+            timeBudget={autonomousTimeBudget}
+            status={autonomousStatus!}
+            completedCount={completedCount}
+            totalCount={totalCount}
+            onClose={onClose}
+          />
+        ) : (
+          <ConversationHeader conversationId={conversationId} onClose={onClose} />
+        )}
+
+        {/* Message list */}
+        <MessageList
+          conversationId={conversationId}
+          streamingContent={streamingContent}
+          streamingToolCalls={streamingToolCalls}
+          approvalRequests={approvalRequests}
+          onApprovalRespond={handleApprovalRespond}
+        />
+
+        {/* Approve & Launch banner for pending autonomous runs */}
+        {isPendingApproval && taskId && (
+          <ApproveLaunchBanner
+            taskId={taskId}
+            onApproved={handleLaunchApproved}
+          />
+        )}
+
+        {/* Message input */}
+        <MessageInput
+          conversationId={conversationId}
+          disabled={inputDisabled}
+          onSend={handleSend}
+        />
+      </div>
+
+      {/* Task list sidebar for autonomous runs */}
+      {showTaskListSidebar && taskId && (
+        <TaskListSidebar
+          taskId={taskId}
+          collapsed={taskListCollapsed}
+          onToggle={() => setTaskListCollapsed((prev) => !prev)}
+        />
+      )}
     </div>
   );
 }

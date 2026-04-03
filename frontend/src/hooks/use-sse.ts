@@ -79,6 +79,32 @@ export interface SSEStreamEndEvent {
   conversation_id: string;
 }
 
+export interface SSEAutonomousProgressEvent {
+  type: 'autonomous_progress';
+  conversation_id: string;
+  task_id: string;
+  completed_count: number;
+  total_count: number;
+  current_item: string | null;
+  summary: string;
+}
+
+export interface SSEApprovalQueuedEvent {
+  type: 'approval_queued';
+  approval_id: string;
+  background_task_id: string;
+  agent_id: string;
+  action_type: string;
+  reason: string | null;
+}
+
+export interface SSEGoalCompleteEvent {
+  type: 'goal_complete';
+  task_id: string;
+  conversation_id: string;
+  summary: string;
+}
+
 export type SSEEvent =
   | SSETokenEvent
   | SSEToolCallEvent
@@ -90,7 +116,10 @@ export type SSEEvent =
   | SSEBackgroundProgressEvent
   | SSERateLimitedEvent
   | SSEErrorEvent
-  | SSEStreamEndEvent;
+  | SSEStreamEndEvent
+  | SSEAutonomousProgressEvent
+  | SSEApprovalQueuedEvent
+  | SSEGoalCompleteEvent;
 
 export type SSEStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 type SSEHandler = (event: SSEEvent) => void;
@@ -124,6 +153,7 @@ const EVENT_TYPES = [
   'token', 'tool_call', 'tool_result', 'approval_request',
   'notification', 'route', 'background_update', 'background_progress',
   'rate_limited', 'error', 'stream_end',
+  'autonomous_progress', 'approval_queued', 'goal_complete',
 ];
 
 function dispatch(event: SSEEvent) {

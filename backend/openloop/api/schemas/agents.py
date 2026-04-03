@@ -33,6 +33,9 @@ class AgentUpdate(BaseModel):
     tools: list[str] | None = None
     mcp_tools: list[str] | None = None
     status: str | None = None
+    max_spawn_depth: int | None = None
+    heartbeat_enabled: bool | None = None
+    heartbeat_cron: str | None = None
 
 
 class AgentResponse(BaseModel):
@@ -47,6 +50,9 @@ class AgentResponse(BaseModel):
     mcp_tools: list[str] | None
     skill_path: str | None = None
     status: str
+    max_spawn_depth: int = 1
+    heartbeat_enabled: bool = False
+    heartbeat_cron: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -103,3 +109,10 @@ class RunningSessionResponse(BaseModel):
     status: str
     started_at: str
     last_activity: str
+    # Phase 9.4a: enriched fields for active agents panel
+    run_type: str | None = None
+    background_task_id: str | None = None
+    instruction: str | None = None
+    completed_count: int | None = None
+    total_count: int | None = None
+    token_budget: int | None = None

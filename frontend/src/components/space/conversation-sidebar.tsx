@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { $api } from '../../api/hooks';
 import { Badge, Button, Panel } from '../ui';
 import { formatDate } from '../../utils/dates';
@@ -11,6 +11,20 @@ interface ConversationSidebarProps {
   onToggle: () => void;
 }
 
+/** Running session shape from /api/v1/agents/running */
+interface RunningSession {
+  conversation_id: string;
+  agent_id: string;
+  run_type: string | null;
+  background_task_id: string | null;
+  instruction: string | null;
+  completed_count: number | null;
+  total_count: number | null;
+  token_budget: number | null;
+  started_at: string;
+  status: string;
+}
+
 export function ConversationSidebar({ spaceId, collapsed, onToggle }: ConversationSidebarProps) {
   const [modalOpen, setModalOpen] = useState(false);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -19,6 +33,28 @@ export function ConversationSidebar({ spaceId, collapsed, onToggle }: Conversati
     params: { query: { space_id: spaceId } },
   });
   const conversations = convsData ?? [];
+
+  // Fetch running sessions to detect autonomous runs linked to conversations
+  const runningSessions = $api.useQuery('get', '/api/v1/agents/running', {}, {
+    refetchInterval: 5_000,
+  });
+
+  // Build a map from conversation_id to running session data for autonomous context
+  const sessionByConvId = useMemo(() => {
+    const map = new Map<string, RunningSession>();
+    if (runningSessions.data) {
+      for (const session of runningSessions.data as unknown as RunningSession[]) {
+        if (session.conversation_id) {
+          map.set(session.conversation_id, session);
+        }
+      }
+    }
+    return map;
+  }, [runningSessions.data]);
+
+  // Get autonomous context for the active conversation
+  const activeSession = activeConversationId ? sessionByConvId.get(activeConversationId) : null;
+  const isActiveAutonomous = activeSession?.run_type === 'autonomous';
 
   function handleClick(conversationId: string) {
     setActiveConversationId((prev) => prev === conversationId ? null : conversationId);
@@ -72,27 +108,36 @@ export function ConversationSidebar({ spaceId, collapsed, onToggle }: Conversati
           </div>
         )}
 
-        {conversations.map((conv) => (
-          <button
-            key={conv.id}
-            onClick={() => handleClick(conv.id)}
-            className="w-full text-left px-3 py-2.5 hover:bg-raised/50 transition-colors border-b border-border/50 cursor-pointer"
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-sm font-medium text-foreground truncate">{conv.name}</span>
-              <Badge
-                variant={conv.status === 'active' ? 'success' : 'info'}
-                className="ml-2 shrink-0"
-              >
-                {conv.status}
-              </Badge>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-muted">
-              <span>{formatDate(conv.created_at)}</span>
-              {conv.model_override && <span>({conv.model_override})</span>}
-            </div>
-          </button>
-        ))}
+        {conversations.map((conv) => {
+          const session = sessionByConvId.get(conv.id);
+          const isAutonomous = session?.run_type === 'autonomous';
+
+          return (
+            <button
+              key={conv.id}
+              onClick={() => handleClick(conv.id)}
+              className="w-full text-left px-3 py-2.5 hover:bg-raised/50 transition-colors border-b border-border/50 cursor-pointer"
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-sm font-medium text-foreground truncate">{conv.name}</span>
+                <div className="flex items-center gap-1 ml-2 shrink-0">
+                  {isAutonomous && (
+                    <Badge variant="warning" className="text-[10px]">auto</Badge>
+                  )}
+                  <Badge
+                    variant={conv.status === 'active' ? 'success' : 'info'}
+                  >
+                    {conv.status}
+                  </Badge>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 text-[11px] text-muted">
+                <span>{formatDate(conv.created_at)}</span>
+                {conv.model_override && <span>({conv.model_override})</span>}
+              </div>
+            </button>
+          );
+        })}
       </div>
 
       <NewConversationModal open={modalOpen} onClose={() => setModalOpen(false)} spaceId={spaceId} />
@@ -101,12 +146,21 @@ export function ConversationSidebar({ spaceId, collapsed, onToggle }: Conversati
       <Panel
         open={!!activeConversationId}
         onClose={() => setActiveConversationId(null)}
-        width="600px"
+        width={isActiveAutonomous ? '900px' : '600px'}
         noPadding
       >
         {activeConversationId && (
           <ConversationPanel
             conversationId={activeConversationId}
+            taskId={isActiveAutonomous ? activeSession?.background_task_id : null}
+            autonomousGoal={isActiveAutonomous ? activeSession?.instruction : null}
+            autonomousStartedAt={isActiveAutonomous ? activeSession?.started_at : null}
+            autonomousTokenBudget={isActiveAutonomous ? (activeSession?.token_budget ?? null) : null}
+            autonomousStatus={
+              isActiveAutonomous
+                ? (activeSession?.status as 'running' | 'paused' | 'completed' | 'failed' | 'cancelled' | 'pending') ?? null
+                : null
+            }
             onClose={() => setActiveConversationId(null)}
           />
         )}

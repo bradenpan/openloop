@@ -7,6 +7,8 @@ from backend.openloop.api.schemas import (
     AgentPermissionSet,
     AgentResponse,
     AgentUpdate,
+    AutonomousLaunchRequest,
+    AutonomousLaunchResponse,
     PermissionRequestResponse,
     PermissionRequestUpdate,
 )
@@ -43,6 +45,37 @@ def list_agents(
 ) -> list[AgentResponse]:
     agents = agent_service.list_agents(db, limit=limit, offset=offset)
     return [AgentResponse.model_validate(a) for a in agents]
+
+
+@router.post("/{agent_id}/autonomous", response_model=AutonomousLaunchResponse, status_code=201)
+async def launch_autonomous(
+    agent_id: str,
+    body: AutonomousLaunchRequest,
+    db: Session = Depends(get_db),
+) -> AutonomousLaunchResponse:
+    """Start an autonomous launch conversation for an agent.
+
+    Creates a conversation for goal clarification. The agent does NOT
+    start autonomous execution until approve-launch is called.
+    """
+    from backend.openloop.agents import agent_runner
+
+    # Validate agent exists
+    agent = agent_service.get_agent(db, agent_id)
+
+    conversation_id, task_id = await agent_runner.launch_autonomous(
+        db,
+        agent_id=agent_id,
+        space_id=agent.spaces[0].id if agent.spaces else None,
+        goal=body.goal,
+        constraints=body.constraints,
+        token_budget=body.token_budget,
+        time_budget=body.time_budget,
+    )
+    return AutonomousLaunchResponse(
+        conversation_id=conversation_id,
+        task_id=task_id,
+    )
 
 
 @router.get("/{agent_id}", response_model=AgentResponse)

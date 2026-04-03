@@ -267,6 +267,10 @@ class Agent(Base):
     tools: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     mcp_tools: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     status: Mapped[str] = mapped_column(String, default="active")
+    # Phase 9.1: autonomous operation fields
+    max_spawn_depth: Mapped[int] = mapped_column(Integer, default=1)
+    heartbeat_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    heartbeat_cron: Mapped[str | None] = mapped_column(String, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -676,6 +680,14 @@ class BackgroundTask(Base):
     # Phase 8.6a: compaction loop fields
     goal: Mapped[str | None] = mapped_column(Text, nullable=True)
     time_budget: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Phase 9.1: autonomous operation fields
+    task_list: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
+    task_list_version: Mapped[int] = mapped_column(Integer, default=0)
+    completed_count: Mapped[int] = mapped_column(Integer, default=0)
+    total_count: Mapped[int] = mapped_column(Integer, default=0)
+    queued_approvals_count: Mapped[int] = mapped_column(Integer, default=0)
+    run_type: Mapped[str] = mapped_column(String, default="task")
+    run_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -690,6 +702,34 @@ class BackgroundTask(Base):
     parent_task: Mapped["BackgroundTask | None"] = relationship(
         "BackgroundTask", remote_side="BackgroundTask.id", lazy="select"
     )
+
+
+# ---------------------------------------------------------------------------
+# 16b. approval_queue (Phase 9.1)
+# ---------------------------------------------------------------------------
+
+
+class ApprovalQueue(Base):
+    __tablename__ = "approval_queue"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    background_task_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("background_tasks.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    agent_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    action_type: Mapped[str] = mapped_column(String, nullable=False)
+    action_detail: Mapped[dict | None] = mapped_column(SA_JSON, nullable=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="pending")
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    resolved_by: Mapped[str | None] = mapped_column(String, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+    # Relationships
+    background_task: Mapped["BackgroundTask"] = relationship("BackgroundTask", lazy="select")
+    agent: Mapped["Agent"] = relationship("Agent", lazy="select")
 
 
 # ---------------------------------------------------------------------------

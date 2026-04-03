@@ -3,7 +3,9 @@ import { $api } from '../api/hooks';
 import { Skeleton } from '../components/ui';
 import { Card, CardBody } from '../components/ui';
 import { AttentionItems } from '../components/home/attention-items';
-import { BackgroundTaskPanel } from '../components/home/background-task-panel';
+import { ActiveAgents, useHasActiveAgents } from '../components/home/active-agents';
+import { ActivityFeed } from '../components/home/activity-feed';
+import { PendingApprovals } from '../components/home/pending-approvals';
 import { SpaceList } from '../components/home/space-list';
 import { TaskOverview } from '../components/home/todo-overview';
 import { ConversationList } from '../components/home/conversation-list';
@@ -72,6 +74,8 @@ export default function Home() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const hasActiveAgents = useHasActiveAgents();
+
   const allLoading = dashboard.isLoading || spaces.isLoading;
 
   const isFirstRun =
@@ -80,6 +84,16 @@ export default function Home() {
     dashboard.data?.total_spaces === 0;
 
   if (allLoading) return <HomeSkeleton />;
+
+  // When agents are running, Active Agents moves to the top (before attention items)
+  const activeAgentsSection = (
+    <section>
+      <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
+        Active Agents
+      </h2>
+      <ActiveAgents />
+    </section>
+  );
 
   return (
     <div className="space-y-6 max-w-5xl">
@@ -93,6 +107,9 @@ export default function Home() {
           />
         </>
       )}
+
+      {/* Conditional ordering: Active Agents first when running */}
+      {hasActiveAgents && activeAgentsSection}
 
       {/* 1. Attention Items */}
       <section>
@@ -108,15 +125,21 @@ export default function Home() {
         </p>
       )}
 
-      {/* 2. Active Agents */}
+      {/* Active Agents — in default position when no agents running */}
+      {!hasActiveAgents && activeAgentsSection}
+
+      {/* Activity Feed */}
       <section>
         <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
-          Active Agents
+          Activity Feed
         </h2>
-        <BackgroundTaskPanel />
+        <ActivityFeed />
       </section>
 
-      {/* 2b. Token Usage */}
+      {/* Pending Approvals — hidden when empty */}
+      <PendingApprovals />
+
+      {/* Token Usage */}
       <section>
         <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
           Token Usage
@@ -126,7 +149,7 @@ export default function Home() {
         </div>
       </section>
 
-      {/* 3. Spaces */}
+      {/* Spaces */}
       <section>
         <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
           Spaces
@@ -134,7 +157,7 @@ export default function Home() {
         <SpaceList spaces={spaces.data} isLoading={spaces.isLoading} />
       </section>
 
-      {/* 4. Tasks */}
+      {/* Tasks */}
       <section>
         <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
           Tasks
@@ -146,7 +169,7 @@ export default function Home() {
         />
       </section>
 
-      {/* 5. Recent Conversations */}
+      {/* Recent Conversations */}
       <section>
         <h2 className="text-sm font-semibold text-muted uppercase tracking-wide mb-2">
           Recent Conversations

@@ -124,6 +124,8 @@ app.add_middleware(
 
 # --- Routers ---
 from backend.openloop.api.routes.agents import router as agents_router  # noqa: E402
+from backend.openloop.api.routes.approvals import router as approvals_router  # noqa: E402
+from backend.openloop.api.routes.background_tasks import router as background_tasks_router  # noqa: E402
 from backend.openloop.api.routes.audit import router as audit_router  # noqa: E402
 from backend.openloop.api.routes.automations import router as automations_router  # noqa: E402
 from backend.openloop.api.routes.behavioral_rules import router as behavioral_rules_router  # noqa: E402
@@ -150,6 +152,8 @@ from backend.openloop.api.routes.system import router as system_router  # noqa: 
 # capture the literal path "running" if it were registered first.
 app.include_router(running_router)
 app.include_router(agents_router)
+app.include_router(approvals_router)
+app.include_router(background_tasks_router)
 app.include_router(audit_router)
 app.include_router(automations_router)
 app.include_router(behavioral_rules_router)

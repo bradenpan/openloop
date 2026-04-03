@@ -2027,6 +2027,147 @@ async def archive_item(
 
 
 # ---------------------------------------------------------------------------
+# Approval queue tool
+# ---------------------------------------------------------------------------
+
+
+async def queue_approval(
+    action_type: str,
+    action_detail: str = "",
+    reason: str = "",
+    *,
+    _db=None,
+    _agent_id: str = "",
+    _background_task_id: str = "",
+) -> str:
+    """Queue an action for user approval. Use when you need permission to proceed. Continue with other work after queuing."""
+    db = _get_db(_db)
+    try:
+        from backend.openloop.services import approval_service
+
+        # Parse action_detail as JSON if provided
+        detail = None
+        if action_detail:
+            try:
+                detail = json.loads(action_detail)
+            except (json.JSONDecodeError, TypeError):
+                detail = {"raw": action_detail}
+
+        if not _background_task_id:
+            return _err("queue_approval requires a background task context")
+
+        entry = approval_service.create_approval(
+            db,
+            background_task_id=_background_task_id,
+            agent_id=_agent_id,
+            action_type=action_type,
+            action_detail=detail,
+            reason=reason or None,
+        )
+        return _ok({
+            "approval_id": entry.id,
+            "status": entry.status,
+            "message": "Action queued for user approval. Continue with other work.",
+        })
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 35. update_task_list — autonomous task list management
+async def update_task_list(
+    updates: str,
+    *,
+    _db=None,
+    _agent_id: str = "",
+    _background_task_id: str = "",
+) -> str:
+    """Update the autonomous task list. Pass a JSON array of {title, status} items to replace the full list, or {action, index, ...} operations."""
+    db = _get_db(_db)
+    try:
+        if not _background_task_id:
+            return _err("update_task_list requires a background task context")
+
+        # Parse updates JSON
+        try:
+            parsed = json.loads(updates)
+        except (json.JSONDecodeError, TypeError):
+            return _err("updates must be valid JSON")
+
+        if not isinstance(parsed, list):
+            return _err("updates must be a JSON array")
+
+        task = background_task_service.get_background_task(db, _background_task_id)
+
+        # Determine if this is a full replacement or operational updates
+        if parsed and isinstance(parsed[0], dict) and "action" in parsed[0]:
+            # Operational updates: [{action: "complete", index: 0}, ...]
+            current_list = list(task.task_list or [])
+            for op in parsed:
+                action = op.get("action", "")
+                idx = int(op.get("index", -1))
+                if action == "complete" and 0 <= idx < len(current_list):
+                    current_list[idx]["status"] = "done"
+                elif action == "skip" and 0 <= idx < len(current_list):
+                    current_list[idx]["status"] = "skipped"
+                elif action == "add":
+                    current_list.append({
+                        "title": op.get("title", "Untitled"),
+                        "status": "pending",
+                    })
+                elif action == "remove" and 0 <= idx < len(current_list):
+                    current_list.pop(idx)
+            new_list = current_list
+        else:
+            # Full replacement: [{title, status}, ...]
+            new_list = parsed
+
+        # Count completed
+        completed = sum(1 for item in new_list if item.get("status") in ("done", "completed"))
+        total = len(new_list)
+        new_version = (task.task_list_version or 0) + 1
+
+        background_task_service.update_background_task(
+            db,
+            _background_task_id,
+            task_list=new_list,
+            task_list_version=new_version,
+            completed_count=completed,
+            total_count=total,
+        )
+
+        # Publish SSE progress event
+        try:
+            from backend.openloop.agents.event_bus import event_bus
+            import asyncio
+
+            asyncio.ensure_future(event_bus.publish({
+                "type": "autonomous_progress",
+                "task_id": _background_task_id,
+                "completed_count": completed,
+                "total_count": total,
+                "task_list_version": new_version,
+            }))
+        except Exception:
+            pass  # Non-critical
+
+        return _ok({
+            "task_list_version": new_version,
+            "completed_count": completed,
+            "total_count": total,
+        })
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# ---------------------------------------------------------------------------
 # Builder functions
 # ---------------------------------------------------------------------------
 
@@ -2073,6 +2214,8 @@ _STANDARD_TOOLS = {
     "unlink_items": unlink_items,
     "get_linked_items": get_linked_items,
     "archive_item": archive_item,
+    "queue_approval": queue_approval,
+    "update_task_list": update_task_list,
 }
 
 _ODIN_TOOLS = {
@@ -2085,8 +2228,13 @@ _ODIN_TOOLS = {
 }
 
 
-def _make_decorated_tools(tool_map: dict, agent_name: str, agent_id: str = "") -> list:
-    """Wrap raw async functions with @tool() and inject _agent_name/_agent_id via closures.
+def _make_decorated_tools(
+    tool_map: dict,
+    agent_name: str,
+    agent_id: str = "",
+    background_task_id: str = "",
+) -> list:
+    """Wrap raw async functions with @tool() and inject _agent_name/_agent_id/_background_task_id via closures.
 
     Adapts the existing kwargs-based tool functions to the current SDK API which
     requires tool(name, description, input_schema) and a handler that receives a
@@ -2101,6 +2249,7 @@ def _make_decorated_tools(tool_map: dict, agent_name: str, agent_id: str = "") -
         sig = inspect.signature(fn)
         has_agent_name = "_agent_name" in sig.parameters
         has_agent_id = "_agent_id" in sig.parameters
+        has_bg_task_id = "_background_task_id" in sig.parameters
 
         # Build input_schema from annotations, excluding internal/private params
         input_schema: dict = {}
@@ -2116,13 +2265,15 @@ def _make_decorated_tools(tool_map: dict, agent_name: str, agent_id: str = "") -
         description = (fn.__doc__ or f"Tool: {name}").strip().split("\n")[0]
 
         # Build handler: adapts args dict -> **kwargs and wraps string result
-        def _make_handler(original_fn, bound_name, bound_id, inject_name, inject_id):
+        def _make_handler(original_fn, bound_name, bound_id, bound_bg_task_id, inject_name, inject_id, inject_bg_task_id):
             async def handler(args):
                 kwargs = dict(args)
                 if inject_name:
                     kwargs["_agent_name"] = bound_name
                 if inject_id:
                     kwargs["_agent_id"] = bound_id
+                if inject_bg_task_id:
+                    kwargs["_background_task_id"] = bound_bg_task_id
                 result_str = await original_fn(**kwargs)
                 # Existing tools return JSON strings; wrap in SDK content format
                 try:
@@ -2137,24 +2288,25 @@ def _make_decorated_tools(tool_map: dict, agent_name: str, agent_id: str = "") -
 
             return handler
 
-        handler = _make_handler(fn, agent_name, agent_id, has_agent_name, has_agent_id)
+        handler = _make_handler(fn, agent_name, agent_id, background_task_id, has_agent_name, has_agent_id, has_bg_task_id)
         decorated.append(tool(name, description, input_schema)(handler))
     return decorated
 
 
-def build_agent_tools(agent_name: str, agent_id: str = ""):
+def build_agent_tools(agent_name: str, agent_id: str = "", background_task_id: str = ""):
     """Build the standard MCP tool server for a space agent.
 
-    Returns a server from create_sdk_mcp_server with tools 1-33.
+    Returns a server from create_sdk_mcp_server with tools 1-33 + queue_approval.
     agent_id is the UUID needed for behavioral rule operations.
+    background_task_id is needed for queue_approval in autonomous mode.
     """
     from claude_agent_sdk import create_sdk_mcp_server
 
-    tools = _make_decorated_tools(_STANDARD_TOOLS, agent_name, agent_id)
+    tools = _make_decorated_tools(_STANDARD_TOOLS, agent_name, agent_id, background_task_id)
     return create_sdk_mcp_server(f"openloop_{agent_name}", tools=tools)
 
 
-def build_odin_tools(agent_id: str = ""):
+def build_odin_tools(agent_id: str = "", background_task_id: str = ""):
     """Build the Odin-specific MCP tool server.
 
     Returns a server from create_sdk_mcp_server with standard tools (1-33)
@@ -2163,7 +2315,7 @@ def build_odin_tools(agent_id: str = ""):
     from claude_agent_sdk import create_sdk_mcp_server
 
     all_tools = {**_STANDARD_TOOLS, **_ODIN_TOOLS}
-    tools = _make_decorated_tools(all_tools, "odin", agent_id)
+    tools = _make_decorated_tools(all_tools, "odin", agent_id, background_task_id)
     return create_sdk_mcp_server("openloop_odin", tools=tools)
 
 
@@ -2174,7 +2326,7 @@ _AGENT_BUILDER_TOOLS = {
 }
 
 
-def build_agent_builder_tools(agent_name: str, agent_id: str = ""):
+def build_agent_builder_tools(agent_name: str, agent_id: str = "", background_task_id: str = ""):
     """Build MCP tools for the Agent Builder agent.
 
     Standard tools + register_agent + test_agent (exclusive to Agent Builder).
@@ -2182,5 +2334,5 @@ def build_agent_builder_tools(agent_name: str, agent_id: str = ""):
     from claude_agent_sdk import create_sdk_mcp_server
 
     all_tools = {**_STANDARD_TOOLS, **_AGENT_BUILDER_TOOLS}
-    tools = _make_decorated_tools(all_tools, agent_name, agent_id)
+    tools = _make_decorated_tools(all_tools, agent_name, agent_id, background_task_id)
     return create_sdk_mcp_server(f"openloop_{agent_name}", tools=tools)

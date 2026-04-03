@@ -141,6 +141,10 @@ _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
     # Agent Builder tools
     "register_agent": ("openloop-agents", Operation.CREATE),
     "test_agent": ("openloop-delegation", Operation.EXECUTE),
+    # Approval queue tool
+    "queue_approval": ("openloop-approvals", Operation.CREATE),
+    # Autonomous task list management
+    "update_task_list": ("openloop-delegation", Operation.EDIT),
     # Odin-only tools (20-25)
     "list_spaces": ("openloop-spaces", Operation.READ),
     "list_agents": ("openloop-agents", Operation.READ),
@@ -323,6 +327,92 @@ async def check_permission(
 
 
 # ---------------------------------------------------------------------------
+# Autonomous-mode permission check
+# ---------------------------------------------------------------------------
+
+
+async def _check_permission_autonomous(
+    db: Session,
+    *,
+    agent_id: str,
+    conversation_id: str | None,
+    background_task_id: str | None,
+    tool_name: str,
+    tool_input: dict,
+) -> str:
+    """Check permissions in autonomous mode.
+
+    Behaves identically to check_permission for allow/deny grants.
+    For "approval" grants, instead of blocking and polling, creates an
+    ApprovalQueue entry and returns "approval_queued" immediately.
+    """
+    # 1. Map tool to (resource, operation)
+    resource, operation = map_tool_to_resource(tool_name, tool_input)
+
+    # 2. Check system guardrails
+    if is_system_blocked(resource):
+        logger.info(
+            "System guardrail blocked %s on %s for agent %s",
+            tool_name,
+            resource,
+            agent_id,
+        )
+        return "deny"
+
+    # 3. Load agent permissions from DB
+    permissions: list[AgentPermission] = (
+        db.query(AgentPermission).filter(AgentPermission.agent_id == agent_id).all()
+    )
+
+    # 4. Match against permission matrix
+    grant = match_permission(resource, permissions, operation)
+
+    # 5. "always" -> allow
+    if grant == GrantLevel.ALWAYS:
+        return "allow"
+
+    # 6. "never" -> deny
+    if grant == GrantLevel.NEVER:
+        return "deny"
+
+    # 7. "approval" -> queue instead of blocking
+    if grant == GrantLevel.APPROVAL:
+        if not background_task_id:
+            logger.warning(
+                "Autonomous mode approval requested but no background_task_id — denying %s",
+                tool_name,
+            )
+            return "deny"
+
+        try:
+            from backend.openloop.services import approval_service
+
+            approval_service.create_approval(
+                db,
+                background_task_id=background_task_id,
+                agent_id=agent_id,
+                action_type=f"{operation}:{resource}",
+                action_detail={
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                },
+                reason=f"Agent requested {operation} on {resource} via {tool_name}",
+            )
+        except Exception:
+            logger.error(
+                "Failed to create approval queue entry for %s — denying",
+                tool_name,
+                exc_info=True,
+            )
+            return "deny"
+
+        return "approval_queued"
+
+    # Fallback — deny
+    return "deny"
+
+
+# ---------------------------------------------------------------------------
 # Approval polling
 # ---------------------------------------------------------------------------
 
@@ -382,7 +472,12 @@ async def _poll_for_approval(db: Session, request_id: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def build_permission_hook(agent_id: str, conversation_id: str | None, background_task_id: str | None = None):
+def build_permission_hook(
+    agent_id: str,
+    conversation_id: str | None,
+    background_task_id: str | None = None,
+    autonomous_mode: bool = False,
+):
     """Build a PreToolUse hook for SDK session registration.
 
     Returns a tuple of (HookMatcher, hook_function) compatible with the
@@ -390,6 +485,11 @@ def build_permission_hook(agent_id: str, conversation_id: str | None, background
 
     The hook intercepts every tool call, checks permissions, and returns
     PermissionResultAllow or PermissionResultDeny.
+
+    When autonomous_mode=True and a tool requires approval, instead of
+    blocking and polling, the action is queued in the approval_queue table
+    and the tool call is denied with a message telling the agent to continue
+    with other work.
 
     Each invocation creates its own short-lived DB session via SessionLocal()
     so it is safe to call from async SDK context (not request-scoped).
@@ -408,19 +508,29 @@ def build_permission_hook(agent_id: str, conversation_id: str | None, background
 
         db = SessionLocal()
         try:
-            result = await check_permission(
-                db,
-                agent_id=agent_id,
-                conversation_id=conversation_id,
-                tool_name=tool_name,
-                tool_input=tool_input,
-            )
+            if autonomous_mode:
+                result = await _check_permission_autonomous(
+                    db,
+                    agent_id=agent_id,
+                    conversation_id=conversation_id,
+                    background_task_id=background_task_id,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                )
+            else:
+                result = await check_permission(
+                    db,
+                    agent_id=agent_id,
+                    conversation_id=conversation_id,
+                    tool_name=tool_name,
+                    tool_input=tool_input,
+                )
         finally:
             db.close()
 
         # Audit log the permission decision
         resource, operation = map_tool_to_resource(tool_name, tool_input)
-        audit_action = result  # "allow", "deny", or "pending" (resolved)
+        audit_action = result  # "allow", "deny", "approval_queued"
         # Build a redacted summary of tool inputs (strip long values, mask secrets)
         input_summary = _redact_tool_input(tool_input)
 
@@ -446,6 +556,11 @@ def build_permission_hook(agent_id: str, conversation_id: str | None, background
         if result == "allow":
             # Empty dict = allow the tool call to proceed
             return {}
+        elif result == "approval_queued":
+            return {
+                "decision": "block",
+                "reason": "Action queued for approval. Continue with other work.",
+            }
         else:
             return {
                 "decision": "block",

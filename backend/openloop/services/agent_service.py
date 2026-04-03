@@ -86,6 +86,9 @@ def update_agent(db: Session, agent_id: str, **kwargs) -> Agent:
         "tools",
         "mcp_tools",
         "status",
+        "max_spawn_depth",
+        "heartbeat_enabled",
+        "heartbeat_cron",
     }
     for field, value in kwargs.items():
         if field == "name" and value is not None:

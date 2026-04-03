@@ -44,12 +44,27 @@ class AutomationStatus(StrEnum):
 
 
 class BackgroundTaskStatus(StrEnum):
+    PENDING = "pending"
     QUEUED = "queued"
     RUNNING = "running"
+    PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
     INTERRUPTED = "interrupted"
+
+
+class BackgroundTaskRunType(StrEnum):
+    TASK = "task"
+    AUTONOMOUS = "autonomous"
+    HEARTBEAT = "heartbeat"
+
+
+class ApprovalStatus(StrEnum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    DENIED = "denied"
+    EXPIRED = "expired"
 
 
 class NotificationType(StrEnum):
@@ -62,6 +77,7 @@ class NotificationType(StrEnum):
     MEMORY_CONSOLIDATION = "memory_consolidation"
     SYSTEM = "system"
     EMERGENCY_STOP = "emergency_stop"
+    HEARTBEAT_ACTION = "heartbeat_action"
 
 
 class SSEEventType(StrEnum):
@@ -74,6 +90,9 @@ class SSEEventType(StrEnum):
     BACKGROUND_UPDATE = "background_update"
     RATE_LIMITED = "rate_limited"
     ERROR = "error"
+    AUTONOMOUS_PROGRESS = "autonomous_progress"
+    APPROVAL_QUEUED = "approval_queued"
+    GOAL_COMPLETE = "goal_complete"
 
 
 class DefaultView(StrEnum):

@@ -129,6 +129,59 @@
         }
       }
     },
+    "/api/v1/agents/{agent_id}/autonomous": {
+      "post": {
+        "tags": [
+          "agents"
+        ],
+        "summary": "Launch Autonomous",
+        "description": "Start an autonomous launch conversation for an agent.\n\nCreates a conversation for goal clarification. The agent does NOT\nstart autonomous execution until approve-launch is called.",
+        "operationId": "launch_autonomous_api_v1_agents__agent_id__autonomous_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutonomousLaunchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutonomousLaunchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/agents/{agent_id}": {
       "get": {
         "tags": [
@@ -414,6 +467,403 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/approval-queue": {
+      "get": {
+        "tags": [
+          "approval-queue"
+        ],
+        "summary": "List Pending",
+        "operationId": "list_pending_api_v1_approval_queue_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "background_task_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Background Task Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApprovalQueueResponse"
+                  },
+                  "title": "Response List Pending Api V1 Approval Queue Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/approval-queue/{approval_id}/resolve": {
+      "post": {
+        "tags": [
+          "approval-queue"
+        ],
+        "summary": "Resolve Approval",
+        "operationId": "resolve_approval_api_v1_approval_queue__approval_id__resolve_post",
+        "parameters": [
+          {
+            "name": "approval_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Approval Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalResolveRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApprovalQueueResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/approval-queue/batch-resolve": {
+      "post": {
+        "tags": [
+          "approval-queue"
+        ],
+        "summary": "Batch Resolve",
+        "operationId": "batch_resolve_api_v1_approval_queue_batch_resolve_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApprovalBatchResolveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApprovalQueueResponse"
+                  },
+                  "type": "array",
+                  "title": "Response Batch Resolve Api V1 Approval Queue Batch Resolve Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/background-tasks/{task_id}/approve-launch": {
+      "post": {
+        "tags": [
+          "background-tasks"
+        ],
+        "summary": "Approve Launch",
+        "description": "Approve an autonomous launch \u2014 transitions from clarification to execution.",
+        "operationId": "approve_launch_api_v1_background_tasks__task_id__approve_launch_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutonomousLaunchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/background-tasks/{task_id}/task-list": {
+      "get": {
+        "tags": [
+          "background-tasks"
+        ],
+        "summary": "Get Task List",
+        "description": "Return the current task list for an autonomous run.",
+        "operationId": "get_task_list_api_v1_background_tasks__task_id__task_list_get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "background-tasks"
+        ],
+        "summary": "Update Task List",
+        "description": "User can modify the task list mid-run.",
+        "operationId": "update_task_list_api_v1_background_tasks__task_id__task_list_patch",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TaskListUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskListResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/background-tasks/{task_id}/pause": {
+      "post": {
+        "tags": [
+          "background-tasks"
+        ],
+        "summary": "Pause Task",
+        "description": "Pause a running autonomous task at the next turn boundary.",
+        "operationId": "pause_task_api_v1_background_tasks__task_id__pause_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/background-tasks/{task_id}/resume": {
+      "post": {
+        "tags": [
+          "background-tasks"
+        ],
+        "summary": "Resume Task",
+        "description": "Resume a paused autonomous task.",
+        "operationId": "resume_task_api_v1_background_tasks__task_id__resume_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -4914,6 +5364,27 @@
             "type": "string",
             "title": "Status"
           },
+          "max_spawn_depth": {
+            "type": "integer",
+            "title": "Max Spawn Depth",
+            "default": 1
+          },
+          "heartbeat_enabled": {
+            "type": "boolean",
+            "title": "Heartbeat Enabled",
+            "default": false
+          },
+          "heartbeat_cron": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat Cron"
+          },
           "created_at": {
             "type": "string",
             "format": "date-time",
@@ -5024,10 +5495,198 @@
               }
             ],
             "title": "Status"
+          },
+          "max_spawn_depth": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Spawn Depth"
+          },
+          "heartbeat_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat Enabled"
+          },
+          "heartbeat_cron": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heartbeat Cron"
           }
         },
         "type": "object",
         "title": "AgentUpdate"
+      },
+      "ApprovalBatchResolveRequest": {
+        "properties": {
+          "approval_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Approval Ids"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ApprovalStatus"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By",
+            "default": "user"
+          }
+        },
+        "type": "object",
+        "required": [
+          "approval_ids",
+          "status"
+        ],
+        "title": "ApprovalBatchResolveRequest"
+      },
+      "ApprovalQueueResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "background_task_id": {
+            "type": "string",
+            "title": "Background Task Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "action_type": {
+            "type": "string",
+            "title": "Action Type"
+          },
+          "action_detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Detail"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "background_task_id",
+          "agent_id",
+          "action_type",
+          "action_detail",
+          "reason",
+          "status",
+          "resolved_at",
+          "resolved_by",
+          "created_at"
+        ],
+        "title": "ApprovalQueueResponse"
+      },
+      "ApprovalResolveRequest": {
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/ApprovalStatus"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By",
+            "default": "user"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ApprovalResolveRequest"
+      },
+      "ApprovalStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "approved",
+          "denied",
+          "expired"
+        ],
+        "title": "ApprovalStatus"
       },
       "AuditLogResponse": {
         "properties": {
@@ -5532,6 +6191,70 @@
         },
         "type": "object",
         "title": "AutomationUpdate"
+      },
+      "AutonomousLaunchRequest": {
+        "properties": {
+          "goal": {
+            "type": "string",
+            "title": "Goal"
+          },
+          "constraints": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Constraints"
+          },
+          "token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Budget"
+          },
+          "time_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Budget"
+          }
+        },
+        "type": "object",
+        "required": [
+          "goal"
+        ],
+        "title": "AutonomousLaunchRequest"
+      },
+      "AutonomousLaunchResponse": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "task_id"
+        ],
+        "title": "AutonomousLaunchResponse"
       },
       "BackupStatusResponse": {
         "properties": {
@@ -7948,6 +8671,72 @@
           "last_activity": {
             "type": "string",
             "title": "Last Activity"
+          },
+          "run_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Run Type"
+          },
+          "background_task_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Background Task Id"
+          },
+          "instruction": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Instruction"
+          },
+          "completed_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed Count"
+          },
+          "total_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Count"
+          },
+          "token_budget": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Budget"
           }
         },
         "type": "object",
@@ -8447,6 +9236,53 @@
           "active_sessions"
         ],
         "title": "SystemStatusResponse"
+      },
+      "TaskListResponse": {
+        "properties": {
+          "task_list": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task List"
+          },
+          "task_list_version": {
+            "type": "integer",
+            "title": "Task List Version",
+            "default": 0
+          },
+          "completed_count": {
+            "type": "integer",
+            "title": "Completed Count",
+            "default": 0
+          },
+          "total_count": {
+            "type": "integer",
+            "title": "Total Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "title": "TaskListResponse"
+      },
+      "TaskListUpdateRequest": {
+        "properties": {
+          "task_list": {
+            "items": {},
+            "type": "array",
+            "title": "Task List"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_list"
+        ],
+        "title": "TaskListUpdateRequest"
       },
       "TokenStatsBucket": {
         "properties": {

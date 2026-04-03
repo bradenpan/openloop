@@ -12,12 +12,12 @@ import asyncio
 import logging
 from datetime import UTC, datetime
 
-from contract.enums import AutomationTriggerType, BackgroundTaskStatus, NotificationType
+from contract.enums import AutomationTriggerType, BackgroundTaskRunType, BackgroundTaskStatus, NotificationType
 from croniter import croniter
 
 from backend.openloop.agents import concurrency_manager
 from backend.openloop.database import SessionLocal
-from backend.openloop.db.models import Notification
+from backend.openloop.db.models import Agent, BackgroundTask, Notification
 from backend.openloop.services import automation_service, notification_service
 
 logger = logging.getLogger(__name__)
@@ -133,6 +133,9 @@ async def _tick() -> None:
                 await automation_service.trigger_automation(db, automation.id)
             except Exception:
                 logger.error("Failed to trigger automation '%s'", automation.name, exc_info=True)
+
+        # --- Heartbeat evaluation ---
+        await _evaluate_heartbeats(db, now_naive)
     finally:
         db.close()
 
@@ -159,6 +162,98 @@ def _is_due(automation, now_naive: datetime) -> bool:
     cron = croniter(automation.cron_expression, ref)
     next_run = cron.get_next(datetime)
     return next_run <= now_naive
+
+
+async def _evaluate_heartbeats(db, now_naive: datetime) -> None:
+    """Check all heartbeat-enabled agents and fire those whose cron is due."""
+    agents = (
+        db.query(Agent)
+        .filter(
+            Agent.heartbeat_enabled == True,  # noqa: E712
+            Agent.heartbeat_cron.isnot(None),
+            Agent.status == "active",
+        )
+        .all()
+    )
+
+    for agent in agents:
+        try:
+            if not _is_heartbeat_due(db, agent, now_naive):
+                continue
+        except Exception:
+            logger.warning(
+                "Invalid heartbeat cron for agent '%s': %s",
+                agent.name,
+                agent.heartbeat_cron,
+            )
+            continue
+
+        # Check automation lane concurrency before firing
+        if not concurrency_manager.acquire_slot(db, "automation"):
+            logger.debug("Automation lane full — skipping heartbeat for '%s'", agent.name)
+            break
+
+        logger.info("Firing heartbeat for agent '%s' (id=%s)", agent.name, agent.id)
+        try:
+            await _fire_heartbeat(db, agent)
+        except Exception:
+            logger.error("Failed to fire heartbeat for agent '%s'", agent.name, exc_info=True)
+
+
+def _is_heartbeat_due(db, agent: Agent, now_naive: datetime) -> bool:
+    """Return True if the agent's heartbeat cron is due.
+
+    Uses the most recent BackgroundTask with run_type=heartbeat for that agent
+    as the last-run reference.
+    """
+    last_heartbeat = (
+        db.query(BackgroundTask)
+        .filter(
+            BackgroundTask.agent_id == agent.id,
+            BackgroundTask.run_type == BackgroundTaskRunType.HEARTBEAT,
+        )
+        .order_by(BackgroundTask.created_at.desc())
+        .first()
+    )
+
+    if last_heartbeat is None:
+        ref = datetime(2000, 1, 1)
+    else:
+        ref = last_heartbeat.created_at.replace(tzinfo=None)
+
+    cron = croniter(agent.heartbeat_cron, ref)
+    next_run = cron.get_next(datetime)
+    return next_run <= now_naive
+
+
+async def _fire_heartbeat(db, agent: Agent) -> None:
+    """Build the heartbeat survey prompt and delegate to agent_runner."""
+    from backend.openloop.agents import agent_runner
+
+    now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    survey_prompt = (
+        f"HEARTBEAT — {now_str}\n\n"
+        "You have been woken for a periodic check-in.\n"
+        "Review the current state of your spaces. Consider:\n"
+        "- Are there overdue items that need attention?\n"
+        "- Has anything changed since your last check-in?\n"
+        "- Are there items you've been assigned that are stale?\n"
+        "- Is there anything the user should know about?\n\n"
+        "If nothing needs attention, respond with HEARTBEAT_OK.\n"
+        "If something needs action and is within your permissions, handle it.\n"
+        "If something needs the user's attention, create a notification."
+    )
+
+    # Use the agent's first bound space, or None for system agents
+    space_id = agent.spaces[0].id if agent.spaces else None
+
+    await agent_runner.delegate_background(
+        db,
+        agent_id=agent.id,
+        instruction=survey_prompt,
+        space_id=space_id,
+        run_type=BackgroundTaskRunType.HEARTBEAT,
+    )
 
 
 def start_automation_scheduler() -> None:

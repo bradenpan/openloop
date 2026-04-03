@@ -147,9 +147,18 @@ def resolve_model(model_name: str) -> str:
     return MODEL_MAP.get(model_name, model_name)
 
 
-def _build_hooks_dict(agent_id: str, conversation_id: str | None, background_task_id: str | None = None) -> dict:
+def _build_hooks_dict(
+    agent_id: str,
+    conversation_id: str | None,
+    background_task_id: str | None = None,
+    autonomous_mode: bool = False,
+) -> dict:
     """Build the hooks dict for ClaudeAgentOptions from the permission hook."""
-    matcher, hook_fn = build_permission_hook(agent_id, conversation_id, background_task_id=background_task_id)
+    matcher, hook_fn = build_permission_hook(
+        agent_id, conversation_id,
+        background_task_id=background_task_id,
+        autonomous_mode=autonomous_mode,
+    )
     matcher.hooks = [hook_fn]
     return {"PreToolUse": [matcher]}
 
@@ -1169,6 +1178,7 @@ async def delegate_background(
     parent_task_id: str | None = None,
     automation_run_id: str | None = None,
     model_override: str | None = None,
+    run_type: str = "task",
 ) -> str:
     """Delegate work to an agent as a background task.
 
@@ -1185,7 +1195,7 @@ async def delegate_background(
     # Determine the concurrency lane based on task type
     if parent_task_id:
         lane = "subagent"
-    elif automation_run_id:
+    elif automation_run_id or run_type == "heartbeat":
         lane = "automation"
     else:
         lane = "autonomous"
@@ -1209,6 +1219,7 @@ async def delegate_background(
         parent_task_id=parent_task_id,
         automation_id=resolved_automation_id,
         goal=instruction,
+        run_type=run_type,
         status="running",
     )
 
@@ -1240,6 +1251,7 @@ async def delegate_background(
             space_id=space_id,
             automation_run_id=automation_run_id,
             model_override=model_override,
+            run_type=run_type,
         )
     )
     _background_tasks.add(bg)
@@ -1259,6 +1271,7 @@ async def _run_background_task(
     space_id: str | None,
     automation_run_id: str | None = None,
     model_override: str | None = None,
+    run_type: str = "task",
 ) -> None:
     """Managed turn loop — agent works in discrete turns with steering checkpoints.
 
@@ -1421,9 +1434,11 @@ async def _run_background_task(
                     output_tokens=turn_output_tokens,
                 )
 
-            # Check for completion signal (TASK_COMPLETE or GOAL_COMPLETE)
+            # Check for completion signal (TASK_COMPLETE, GOAL_COMPLETE, or HEARTBEAT_OK)
             upper_result = (turn_result or "").upper()
             if "TASK_COMPLETE" in upper_result or "GOAL_COMPLETE" in upper_result:
+                completed = True
+            elif run_type == "heartbeat" and "HEARTBEAT_OK" in upper_result:
                 completed = True
 
             # Update step progress (don't predict total_steps from MAX_TURNS —
@@ -1571,13 +1586,38 @@ async def _run_background_task(
             completed_at=datetime.now(UTC),
         )
 
-        notification_service.create_notification(
-            db,
-            type="task_completed",
-            title="Background task completed",
-            body=f"Task completed{status_note}: {instruction[:100]}",
-            space_id=space_id,
-        )
+        # Heartbeat-specific completion handling
+        is_heartbeat = run_type == "heartbeat"
+        heartbeat_ok = is_heartbeat and "HEARTBEAT_OK" in (result_text or "").upper()
+
+        if heartbeat_ok:
+            # Silent completion — no user-visible notification
+            logger.info("Heartbeat OK for agent %s (task %s) — no action needed", agent_id, task_id)
+        elif is_heartbeat:
+            # Heartbeat took action — create audit log + notification
+            audit_service.log_action(
+                db,
+                agent_id=agent_id,
+                action="heartbeat_action",
+                background_task_id=task_id,
+                tool_name="heartbeat",
+                input_summary=f"Heartbeat took action: {result_text[:200] if result_text else 'unknown'}",
+            )
+            notification_service.create_notification(
+                db,
+                type="heartbeat_action",
+                title=f"Heartbeat: {agent_name} took action",
+                body=result_text[:500] if result_text else "Agent took action during heartbeat check-in.",
+                space_id=space_id,
+            )
+        else:
+            notification_service.create_notification(
+                db,
+                type="task_completed",
+                title="Background task completed",
+                body=f"Task completed{status_note}: {instruction[:100]}",
+                space_id=space_id,
+            )
 
         # Complete the automation run if this was triggered by an automation
         if automation_run_id:
@@ -1629,6 +1669,726 @@ async def _run_background_task(
         # Clean up background tracking and steering queue
         _background_conversations.discard(conversation_id)
         _steering_queues.pop(conversation_id, None)
+
+
+# ---------------------------------------------------------------------------
+# Autonomous launch — goal-driven execution (Phase 9.2b)
+# ---------------------------------------------------------------------------
+
+# Prompt constants for autonomous mode
+AUTONOMOUS_FIRST_TURN_PROMPT = (
+    "You are starting an autonomous run. Your goal: {goal}\n\n"
+    "{constraints_text}"
+    "Survey the space and generate a task list. Output your plan as a JSON "
+    'array of items: [{{"title": "...", "status": "pending"}}, ...]\n\n'
+    "Work incrementally. Complete one meaningful step per turn. "
+    "Report what you did and what you plan to do next. "
+    "Say GOAL_COMPLETE when the entire goal is finished."
+)
+
+AUTONOMOUS_NEXT_ITEM_PROMPT = (
+    "Pick the next pending item from your task list and work on it. "
+    "After completing an item, use the update_task_list tool to mark it done. "
+    "Say GOAL_COMPLETE when all items are finished."
+)
+
+# In-memory set of paused task IDs (checked at turn boundaries)
+_paused_tasks: set[str] = set()
+
+
+async def launch_autonomous(
+    db: Session,
+    *,
+    agent_id: str,
+    space_id: str | None = None,
+    goal: str,
+    constraints: str | None = None,
+    token_budget: int | None = None,
+    time_budget: int | None = None,
+) -> tuple[str, str]:
+    """Start an autonomous launch conversation.
+
+    Creates a BackgroundTask (status=pending) and a Conversation for the
+    clarification phase. The agent does NOT start autonomous execution yet —
+    the user chats with the agent to clarify the goal, then calls
+    approve_autonomous_launch() to begin.
+
+    Returns (conversation_id, task_id).
+    Raises 409 if the agent already has an active autonomous run.
+    """
+    from backend.openloop.db.models import BackgroundTask as BT
+
+    # Guard: one autonomous run per agent at a time
+    existing = (
+        db.query(BT)
+        .filter(
+            BT.agent_id == agent_id,
+            BT.run_type == "autonomous",
+            BT.status.in_(["pending", "running"]),
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="Agent already has an active autonomous run",
+        )
+
+    # Kill switch guard
+    if system_service.is_paused(db):
+        raise HTTPException(
+            status_code=503,
+            detail="System is paused (emergency stop active). Resume before starting autonomous work.",
+        )
+
+    # Concurrency check
+    _check_concurrency(db, "autonomous")
+
+    # Validate agent exists
+    agent = agent_service.get_agent(db, agent_id)
+
+    # Create conversation for clarification phase
+    conv = conversation_service.create_conversation(
+        db,
+        agent_id=agent_id,
+        name=f"Autonomous: {goal[:50]}",
+        space_id=space_id,
+    )
+
+    # Create BackgroundTask with status=pending (not running yet)
+    task = background_task_service.create_background_task(
+        db,
+        agent_id=agent_id,
+        instruction=goal,
+        space_id=space_id,
+        conversation_id=conv.id,
+        goal=goal,
+        time_budget=time_budget,
+        token_budget=token_budget,
+        run_type="autonomous",
+        status="pending",
+    )
+
+    return conv.id, task.id
+
+
+async def approve_autonomous_launch(
+    db: Session,
+    *,
+    task_id: str,
+) -> None:
+    """Transition an autonomous task from pending to running.
+
+    Fires the autonomous turn loop as an asyncio background task.
+    """
+    task = background_task_service.get_background_task(db, task_id)
+
+    if task.status != "pending":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task is '{task.status}', not 'pending'. Cannot approve.",
+        )
+
+    if task.run_type != "autonomous":
+        raise HTTPException(
+            status_code=422,
+            detail="Only autonomous tasks can be approved via this endpoint.",
+        )
+
+    # Kill switch guard
+    if system_service.is_paused(db):
+        raise HTTPException(
+            status_code=503,
+            detail="System is paused. Resume before approving autonomous work.",
+        )
+
+    # Transition to running
+    background_task_service.update_background_task(db, task_id, status="running")
+
+    agent = agent_service.get_agent(db, task.agent_id)
+
+    # Track this conversation as having an active background task
+    if task.conversation_id:
+        _background_conversations.add(task.conversation_id)
+
+    # Fire autonomous execution loop
+    bg = asyncio.create_task(
+        _run_autonomous_task(
+            task_id=task.id,
+            conversation_id=task.conversation_id,
+            agent_id=agent.id,
+            agent_name=agent.name,
+            default_model=agent.default_model,
+            goal=task.goal or task.instruction,
+            constraints=None,  # constraints stored in goal text
+            space_id=task.space_id,
+        )
+    )
+    _background_tasks.add(bg)
+    bg.add_done_callback(_task_done)
+
+
+async def _run_autonomous_task(
+    *,
+    task_id: str,
+    conversation_id: str | None,
+    agent_id: str,
+    agent_name: str,
+    default_model: str,
+    goal: str,
+    constraints: str | None,
+    space_id: str | None,
+) -> None:
+    """Autonomous turn loop — agent generates a task list and iterates through it.
+
+    Similar to _run_background_task but with autonomous-specific behavior:
+    1. First turn: agent receives goal + instruction to generate task list
+    2. Parse task list from first response, store on BackgroundTask
+    3. Subsequent turns: work through items, update progress
+    4. Completion on GOAL_COMPLETE or budget exhaustion
+    """
+    from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, StreamEvent, query
+
+    from backend.openloop.agents.event_bus import event_bus
+
+    mcp_server = _build_mcp_server_by_name(agent_name, agent_id)
+    model = resolve_model(default_model)
+
+    db = _new_db_session()
+    turn = 0
+    all_turn_results: list[str] = []
+    compaction_count = 0
+
+    try:
+        # Kill switch guard
+        if system_service.is_paused(db):
+            logger.info("Autonomous task %s skipped — system is paused", task_id)
+            background_task_service.update_background_task(
+                db, task_id,
+                status="interrupted",
+                error="System paused (emergency stop)",
+                completed_at=datetime.now(UTC),
+            )
+            return
+
+        # Record started_at for time budget tracking
+        task_record = background_task_service.get_background_task(db, task_id)
+        raw_started = task_record.started_at or datetime.now(UTC)
+        started_at = raw_started if raw_started.tzinfo else raw_started.replace(tzinfo=UTC)
+
+        # Assemble context for the system prompt
+        system_prompt = context_assembler.assemble_context(
+            db,
+            agent_id=agent_id,
+            space_id=space_id,
+            conversation_id=conversation_id,
+        )
+
+        # Build first turn prompt
+        constraints_text = f"Constraints: {constraints}\n\n" if constraints else ""
+        first_prompt = AUTONOMOUS_FIRST_TURN_PROMPT.format(
+            goal=goal, constraints_text=constraints_text
+        )
+
+        hooks = _build_hooks_dict(
+            agent_id, conversation_id,
+            background_task_id=task_id,
+            autonomous_mode=True,
+        )
+
+        sdk_session_id: str | None = None
+        # If the conversation already has an SDK session from clarification,
+        # resume it instead of starting fresh
+        if conversation_id:
+            conv_record = conversation_service.get_conversation(db, conversation_id)
+            if conv_record.sdk_session_id:
+                sdk_session_id = conv_record.sdk_session_id
+
+        result_text = ""
+        completed = False
+        budget_exhausted = False
+        just_compacted = False
+        compaction_summary: str | None = None
+        task_list_parsed = False
+
+        while not completed and not budget_exhausted and turn < MAX_TURNS:
+            turn += 1
+
+            # --- Pause check at turn boundary ---
+            if task_id in _paused_tasks:
+                logger.info("Autonomous task %s paused at turn %d", task_id, turn)
+                background_task_service.update_background_task(
+                    db, task_id, status="paused"
+                )
+                # Wait until resumed
+                while task_id in _paused_tasks:
+                    await asyncio.sleep(2)
+                    # Check kill switch while paused
+                    if system_service.is_paused(db):
+                        background_task_service.update_background_task(
+                            db, task_id,
+                            status="interrupted",
+                            error="System paused during autonomous pause",
+                            completed_at=datetime.now(UTC),
+                        )
+                        return
+                # Resumed — set status back to running
+                background_task_service.update_background_task(
+                    db, task_id, status="running"
+                )
+                logger.info("Autonomous task %s resumed at turn %d", task_id, turn)
+
+            # Determine what to send this turn
+            if turn == 1 and not sdk_session_id:
+                # First turn — fresh start with system prompt
+                prompt_message = first_prompt
+            elif turn == 1 and sdk_session_id:
+                # Resuming from clarification conversation — transition to autonomous
+                prompt_message = (
+                    "The user has approved the autonomous launch. Begin execution now.\n\n"
+                    + first_prompt
+                )
+            else:
+                # Check for steering messages
+                queue = _steering_queues.get(conversation_id, [])
+                if queue:
+                    raw_steering = queue.pop(0)
+                    prompt_message = f"<steering>{raw_steering}</steering>"
+                    logger.info("Steering message applied for autonomous task %s at turn %d", task_id, turn)
+                else:
+                    prompt_message = _build_continuation_prompt(
+                        db=db,
+                        task_id=task_id,
+                        conversation_id=conversation_id,
+                        turn=turn,
+                        started_at=started_at,
+                        compacted=just_compacted,
+                        compaction_summary=compaction_summary if just_compacted else None,
+                    )
+                if just_compacted:
+                    just_compacted = False
+                    compaction_summary = None
+
+            # Build query kwargs
+            if turn == 1 and not sdk_session_id:
+                query_kwargs: dict = {
+                    "prompt": prompt_message,
+                    "options": ClaudeAgentOptions(
+                        system_prompt=system_prompt,
+                        model=model,
+                        mcp_servers={mcp_server["name"]: mcp_server},
+                        hooks=hooks,
+                    ),
+                }
+            else:
+                query_kwargs = {
+                    "prompt": prompt_message,
+                    "options": ClaudeAgentOptions(
+                        resume=sdk_session_id,
+                        model=model,
+                        mcp_servers={mcp_server["name"]: mcp_server},
+                        hooks=hooks,
+                    ),
+                }
+
+            # Execute one turn
+            turn_result = ""
+            turn_result_message = None
+            async for event in _query_with_retry(
+                query, query_kwargs,
+                conversation_id=conversation_id,
+                space_id=space_id,
+            ):
+                if isinstance(event, StreamEvent):
+                    pass
+                elif isinstance(event, ResultMessage):
+                    sdk_session_id = event.session_id
+                    turn_result = event.result or ""
+                    turn_result_message = event
+
+            result_text = turn_result
+            all_turn_results.append(turn_result)
+
+            # Token extraction
+            turn_input_tokens, turn_output_tokens = _extract_usage(turn_result_message)
+
+            # Store assistant message
+            if turn_result and conversation_id:
+                conversation_service.add_message(
+                    db,
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=turn_result,
+                    input_tokens=turn_input_tokens,
+                    output_tokens=turn_output_tokens,
+                )
+
+            # --- Parse task list from first turn response (or any turn) ---
+            if not task_list_parsed and turn_result:
+                parsed_list = _extract_task_list_json(turn_result)
+                if parsed_list:
+                    task_list_parsed = True
+                    total = len(parsed_list)
+                    completed_count = sum(
+                        1 for item in parsed_list
+                        if item.get("status") in ("done", "completed")
+                    )
+                    background_task_service.update_background_task(
+                        db, task_id,
+                        task_list=parsed_list,
+                        task_list_version=1,
+                        total_count=total,
+                        completed_count=completed_count,
+                    )
+                    logger.info(
+                        "Autonomous task %s: parsed task list with %d items",
+                        task_id, total,
+                    )
+
+            # Check for completion signal
+            upper_result = (turn_result or "").upper()
+            if "GOAL_COMPLETE" in upper_result or "TASK_COMPLETE" in upper_result:
+                completed = True
+
+            # Update step progress
+            background_task_service.update_task_progress(
+                db, task_id,
+                current_step=turn,
+                total_steps=turn if completed else 0,
+                step_summary=turn_result[:500] if turn_result else f"Turn {turn}",
+            )
+
+            # Publish autonomous progress SSE event
+            task_record = background_task_service.get_background_task(db, task_id)
+            await event_bus.publish({
+                "type": "autonomous_progress",
+                "task_id": task_id,
+                "conversation_id": conversation_id,
+                "turn": turn,
+                "completed": completed,
+                "completed_count": task_record.completed_count or 0,
+                "total_count": task_record.total_count or 0,
+                "task_list_version": task_record.task_list_version or 0,
+                "summary": turn_result[:200] if turn_result else "",
+            })
+
+            # Also publish to conversation channel
+            if conversation_id:
+                await event_bus.publish_to(conversation_id, {
+                    "type": "autonomous_progress",
+                    "task_id": task_id,
+                    "conversation_id": conversation_id,
+                    "turn": turn,
+                    "completed": completed,
+                    "completed_count": task_record.completed_count or 0,
+                    "total_count": task_record.total_count or 0,
+                    "summary": turn_result[:200] if turn_result else "",
+                })
+
+            # Kill switch check
+            if not completed and system_service.is_paused(db):
+                logger.info("Autonomous task %s interrupted by kill switch at turn %d", task_id, turn)
+                background_task_service.update_background_task(
+                    db, task_id,
+                    status="interrupted",
+                    error="System paused (emergency stop) at turn boundary",
+                    completed_at=datetime.now(UTC),
+                )
+                return
+
+            # Soft budget check
+            if not completed:
+                exhausted, reason = _check_budget_exhausted(
+                    db=db, task_id=task_id,
+                    conversation_id=conversation_id,
+                    started_at=started_at,
+                )
+                if exhausted:
+                    logger.info(
+                        "Budget exhausted for autonomous task %s (%s) — final turn",
+                        task_id, reason,
+                    )
+                    budget_exhausted = True
+                    final_kwargs = {
+                        "prompt": BUDGET_EXHAUSTED_PROMPT,
+                        "options": ClaudeAgentOptions(
+                            resume=sdk_session_id,
+                            model=model,
+                            mcp_servers={mcp_server["name"]: mcp_server},
+                            hooks=hooks,
+                        ),
+                    }
+                    final_result = ""
+                    async for evt in _query_with_retry(
+                        query, final_kwargs,
+                        conversation_id=conversation_id,
+                        space_id=space_id,
+                    ):
+                        if isinstance(evt, ResultMessage):
+                            sdk_session_id = evt.session_id
+                            final_result = evt.result or ""
+                            f_in, f_out = _extract_usage(evt)
+                            if final_result and conversation_id:
+                                conversation_service.add_message(
+                                    db,
+                                    conversation_id=conversation_id,
+                                    role="assistant",
+                                    content=final_result,
+                                    input_tokens=f_in,
+                                    output_tokens=f_out,
+                                )
+                    result_text = final_result or result_text
+
+            # Context monitoring & compaction
+            if not completed and not budget_exhausted and conversation_id:
+                estimated_context = _estimate_conversation_context(
+                    db, conversation_id, ""
+                )
+                utilization = estimated_context / CONTEXT_WINDOW_TOKENS
+                if utilization > CHECKPOINT_THRESHOLD:
+                    logger.info(
+                        "Autonomous task %s context at ~%.0f%% — compacting (turn %d)",
+                        task_id, utilization * 100, turn,
+                    )
+                    success, cycle_summary, new_sid = await _run_compaction_cycle(
+                        db=db,
+                        task_id=task_id,
+                        conversation_id=conversation_id,
+                        agent_id=agent_id,
+                        agent_name=agent_name,
+                        space_id=space_id,
+                        instruction=goal,
+                        turn_results=all_turn_results,
+                        sdk_session_id=sdk_session_id,
+                        model=model,
+                        hooks=hooks,
+                    )
+                    if new_sid:
+                        sdk_session_id = new_sid
+                    if not success:
+                        return
+                    compaction_count += 1
+                    just_compacted = True
+                    compaction_summary = cycle_summary
+
+        # Persist sdk_session_id
+        if conversation_id:
+            conversation_service.update_conversation(
+                db, conversation_id, sdk_session_id=sdk_session_id
+            )
+
+        # Generate run summary
+        if completed:
+            run_summary = result_text[:2000] if result_text else "Goal completed."
+        elif budget_exhausted:
+            run_summary = f"Budget exhausted after {turn} turns. {result_text[:1500] if result_text else ''}"
+        else:
+            run_summary = f"Stopped after {turn} turns (max reached). {result_text[:1500] if result_text else ''}"
+
+        # Mark task completed
+        background_task_service.update_background_task(
+            db, task_id,
+            status="completed",
+            result_summary=result_text[:2000] if result_text else None,
+            run_summary=run_summary,
+            completed_at=datetime.now(UTC),
+        )
+
+        # Publish goal_complete SSE event
+        await event_bus.publish({
+            "type": "goal_complete",
+            "task_id": task_id,
+            "conversation_id": conversation_id,
+            "run_summary": run_summary[:500],
+        })
+
+        notification_service.create_notification(
+            db,
+            type="task_completed",
+            title="Autonomous run completed",
+            body=f"Goal completed: {goal[:100]}",
+            space_id=space_id,
+        )
+
+    except (Exception, ExceptionGroup) as exc:
+        logger.error("Autonomous task %s failed at turn %d: %s", task_id, turn, exc)
+        db.rollback()
+
+        background_task_service.update_background_task(
+            db, task_id,
+            status="failed",
+            error=str(exc)[:2000],
+            completed_at=datetime.now(UTC),
+        )
+
+        if conversation_id:
+            conversation_service.update_conversation(db, conversation_id, status="interrupted")
+
+        notification_service.create_notification(
+            db,
+            type="task_failed",
+            title="Autonomous run failed",
+            body=f"Goal failed: {goal[:100]}. Error: {exc}",
+            space_id=space_id,
+        )
+    finally:
+        db.close()
+        if conversation_id:
+            _background_conversations.discard(conversation_id)
+            _steering_queues.pop(conversation_id, None)
+
+
+def _extract_task_list_json(text: str) -> list | None:
+    """Extract a JSON array from agent response text.
+
+    Looks for the first JSON array in the text (possibly wrapped in markdown
+    code blocks). Returns the parsed list or None.
+    """
+    import json as _json
+
+    # Try to find JSON array in markdown code blocks first
+    code_block_pattern = re.compile(r"```(?:json)?\s*\n?(\[.*?\])\s*\n?```", re.DOTALL)
+    match = code_block_pattern.search(text)
+    if match:
+        try:
+            parsed = _json.loads(match.group(1))
+            if isinstance(parsed, list) and len(parsed) > 0:
+                return parsed
+        except (ValueError, TypeError):
+            pass
+
+    # Try to find a bare JSON array
+    bracket_pattern = re.compile(r"\[[\s\S]*?\]")
+    for match in bracket_pattern.finditer(text):
+        try:
+            parsed = _json.loads(match.group())
+            if isinstance(parsed, list) and len(parsed) > 0:
+                # Validate it looks like a task list
+                if all(isinstance(item, dict) and "title" in item for item in parsed):
+                    return parsed
+        except (ValueError, TypeError):
+            continue
+
+    return None
+
+
+async def pause_autonomous(db: Session, *, task_id: str) -> None:
+    """Pause an autonomous task at the next turn boundary.
+
+    The turn loop checks _paused_tasks at each iteration.
+    """
+    task = background_task_service.get_background_task(db, task_id)
+
+    if task.run_type != "autonomous":
+        raise HTTPException(status_code=422, detail="Only autonomous tasks can be paused.")
+
+    if task.status not in ("running", "pending"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task is '{task.status}', cannot pause.",
+        )
+
+    _paused_tasks.add(task_id)
+    # If it's still pending (not yet in the turn loop), mark immediately
+    if task.status == "pending":
+        background_task_service.update_background_task(db, task_id, status="paused")
+
+    logger.info("Autonomous task %s marked for pause", task_id)
+
+
+async def resume_autonomous(db: Session, *, task_id: str) -> None:
+    """Resume a paused autonomous task.
+
+    If the task was paused mid-run, the turn loop will resume.
+    If the task was paused before the loop started (pending->paused),
+    we re-fire the turn loop.
+    """
+    task = background_task_service.get_background_task(db, task_id)
+
+    if task.run_type != "autonomous":
+        raise HTTPException(status_code=422, detail="Only autonomous tasks can be resumed.")
+
+    if task.status != "paused":
+        raise HTTPException(
+            status_code=409,
+            detail=f"Task is '{task.status}', not 'paused'. Cannot resume.",
+        )
+
+    # Remove from paused set — the turn loop will notice and continue
+    _paused_tasks.discard(task_id)
+
+    # Check if the task is actually in the turn loop (has a conversation in _background_conversations)
+    if task.conversation_id and task.conversation_id in _background_conversations:
+        # Turn loop is alive, it will pick up the resume
+        background_task_service.update_background_task(db, task_id, status="running")
+        logger.info("Autonomous task %s resumed (turn loop active)", task_id)
+    else:
+        # Turn loop is not running — need to re-fire it
+        background_task_service.update_background_task(db, task_id, status="running")
+        agent = agent_service.get_agent(db, task.agent_id)
+
+        if task.conversation_id:
+            _background_conversations.add(task.conversation_id)
+
+        bg = asyncio.create_task(
+            _run_autonomous_task(
+                task_id=task.id,
+                conversation_id=task.conversation_id,
+                agent_id=agent.id,
+                agent_name=agent.name,
+                default_model=agent.default_model,
+                goal=task.goal or task.instruction,
+                constraints=None,
+                space_id=task.space_id,
+            )
+        )
+        _background_tasks.add(bg)
+        bg.add_done_callback(_task_done)
+        logger.info("Autonomous task %s resumed (turn loop re-fired)", task_id)
+
+
+# ---------------------------------------------------------------------------
+# PersistentData extractor for autonomous task lists (Phase 9.2b)
+# ---------------------------------------------------------------------------
+
+
+def _extract_autonomous_task_list(instruction: str, turn_results: list[str]) -> dict:
+    """Extract the current task list from the most recent BackgroundTask.
+
+    This is called during compaction to ensure the task list survives
+    context compression.
+    """
+    db = _new_db_session()
+    try:
+        from backend.openloop.db.models import BackgroundTask as BT
+
+        # Find the most recent autonomous task matching this instruction
+        task = (
+            db.query(BT)
+            .filter(
+                BT.run_type == "autonomous",
+                BT.goal == instruction,
+                BT.status.in_(["running", "paused"]),
+            )
+            .order_by(BT.created_at.desc())
+            .first()
+        )
+        if task and task.task_list:
+            return {
+                "task_list": task.task_list,
+                "task_list_version": task.task_list_version,
+                "completed_count": task.completed_count,
+                "total_count": task.total_count,
+            }
+    except Exception:
+        logger.debug("Failed to extract autonomous task list", exc_info=True)
+    finally:
+        db.close()
+    return {}
+
+
+# Register the extractor at module load time
+register_persistent_extractor(_extract_autonomous_task_list)
 
 
 def _build_mcp_server_by_name(agent_name: str, agent_id: str):
@@ -1721,7 +2481,19 @@ def list_running(db: Session) -> list[dict]:
         )
         .all()
     )
+    # Build a lookup of background tasks keyed by conversation_id for enrichment
+    bg_by_conv: dict[str, BackgroundTask] = {}
+    all_bg = (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.status.in_(["running", "queued"]))
+        .all()
+    )
+    for bt in all_bg:
+        if bt.conversation_id:
+            bg_by_conv[bt.conversation_id] = bt
+
     for conv in interactive:
+        bt = bg_by_conv.get(conv.id)
         results.append({
             "conversation_id": conv.id,
             "agent_id": conv.agent_id,
@@ -1730,15 +2502,20 @@ def list_running(db: Session) -> list[dict]:
             "status": "active",
             "started_at": conv.created_at.isoformat() if conv.created_at else "",
             "last_activity": conv.updated_at.isoformat() if conv.updated_at else "",
+            "run_type": bt.run_type if bt else "interactive",
+            "background_task_id": bt.id if bt else None,
+            "instruction": bt.instruction if bt else None,
+            "completed_count": bt.completed_count if bt else None,
+            "total_count": bt.total_count if bt else None,
+            "token_budget": bt.token_budget if bt else None,
         })
 
-    # Background tasks that are currently running
-    bg_tasks = (
-        db.query(BackgroundTask)
-        .filter(BackgroundTask.status == "running")
-        .all()
-    )
-    for task in bg_tasks:
+    # Background tasks that are currently running (not already covered via conversation)
+    seen_conv_ids = {r["conversation_id"] for r in results}
+    running_bg = [bt for bt in all_bg if bt.status == "running"]
+    for task in running_bg:
+        if task.conversation_id and task.conversation_id in seen_conv_ids:
+            continue
         results.append({
             "conversation_id": task.conversation_id or "",
             "agent_id": task.agent_id,
@@ -1747,6 +2524,12 @@ def list_running(db: Session) -> list[dict]:
             "status": "background",
             "started_at": task.started_at.isoformat() if task.started_at else task.created_at.isoformat(),
             "last_activity": task.updated_at.isoformat() if task.updated_at else "",
+            "run_type": task.run_type,
+            "background_task_id": task.id,
+            "instruction": task.instruction,
+            "completed_count": task.completed_count,
+            "total_count": task.total_count,
+            "token_budget": task.token_budget,
         })
 
     return results
