@@ -387,22 +387,23 @@ The core security mechanism for sub-agent delegation. This must be correct — O
 
 - New function in `permission_enforcer.py`: `narrow_permissions(parent_agent_id, delegation_depth) -> PermissionSet`
   - Loads parent's permissions
-  - Applies depth-based restrictions:
-    - Depth 1+: remove agent management tools (create/modify/delete agents), automation management, permission management
-    - Depth 2+: restrict to read/write items and documents only (no memory writes, no delegation, no conversation management)
+  - Returns an identical copy — the child inherits the parent's full permission set by default
+  - No arbitrary depth-based restrictions. The security invariant is: **child permissions are always a subset of parent permissions.** The parent's configuration is the ceiling.
+  - If the parent wants to further restrict a sub-agent, it can specify restrictions during delegation (optional `restrict_tools` parameter on delegate_task). The system doesn't force it.
   - Returns a `PermissionSet` object used by the delegated session's permission hook
-- New function: `validate_narrowing(parent_permissions, child_permissions) -> bool` — verifies child is strictly a subset of parent. Called at delegation time as a safety check.
+- New function: `validate_narrowing(parent_permissions, child_permissions) -> bool` — verifies child is strictly a subset of parent. Called at delegation time as a safety check. This is the enforcement point — it prevents any path where a child gains permissions the parent doesn't have, regardless of how the permissions were computed.
 - Add `delegation_depth` column to `background_tasks` (int, default 0). Note: `parent_task_id` already exists on BackgroundTask (line 668 in models.py) — do NOT add it again.
 - Modify `delegate_task()` MCP tool: accept delegation depth and narrowed permissions from the calling context. Check `delegation_depth < agent.max_spawn_depth` before allowing delegation. Increment depth for child. Pass narrowed permissions. Note: the current function signature only takes `agent_name` and `instruction` — it needs to be extended to carry parent context (depth, permission scope).
 - Cascade termination: stopping a task also stops all tasks where `parent_task_id` matches (recursive)
 
 **Tests (critical — these are the security boundary):**
-- Test: depth-0 agent can delegate with full permissions minus management tools
-- Test: depth-1 agent can delegate (if max_spawn_depth >= 2) with further-restricted permissions
+- Test: child inherits parent's full permissions by default
+- Test: child CANNOT have permissions the parent doesn't have (validate_narrowing rejects)
+- Test: optional restrict_tools narrows child permissions further
+- Test: depth-1 agent can delegate (if max_spawn_depth >= 2)
 - Test: depth-1 agent CANNOT delegate if max_spawn_depth = 1
-- Test: child agent CANNOT have permissions the parent doesn't have
 - Test: stopping parent cascade-terminates all children
-- Test: child agent cannot access tools removed by narrowing
+- Test: validate_narrowing catches every case where child exceeds parent
 
 **Files modified:** `backend/openloop/agents/permission_enforcer.py`, `backend/openloop/agents/mcp_tools.py` (delegate_task changes), `backend/openloop/agents/agent_runner.py` (cascade termination)
 **Migration:** Add `delegation_depth` to `background_tasks` (`parent_task_id` already exists)
