@@ -18,7 +18,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
 
     # Crash recovery — mark any previously-active conversations as interrupted
-    from backend.openloop.agents.agent_runner import recover_from_crash
+    from backend.openloop.agents.agent_runner import recover_from_crash, resume_autonomous_tasks
 
     db = SessionLocal()
     try:
@@ -27,6 +27,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Crash recovery: marked %d conversations as interrupted", count)
     finally:
         db.close()
+
+    # Resume autonomous tasks after a short delay to let system initialize
+    async def _delayed_resume():
+        await asyncio.sleep(2)
+        db = SessionLocal()
+        try:
+            resumed = await resume_autonomous_tasks(db)
+            if resumed:
+                logger.info("Resumed %d autonomous task(s)", resumed)
+        except Exception:
+            logger.warning("Failed to resume autonomous tasks", exc_info=True)
+        finally:
+            db.close()
+
+    asyncio.create_task(_delayed_resume())
 
     # FTS index check — rebuild if source tables have data but FTS tables are empty
     from backend.openloop.services import search_service

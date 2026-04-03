@@ -36,6 +36,7 @@ from backend.openloop.services import (
     conversation_service,
     memory_service,
     notification_service,
+    summary_service,
     system_service,
 )
 
@@ -2237,38 +2238,45 @@ async def _run_autonomous_task(
                 db, conversation_id, sdk_session_id=sdk_session_id
             )
 
-        # Generate run summary
-        if completed:
-            run_summary = result_text[:2000] if result_text else "Goal completed."
-        elif budget_exhausted:
-            run_summary = f"Budget exhausted after {turn} turns. {result_text[:1500] if result_text else ''}"
-        else:
-            run_summary = f"Stopped after {turn} turns (max reached). {result_text[:1500] if result_text else ''}"
-
-        # Mark task completed
+        # Mark task completed first (sets completed_at for duration calc)
         background_task_service.update_background_task(
             db, task_id,
             status="completed",
             result_summary=result_text[:2000] if result_text else None,
-            run_summary=run_summary,
             completed_at=datetime.now(UTC),
         )
+
+        # Generate structured run summary (creates notification too)
+        try:
+            run_summary = summary_service.generate_run_summary(db, task_id)
+        except Exception as e:
+            logger.warning("Failed to generate run summary: %s", e)
+            # Fallback summary
+            if completed:
+                run_summary = result_text[:2000] if result_text else "Goal completed."
+            elif budget_exhausted:
+                run_summary = f"Budget exhausted after {turn} turns. {result_text[:1500] if result_text else ''}"
+            else:
+                run_summary = f"Stopped after {turn} turns (max reached). {result_text[:1500] if result_text else ''}"
+            background_task_service.update_background_task(
+                db, task_id, run_summary=run_summary,
+            )
+            # Fallback notification
+            notification_service.create_notification(
+                db,
+                type="task_completed",
+                title="Autonomous run completed",
+                body=f"Goal completed: {goal[:100]}",
+                space_id=space_id,
+            )
 
         # Publish goal_complete SSE event
         await event_bus.publish({
             "type": "goal_complete",
             "task_id": task_id,
             "conversation_id": conversation_id,
-            "run_summary": run_summary[:500],
+            "run_summary": (run_summary or "")[:500],
         })
-
-        notification_service.create_notification(
-            db,
-            type="task_completed",
-            title="Autonomous run completed",
-            body=f"Goal completed: {goal[:100]}",
-            space_id=space_id,
-        )
 
     except (Exception, ExceptionGroup) as exc:
         logger.error("Autonomous task %s failed at turn %d: %s", task_id, turn, exc)
@@ -2535,17 +2543,153 @@ def recover_from_crash(db: Session) -> int:
         .all()
     )
     now = datetime.now(UTC)
-    for task in orphaned_tasks:
+
+    # Pass 1: Autonomous tasks — check if resumable
+    autonomous_tasks = [t for t in orphaned_tasks if t.run_type == "autonomous"]
+    regular_tasks = [
+        t for t in orphaned_tasks
+        if t.run_type != "autonomous" and not t.parent_task_id
+    ]
+    subagent_tasks = [
+        t for t in orphaned_tasks
+        if t.parent_task_id is not None and t.run_type != "autonomous"
+    ]
+
+    resumed_count = 0
+    failed_count = 0
+
+    for task in autonomous_tasks:
+        if _is_resumable(task):
+            task.status = BackgroundTaskStatus.PENDING_RESUME
+            resumed_count += 1
+        else:
+            progress = (
+                f" (completed {task.completed_count}/{task.total_count} items)"
+                if task.total_count
+                else ""
+            )
+            task.error = f"Server restarted during execution{progress}"
+            task.status = BackgroundTaskStatus.FAILED
+            task.completed_at = now
+            failed_count += 1
+
+    # Pass 2: Sub-agent tasks — always mark failed (coordinator will re-delegate)
+    for task in subagent_tasks:
+        task.status = BackgroundTaskStatus.FAILED
+        task.error = "Server restarted during execution (sub-agent)"
+        task.completed_at = now
+        failed_count += 1
+
+    # Pass 3: Regular tasks + heartbeats — existing behavior
+    for task in regular_tasks:
         task.status = BackgroundTaskStatus.FAILED
         task.error = "Server restarted during execution"
         task.completed_at = now
+        failed_count += 1
+
     if orphaned_tasks:
         db.commit()
+        parts = []
+        if resumed_count:
+            parts.append(f"{resumed_count} autonomous run(s) queued for resume")
+        if failed_count:
+            parts.append(f"{failed_count} task(s) marked failed")
+        if parts:
+            notification_service.create_notification(
+                db,
+                type="system",
+                title="System recovered",
+                body=", ".join(parts) + ".",
+            )
         logger.info(
-            "Crash recovery: marked %d orphaned background tasks as failed",
+            "Crash recovery: %d orphaned tasks — %d queued for resume, %d failed",
             len(orphaned_tasks),
+            resumed_count,
+            failed_count,
         )
 
+    return count
+
+
+def _is_resumable(task) -> bool:
+    """Check if an autonomous task can be resumed from its task list."""
+    if not task.goal:
+        return False
+    if not task.task_list:
+        return False
+    # Check if there are any non-completed items
+    try:
+        for item in task.task_list:
+            status = item.get("status", "pending") if isinstance(item, dict) else "pending"
+            if status != "completed":
+                return True
+    except (TypeError, AttributeError, KeyError):
+        return False
+    return False
+
+
+async def resume_autonomous_tasks(db: Session) -> int:
+    """Resume autonomous tasks that were marked pending_resume during crash recovery."""
+    from contract.enums import BackgroundTaskStatus
+
+    from backend.openloop.db.models import BackgroundTask
+
+    pending = (
+        db.query(BackgroundTask)
+        .filter(BackgroundTask.status == BackgroundTaskStatus.PENDING_RESUME)
+        .all()
+    )
+
+    if not pending:
+        return 0
+
+    count = 0
+    for task in pending:
+        # Restore conversation if exists
+        if task.conversation_id:
+            conversation_service.update_conversation(db, task.conversation_id, status="active")
+            _background_conversations.add(task.conversation_id)
+
+        # Update task status
+        task.status = BackgroundTaskStatus.RUNNING
+        task.started_at = datetime.now(UTC)
+        db.commit()
+
+        # Load agent for the run
+        agent = agent_service.get_agent(db, task.agent_id)
+        if not agent:
+            task.status = BackgroundTaskStatus.FAILED
+            task.error = "Agent not found during resume"
+            task.completed_at = datetime.now(UTC)
+            db.commit()
+            continue
+
+        # Fire the autonomous task loop (same pattern as approve_autonomous_launch)
+        bg = asyncio.create_task(
+            _run_autonomous_task(
+                task_id=task.id,
+                conversation_id=task.conversation_id,
+                agent_id=task.agent_id,
+                agent_name=agent.name,
+                default_model=agent.default_model,
+                goal=task.goal or task.instruction,
+                constraints=None,
+                space_id=task.space_id,
+            )
+        )
+        _background_tasks.add(bg)
+        bg.add_done_callback(_task_done)
+
+        notification_service.create_notification(
+            db,
+            type="system",
+            title="Autonomous run resumed",
+            body=f"Resumed after restart: {(task.goal or task.instruction)[:100]}",
+            space_id=task.space_id,
+        )
+        count += 1
+
+    logger.info("Resumed %d autonomous task(s) after crash recovery", count)
     return count
 
 

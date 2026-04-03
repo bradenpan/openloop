@@ -290,8 +290,8 @@ def test_expire_stale_expires_old_entries(db_session: Session):
     # Create a fresh entry that should NOT be expired
     fresh = _make_approval(db_session, agent_id, task_id, action_type="fresh")
 
-    count = approval_service.expire_stale(db_session, hours=24)
-    assert count == 1
+    expired = approval_service.expire_stale(db_session, default_hours=24)
+    assert len(expired) == 1
 
     db_session.refresh(entry)
     assert entry.status == ApprovalStatus.EXPIRED
@@ -313,12 +313,12 @@ def test_expire_stale_decrements_queued_count(db_session: Session):
     task = db_session.query(BackgroundTask).filter(BackgroundTask.id == task_id).first()
     assert task.queued_approvals_count == 1
 
-    approval_service.expire_stale(db_session, hours=24)
+    approval_service.expire_stale(db_session, default_hours=24)
 
     db_session.refresh(task)
     assert task.queued_approvals_count == 0
 
 
 def test_expire_stale_no_entries(db_session: Session):
-    count = approval_service.expire_stale(db_session, hours=24)
-    assert count == 0
+    expired = approval_service.expire_stale(db_session, default_hours=24)
+    assert len(expired) == 0

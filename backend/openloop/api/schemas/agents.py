@@ -36,6 +36,7 @@ class AgentUpdate(BaseModel):
     max_spawn_depth: int | None = None
     heartbeat_enabled: bool | None = None
     heartbeat_cron: str | None = None
+    approval_timeout_hours: int | None = None
 
 
 class AgentResponse(BaseModel):
@@ -53,6 +54,7 @@ class AgentResponse(BaseModel):
     max_spawn_depth: int = 1
     heartbeat_enabled: bool = False
     heartbeat_cron: str | None = None
+    approval_timeout_hours: int | None = None
     created_at: datetime
     updated_at: datetime
 

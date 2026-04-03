@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
-from backend.openloop.api.schemas import DashboardResponse
+from backend.openloop.api.schemas import DashboardResponse, MorningBriefResponse
 from backend.openloop.database import get_db
 from backend.openloop.db.models import Conversation, Item, PermissionRequest, Space
-from backend.openloop.services import notification_service
+from backend.openloop.services import notification_service, summary_service
 
 router = APIRouter(prefix="/api/v1/home", tags=["home"])
 
@@ -32,3 +32,15 @@ def get_dashboard(db: Session = Depends(get_db)) -> DashboardResponse:
         active_conversations=active_convs,
         unread_notifications=unread,
     )
+
+
+@router.post("/morning-brief/dismiss", status_code=204)
+def dismiss_morning_brief(db: Session = Depends(get_db)):
+    """Mark morning brief as dismissed by updating user_last_seen."""
+    summary_service.update_last_seen(db)
+
+
+@router.get("/morning-brief", response_model=MorningBriefResponse)
+def get_morning_brief(db: Session = Depends(get_db)):
+    data = summary_service.get_morning_brief(db)
+    return data

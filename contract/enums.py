@@ -52,6 +52,7 @@ class BackgroundTaskStatus(StrEnum):
     FAILED = "failed"
     CANCELLED = "cancelled"
     INTERRUPTED = "interrupted"
+    PENDING_RESUME = "pending_resume"
 
 
 class BackgroundTaskRunType(StrEnum):

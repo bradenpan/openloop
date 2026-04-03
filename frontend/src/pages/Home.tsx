@@ -5,6 +5,7 @@ import { Card, CardBody } from '../components/ui';
 import { AttentionItems } from '../components/home/attention-items';
 import { ActiveAgents, useHasActiveAgents } from '../components/home/active-agents';
 import { ActivityFeed } from '../components/home/activity-feed';
+import { MorningBrief } from '../components/dashboard/morning-brief';
 import { PendingApprovals } from '../components/home/pending-approvals';
 import { SpaceList } from '../components/home/space-list';
 import { TaskOverview } from '../components/home/todo-overview';
@@ -107,6 +108,9 @@ export default function Home() {
           />
         </>
       )}
+
+      {/* Morning Brief — overnight autonomous run summaries */}
+      <MorningBrief />
 
       {/* Conditional ordering: Active Agents first when running */}
       {hasActiveAgents && activeAgentsSection}

@@ -136,6 +136,9 @@ async def _tick() -> None:
 
         # --- Heartbeat evaluation ---
         await _evaluate_heartbeats(db, now_naive)
+
+        # --- Expire stale approvals ---
+        await _expire_stale_approvals(db)
     finally:
         db.close()
 
@@ -253,6 +256,39 @@ async def _fire_heartbeat(db, agent: Agent) -> None:
         instruction=survey_prompt,
         space_id=space_id,
         run_type=BackgroundTaskRunType.HEARTBEAT,
+    )
+
+
+async def _expire_stale_approvals(db) -> None:
+    """Expire stale approvals and inject steering for tasks still running."""
+    from backend.openloop.agents import agent_runner
+    from backend.openloop.services import approval_service
+
+    expired_approvals = approval_service.expire_stale(db)
+    if not expired_approvals:
+        return
+
+    logger.info("Expired %d stale approval(s)", len(expired_approvals))
+
+    # Inject steering for expired approvals where task is still running
+    for entry in expired_approvals:
+        task = db.query(BackgroundTask).filter(BackgroundTask.id == entry.background_task_id).first()
+        if task and task.status in ("running", "paused") and task.conversation_id:
+            try:
+                await agent_runner.steer(
+                    task.conversation_id,
+                    f"Approval expired for: {entry.action_type}. "
+                    "No user response within timeout. Skip this action and continue with remaining work.",
+                )
+            except Exception as e:
+                logger.warning("Failed to steer for expired approval %s: %s", entry.id, e)
+
+    # Create notification for expired approvals
+    notification_service.create_notification(
+        db,
+        type=NotificationType.SYSTEM,
+        title="Approvals expired",
+        body=f"{len(expired_approvals)} approval(s) expired without response.",
     )
 
 

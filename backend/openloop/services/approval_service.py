@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.orm import Session
 
-from backend.openloop.db.models import ApprovalQueue, BackgroundTask
-from contract.enums import ApprovalStatus
+from backend.openloop.db.models import Agent, ApprovalQueue, BackgroundTask
+from contract.enums import ApprovalStatus, BackgroundTaskStatus
 
 
 def create_approval(
@@ -85,18 +85,34 @@ def resolve_approval(
 
     Sets status, resolved_at, resolved_by. Decrements queued_approvals_count
     on the associated BackgroundTask.
+
+    If status is "approved" but the associated BackgroundTask is no longer
+    running (not in running/paused), the approval is set to "expired" instead.
     """
     entry = db.query(ApprovalQueue).filter(ApprovalQueue.id == approval_id).first()
     if entry is None:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Approval not found")
 
+    if entry.status != ApprovalStatus.PENDING:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=409, detail="Approval already resolved")
+
+    # Check if task is still running when approving
+    task = db.query(BackgroundTask).filter(BackgroundTask.id == entry.background_task_id).first()
+    if status == ApprovalStatus.APPROVED and task is not None:
+        if task.status not in (
+            BackgroundTaskStatus.RUNNING.value,
+            BackgroundTaskStatus.PAUSED.value,
+        ):
+            # Task is no longer running — expire the approval instead
+            status = ApprovalStatus.EXPIRED
+
     entry.status = status
     entry.resolved_at = datetime.now(UTC).replace(tzinfo=None)
     entry.resolved_by = resolved_by
 
     # Decrement queued_approvals_count on the background task
-    task = db.query(BackgroundTask).filter(BackgroundTask.id == entry.background_task_id).first()
     if task is not None and (task.queued_approvals_count or 0) > 0:
         task.queued_approvals_count = task.queued_approvals_count - 1
 
@@ -117,6 +133,8 @@ def batch_resolve(
     for approval_id in approval_ids:
         entry = db.query(ApprovalQueue).filter(ApprovalQueue.id == approval_id).first()
         if entry is None:
+            continue
+        if entry.status != ApprovalStatus.PENDING:
             continue
         entry.status = status
         entry.resolved_at = datetime.now(UTC).replace(tzinfo=None)
@@ -155,31 +173,45 @@ def list_pending(
 def expire_stale(
     db: Session,
     *,
-    hours: int = 24,
-) -> int:
-    """Find pending approvals older than `hours` and set status=expired.
+    default_hours: int = 24,
+) -> list[ApprovalQueue]:
+    """Find pending approvals past their timeout and expire them.
 
-    Returns the number of expired entries.
+    Uses per-agent approval_timeout_hours if set, otherwise default_hours.
+    Returns the list of expired entries (so callers can handle steering).
     """
-    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
-    stale = (
+    pending = (
         db.query(ApprovalQueue)
-        .filter(
-            ApprovalQueue.status == ApprovalStatus.PENDING,
-            ApprovalQueue.created_at < cutoff,
-        )
+        .filter(ApprovalQueue.status == ApprovalStatus.PENDING)
         .all()
     )
+
     now = datetime.now(UTC).replace(tzinfo=None)
-    for entry in stale:
-        entry.status = ApprovalStatus.EXPIRED
-        entry.resolved_at = now
-        entry.resolved_by = "system"
+    expired: list[ApprovalQueue] = []
 
-        # Decrement queued_approvals_count on the background task
-        task = db.query(BackgroundTask).filter(BackgroundTask.id == entry.background_task_id).first()
-        if task is not None and (task.queued_approvals_count or 0) > 0:
-            task.queued_approvals_count = task.queued_approvals_count - 1
+    for entry in pending:
+        # Look up per-agent timeout
+        agent = db.query(Agent).filter(Agent.id == entry.agent_id).first()
+        timeout_hours = (
+            agent.approval_timeout_hours
+            if agent and agent.approval_timeout_hours
+            else default_hours
+        )
+        cutoff = now - timedelta(hours=timeout_hours)
 
-    db.commit()
-    return len(stale)
+        if entry.created_at < cutoff:
+            entry.status = ApprovalStatus.EXPIRED
+            entry.resolved_at = now
+            entry.resolved_by = "system"
+
+            # Decrement queued_approvals_count on the background task
+            task = db.query(BackgroundTask).filter(BackgroundTask.id == entry.background_task_id).first()
+            if task is not None and (task.queued_approvals_count or 0) > 0:
+                task.queued_approvals_count = task.queued_approvals_count - 1
+
+            expired.append(entry)
+
+    if expired:
+        db.commit()
+
+    return expired

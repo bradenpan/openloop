@@ -271,6 +271,7 @@ class Agent(Base):
     max_spawn_depth: Mapped[int] = mapped_column(Integer, default=1)
     heartbeat_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     heartbeat_cron: Mapped[str | None] = mapped_column(String, nullable=True)
+    approval_timeout_hours: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
