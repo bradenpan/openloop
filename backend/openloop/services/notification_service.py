@@ -1,3 +1,4 @@
+from contract.enums import NotificationType
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -15,6 +16,12 @@ def create_notification(
     automation_id: str | None = None,
 ) -> Notification:
     """Create a notification."""
+    valid_types = {t.value for t in NotificationType}
+    if type not in valid_types:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid notification type '{type}'. Valid: {sorted(valid_types)}",
+        )
     notif = Notification(
         type=type,
         title=title,

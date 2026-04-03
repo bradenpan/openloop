@@ -7,7 +7,7 @@ from backend.openloop.db.models import Agent, Conversation
 
 def test_post_odin_message_returns_201(client, db_session):
     """POST /api/v1/odin/message should return 201 with the stored user message."""
-    # Mock the background task that calls session_manager
+    # Mock the background task that calls agent_runner
     with patch(
         "backend.openloop.api.routes.odin.odin.send_message",
         return_value=AsyncMock(),

@@ -39,8 +39,9 @@ def create_agent(
     if space_ids:
         for sid in space_ids:
             space = db.query(Space).filter(Space.id == sid).first()
-            if space:
-                agent.spaces.append(space)
+            if not space:
+                raise HTTPException(status_code=404, detail=f"Space '{sid}' not found")
+            agent.spaces.append(space)
 
     db.commit()
     db.refresh(agent)

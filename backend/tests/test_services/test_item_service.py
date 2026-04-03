@@ -370,3 +370,42 @@ def test_lightweight_creation_defaults(db_session: Session):
     assert item.priority is None
     assert item.stage == space.board_columns[0]
     assert item.created_by == "user"
+
+
+# ---------------------------------------------------------------------------
+# update_item rejects stage changes
+# ---------------------------------------------------------------------------
+
+
+def test_update_item_rejects_stage_with_422(db_session: Session):
+    """update_item should reject stage changes with 422 — use move_item instead."""
+    space = _make_space(db_session)
+    item = item_service.create_item(db_session, space_id=space.id, title="Stage Reject")
+    with pytest.raises(HTTPException) as exc_info:
+        item_service.update_item(db_session, item.id, stage="todo")
+    assert exc_info.value.status_code == 422
+    assert "move_item" in exc_info.value.detail.lower()
+
+
+# ---------------------------------------------------------------------------
+# move_item with empty board_columns
+# ---------------------------------------------------------------------------
+
+
+def test_move_item_empty_board_columns_no_crash(db_session: Session):
+    """move_item on a space with empty board_columns should not crash.
+
+    The stage validation and is_done sync should be skipped gracefully.
+    """
+    space = _make_space(db_session)
+    item = item_service.create_item(db_session, space_id=space.id, title="Move Me")
+
+    # Manually clear board_columns to simulate empty columns
+    space.board_columns = []
+    db_session.commit()
+
+    # Should not crash — validation is skipped when board_columns is empty
+    moved = item_service.move_item(db_session, item.id, "any_stage")
+    assert moved.stage == "any_stage"
+    # is_done sync should be skipped (no board_columns to compare against)
+    assert moved.is_done is False

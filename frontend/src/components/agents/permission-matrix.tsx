@@ -160,6 +160,7 @@ export function PermissionMatrix({ agent }: PermissionMatrixProps) {
                                 value={perm?.grant_level ?? ''}
                                 onChange={(e) => handleGrantChange(resource, op, e.target.value)}
                                 disabled={isMutating}
+                                aria-label={`${resource} ${op} permission`}
                                 className="bg-raised text-foreground border border-border rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-primary cursor-pointer disabled:opacity-50 min-w-[80px]"
                               >
                                 <option value="">--</option>

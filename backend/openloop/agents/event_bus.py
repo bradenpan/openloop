@@ -7,7 +7,15 @@ publish events here; the SSE endpoint subscribes and forwards them to clients.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
+
+#: Safety cap on per-subscriber queue depth.  If a consumer falls this far
+#: behind (or disconnects without unsubscribing), new events are dropped
+#: rather than accumulating unboundedly.
+_MAX_QUEUE_SIZE = 1000
 
 
 class EventBus:
@@ -23,7 +31,7 @@ class EventBus:
 
     def subscribe_all(self) -> asyncio.Queue:
         """Subscribe to all events. Returns a queue that receives all events."""
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=_MAX_QUEUE_SIZE)
         self._global_subscribers.append(queue)
         return queue
 
@@ -37,7 +45,14 @@ class EventBus:
     async def publish(self, event: dict) -> None:
         """Publish an event to all global subscribers."""
         for queue in self._global_subscribers:
-            await queue.put(event)
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Global subscriber queue full (%d items), dropping event: %s",
+                    _MAX_QUEUE_SIZE,
+                    event.get("type", "unknown"),
+                )
 
     # ------------------------------------------------------------------
     # Per-channel (e.g. per-conversation) subscriptions
@@ -48,7 +63,7 @@ class EventBus:
 
         Returns a queue that receives only events published to that channel.
         """
-        queue: asyncio.Queue = asyncio.Queue()
+        queue: asyncio.Queue = asyncio.Queue(maxsize=_MAX_QUEUE_SIZE)
         self._subscribers[channel].append(queue)
         return queue
 
@@ -65,9 +80,24 @@ class EventBus:
     async def publish_to(self, channel: str, event: dict) -> None:
         """Publish an event to channel subscribers AND all global subscribers."""
         for queue in self._subscribers.get(channel, []):
-            await queue.put(event)
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Channel %r subscriber queue full (%d items), dropping event: %s",
+                    channel,
+                    _MAX_QUEUE_SIZE,
+                    event.get("type", "unknown"),
+                )
         for queue in self._global_subscribers:
-            await queue.put(event)
+            try:
+                queue.put_nowait(event)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Global subscriber queue full (%d items), dropping event: %s",
+                    _MAX_QUEUE_SIZE,
+                    event.get("type", "unknown"),
+                )
 
 
 # Singleton

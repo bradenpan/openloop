@@ -44,7 +44,7 @@ def update_space(space_id: str, body: SpaceUpdate, db: Session = Depends(get_db)
     return SpaceResponse.model_validate(space)
 
 
-@router.get("/{space_id}/field-schema")
+@router.get("/{space_id}/field-schema", response_model=list)
 def get_field_schema(space_id: str, db: Session = Depends(get_db)):
     space = space_service.get_space(db, space_id)
     return space.custom_field_schema or []

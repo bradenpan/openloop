@@ -44,7 +44,7 @@ class ConsolidationResponse(BaseModel):
     space_id: str | None
     conversation_id: str | None
     summary: str
-    decisions: list | None
-    open_questions: list | None
+    decisions: list[str] | None
+    open_questions: list[str] | None
     is_meta_summary: bool
     created_at: datetime

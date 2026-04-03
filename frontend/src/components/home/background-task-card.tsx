@@ -90,11 +90,11 @@ export function BackgroundTaskCard({ task, indented = false }: BackgroundTaskCar
     setSteerLoading(true);
     setSteerError(null);
     try {
-      const res = await api.POST('/api/v1/conversations/{conversation_id}/steer' as never, {
+      const res = await api.POST('/api/v1/conversations/{conversation_id}/steer', {
         params: { path: { conversation_id: task.conversation_id } },
         body: { message: trimmed },
-      } as never);
-      if ((res as { error?: unknown }).error) {
+      });
+      if (res.error) {
         setSteerError('Failed to send steering message');
       } else {
         setSteerValue('');

@@ -11,7 +11,6 @@ __all__ = [
 
 
 class BehavioralRuleCreate(BaseModel):
-    agent_id: str
     rule: str
     source_type: RuleSourceType = RuleSourceType.CORRECTION
     source_conversation_id: str | None = None

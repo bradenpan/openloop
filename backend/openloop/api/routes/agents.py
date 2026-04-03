@@ -13,6 +13,10 @@ from backend.openloop.api.schemas import (
 from backend.openloop.database import get_db
 from backend.openloop.services import agent_service
 
+# NOTE: running_router (in running.py) shares prefix /api/v1/agents and is
+# included BEFORE this router in main.py so that /agents/running resolves
+# before the /{agent_id} catch-all here.  Do not reorder without updating
+# the include order in main.py.
 router = APIRouter(prefix="/api/v1/agents", tags=["agents"])
 
 

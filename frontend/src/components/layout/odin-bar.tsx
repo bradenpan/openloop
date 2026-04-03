@@ -4,8 +4,14 @@ import { useSSEEvent, type SSEEvent } from '../../hooks/use-sse';
 import { useUIStore } from '../../stores/ui-store';
 
 interface OdinMessage {
+  id: string;
   role: 'user' | 'assistant';
   content: string;
+}
+
+let nextMsgId = 1;
+function msgId(): string {
+  return `odin-msg-${nextMsgId++}`;
 }
 
 export function OdinBar() {
@@ -16,7 +22,9 @@ export function OdinBar() {
   const [messages, setMessages] = useState<OdinMessage[]>([]);
   const [streamingContent, setStreamingContent] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const pendingSendRef = useRef(false);
 
   const sendToOdin = $api.useMutation('post', '/api/v1/odin/message');
 
@@ -25,58 +33,80 @@ export function OdinBar() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamingContent]);
 
-  // Listen for Odin SSE events (Odin uses a system-level conversation, no conversation_id filter)
+  // Listen for SSE events scoped to Odin's conversation
   useSSEEvent(
-    useCallback((event: SSEEvent) => {
-      if (event.type === 'token') {
-        setIsStreaming(true);
-        setStreamingContent((prev) => (prev ?? '') + event.content);
-      }
-      if (event.type === 'error') {
-        setIsStreaming(false);
-        setStreamingContent(null);
-      }
-    }, []),
+    useCallback(
+      (event: SSEEvent) => {
+        // Before the first message, conversationId is null — ignore events unless a send is pending
+        if (conversationId === null && !pendingSendRef.current) return;
+        // Only process events that belong to Odin's conversation (skip check while awaiting first conversationId)
+        if (conversationId !== null && 'conversation_id' in event && event.conversation_id !== conversationId) return;
+
+        if (event.type === 'token') {
+          setIsStreaming(true);
+          setStreamingContent((prev) => (prev ?? '') + event.content);
+        }
+        if (event.type === 'stream_end') {
+          setStreamingContent((prev) => {
+            if (prev) {
+              setMessages((msgs) => [...msgs, { id: msgId(), role: 'assistant', content: prev }]);
+            }
+            return null;
+          });
+          setIsStreaming(false);
+        }
+        if (event.type === 'error') {
+          setIsStreaming(false);
+          setStreamingContent(null);
+        }
+      },
+      [conversationId],
+    ),
   );
 
   const handleSend = () => {
     const text = input.trim();
     if (!text || isStreaming) return;
 
-    setMessages((prev) => [...prev, { role: 'user', content: text }]);
+    setMessages((prev) => [...prev, { id: msgId(), role: 'user', content: text }]);
     setInput('');
     setStreamingContent(null);
     setIsStreaming(true);
 
+    pendingSendRef.current = true;
     sendToOdin.mutate(
       { body: { content: text } },
       {
-        onSuccess: () => {
-          // Odin response will stream via SSE
+        onSuccess: (data) => {
+          // Track Odin's conversation so we only process its SSE events
+          setConversationId(data.conversation_id);
+          pendingSendRef.current = false;
         },
         onError: () => {
+          pendingSendRef.current = false;
           setIsStreaming(false);
           setMessages((prev) => [
             ...prev,
-            { role: 'assistant', content: 'Failed to reach Odin. Is the backend running?' },
+            { id: msgId(), role: 'assistant', content: 'Failed to reach Odin. Is the backend running?' },
           ]);
         },
       },
     );
   };
 
-  // When streaming finishes (detected by absence of new tokens), persist the streamed message
-  // For now, we finalize when the user sends the next message or after a timeout
+  // Fallback: if stream_end is never received (network issue, backend bug),
+  // finalize after 10 seconds of silence
   useEffect(() => {
     if (!isStreaming || streamingContent === null) return;
-    // Simple approach: if no new token in 2 seconds, finalize
     const timer = setTimeout(() => {
-      if (streamingContent) {
-        setMessages((prev) => [...prev, { role: 'assistant', content: streamingContent }]);
-        setStreamingContent(null);
-        setIsStreaming(false);
-      }
-    }, 2000);
+      setStreamingContent((prev) => {
+        if (prev) {
+          setMessages((msgs) => [...msgs, { id: msgId(), role: 'assistant', content: prev }]);
+        }
+        return null;
+      });
+      setIsStreaming(false);
+    }, 10_000);
     return () => clearTimeout(timer);
   }, [isStreaming, streamingContent]);
 
@@ -97,8 +127,8 @@ export function OdinBar() {
               Ask Odin anything — create tasks, navigate spaces, or get help.
             </p>
           )}
-          {messages.map((msg, i) => (
-            <div key={i} className={`mb-2 text-sm ${msg.role === 'user' ? '' : 'text-muted'}`}>
+          {messages.map((msg) => (
+            <div key={msg.id} className={`mb-2 text-sm ${msg.role === 'user' ? '' : 'text-muted'}`}>
               <span className="text-xs font-semibold text-muted mr-2">
                 {msg.role === 'user' ? 'You' : 'Odin'}
               </span>

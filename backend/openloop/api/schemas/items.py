@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from contract.enums import ItemType
+from contract.enums import ItemType, LinkType
 from pydantic import BaseModel, ConfigDict
 
 __all__ = [
@@ -52,7 +52,7 @@ class ItemResponse(BaseModel):
 
     id: str
     space_id: str
-    item_type: str
+    item_type: ItemType
     is_agent_task: bool
     is_done: bool
     title: str
@@ -91,7 +91,7 @@ class RecordChildrenResponse(BaseModel):
 
 class ItemLinkCreate(BaseModel):
     target_item_id: str
-    link_type: str = "related_to"
+    link_type: LinkType = LinkType.RELATED_TO
 
 
 class ItemLinkResponse(BaseModel):
@@ -100,5 +100,5 @@ class ItemLinkResponse(BaseModel):
     id: str
     source_item_id: str
     target_item_id: str
-    link_type: str
+    link_type: LinkType
     created_at: datetime

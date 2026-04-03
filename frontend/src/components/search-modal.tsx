@@ -26,8 +26,11 @@ const TYPE_ICONS: Record<string, string> = {
 };
 
 function highlightExcerpt(html: string): string {
-  // The backend already wraps matches in <mark> tags via snippet().
-  // We just return it as-is for dangerouslySetInnerHTML.
+  // SAFETY: The backend (search_service.py :: _safe_snippet) HTML-escapes the
+  // entire FTS5 snippet output, then restores only <mark>/<​/mark> tags from
+  // null-byte delimiters that cannot appear in user content. The result is
+  // guaranteed to contain no HTML other than <mark> highlight wrappers, so
+  // dangerouslySetInnerHTML is safe here.
   return html;
 }
 
@@ -211,6 +214,8 @@ export function SearchModal() {
                         </span>
                       )}
                     </div>
+                    {/* Safe: excerpt is HTML-escaped server-side with only <mark> allowed through.
+                        See: backend/openloop/services/search_service.py :: _safe_snippet() */}
                     <div
                       className="text-xs text-muted line-clamp-2 [&_mark]:bg-primary/30 [&_mark]:text-foreground [&_mark]:rounded-sm [&_mark]:px-0.5"
                       dangerouslySetInnerHTML={{

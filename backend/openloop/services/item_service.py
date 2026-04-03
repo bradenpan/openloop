@@ -36,7 +36,7 @@ def create_item(
         raise HTTPException(status_code=422, detail=f"Invalid item_type: {item_type}")
 
     # Validate stage if provided
-    if stage and space.board_columns and stage not in space.board_columns:
+    if stage is not None and space.board_columns and stage not in space.board_columns:
         raise HTTPException(
             status_code=422,
             detail=f"Invalid stage '{stage}'. Valid: {space.board_columns}",
@@ -141,6 +141,13 @@ def update_item(db: Session, item_id: str, triggered_by: str = "user", **kwargs)
     """Update a board item. Uses exclude_unset pattern."""
     item = get_item(db, item_id)
 
+    # Stage changes require validation + is_done sync; route through move_item
+    if "stage" in kwargs:
+        raise HTTPException(
+            status_code=422,
+            detail="Use move_item to change stage",
+        )
+
     # Validate custom fields if provided
     if "custom_fields" in kwargs and kwargs["custom_fields"] is not None:
         validate_custom_fields(db, item.space_id, kwargs["custom_fields"])
@@ -199,8 +206,8 @@ def move_item(db: Session, item_id: str, stage: str, triggered_by: str = "user")
     item.stage = stage
 
     # Sync is_done for tasks when moving to/from done column
-    if item.item_type == "task":
-        done_col = "done" if "done" in (space.board_columns or []) else (space.board_columns or [""])[-1]
+    if item.item_type == "task" and space and space.board_columns:
+        done_col = "done" if "done" in space.board_columns else space.board_columns[-1]
         if stage == done_col:
             item.is_done = True
         else:

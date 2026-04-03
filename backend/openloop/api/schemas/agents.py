@@ -11,6 +11,7 @@ __all__ = [
     "AgentPermissionResponse",
     "PermissionRequestUpdate",
     "PermissionRequestResponse",
+    "RunningSessionResponse",
 ]
 
 
@@ -42,8 +43,9 @@ class AgentResponse(BaseModel):
     description: str | None
     system_prompt: str | None
     default_model: str
-    tools: list | None
-    mcp_tools: list | None
+    tools: list[str] | None
+    mcp_tools: list[str] | None
+    skill_path: str | None = None
     status: str
     created_at: datetime
     updated_at: datetime
@@ -91,3 +93,13 @@ class PermissionRequestResponse(BaseModel):
     resolved_by: str | None
     created_at: datetime
     resolved_at: datetime | None
+
+
+class RunningSessionResponse(BaseModel):
+    conversation_id: str
+    agent_id: str
+    space_id: str | None
+    sdk_session_id: str | None
+    status: str
+    started_at: str
+    last_activity: str

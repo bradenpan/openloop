@@ -20,8 +20,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "additionalProperties": true,
-                    "type": "object"
+                    "$ref": "#/components/schemas/RunningSessionResponse"
                   },
                   "type": "array",
                   "title": "Response Get Running Sessions Api V1 Agents Running Get"
@@ -778,6 +777,215 @@
         }
       }
     },
+    "/api/v1/agents/{agent_id}/rules": {
+      "get": {
+        "tags": [
+          "behavioral-rules"
+        ],
+        "summary": "List Rules",
+        "operationId": "list_rules_api_v1_agents__agent_id__rules_get",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "active_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": true,
+              "title": "Active Only"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BehavioralRuleResponse"
+                  },
+                  "title": "Response List Rules Api V1 Agents  Agent Id  Rules Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "behavioral-rules"
+        ],
+        "summary": "Create Rule",
+        "operationId": "create_rule_api_v1_agents__agent_id__rules_post",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BehavioralRuleCreate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BehavioralRuleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/agents/{agent_id}/rules/{rule_id}": {
+      "patch": {
+        "tags": [
+          "behavioral-rules"
+        ],
+        "summary": "Update Rule",
+        "operationId": "update_rule_api_v1_agents__agent_id__rules__rule_id__patch",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BehavioralRuleUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BehavioralRuleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "behavioral-rules"
+        ],
+        "summary": "Delete Rule",
+        "operationId": "delete_rule_api_v1_agents__agent_id__rules__rule_id__delete",
+        "parameters": [
+          {
+            "name": "agent_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Agent Id"
+            }
+          },
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/conversations": {
       "post": {
         "tags": [
@@ -848,7 +1056,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ConversationStatus"
                 },
                 {
                   "type": "null"
@@ -1016,6 +1224,29 @@
               "type": "string",
               "title": "Conversation Id"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
         ],
         "responses": {
@@ -1080,7 +1311,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/SteerResponse"
+                }
               }
             }
           },
@@ -1196,6 +1429,29 @@
             "schema": {
               "type": "string",
               "title": "Conversation Id"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
             }
           }
         ],
@@ -1911,7 +2167,9 @@
             "content": {
               "application/json": {
                 "schema": {}
-              }
+              },
+              "text/plain": {},
+              "application/octet-stream": {}
             }
           },
           "422": {
@@ -2817,6 +3075,16 @@
             }
           },
           {
+            "name": "include_archived",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Include Archived"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -3678,6 +3946,17 @@
               "default": 50,
               "title": "Limit"
             }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
         ],
         "responses": {
@@ -3976,7 +4255,11 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {},
+                  "title": "Response Get Field Schema Api V1 Spaces  Space Id  Field Schema Get"
+                }
               }
             }
           },
@@ -4262,7 +4545,9 @@
           "tools": {
             "anyOf": [
               {
-                "items": {},
+                "items": {
+                  "type": "string"
+                },
                 "type": "array"
               },
               {
@@ -4274,7 +4559,9 @@
           "mcp_tools": {
             "anyOf": [
               {
-                "items": {},
+                "items": {
+                  "type": "string"
+                },
                 "type": "array"
               },
               {
@@ -4282,6 +4569,17 @@
               }
             ],
             "title": "Mcp Tools"
+          },
+          "skill_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skill Path"
           },
           "status": {
             "type": "string",
@@ -4859,6 +5157,142 @@
         ],
         "title": "BackupStatusResponse"
       },
+      "BehavioralRuleCreate": {
+        "properties": {
+          "rule": {
+            "type": "string",
+            "title": "Rule"
+          },
+          "source_type": {
+            "$ref": "#/components/schemas/RuleSourceType",
+            "default": "correction"
+          },
+          "source_conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Conversation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule"
+        ],
+        "title": "BehavioralRuleCreate"
+      },
+      "BehavioralRuleResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "rule": {
+            "type": "string",
+            "title": "Rule"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type"
+          },
+          "source_conversation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Conversation Id"
+          },
+          "confidence": {
+            "type": "number",
+            "title": "Confidence"
+          },
+          "apply_count": {
+            "type": "integer",
+            "title": "Apply Count"
+          },
+          "last_applied": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Applied"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "agent_id",
+          "rule",
+          "source_type",
+          "source_conversation_id",
+          "confidence",
+          "apply_count",
+          "last_applied",
+          "is_active",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "BehavioralRuleResponse"
+      },
+      "BehavioralRuleUpdate": {
+        "properties": {
+          "rule": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rule"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          }
+        },
+        "type": "object",
+        "title": "BehavioralRuleUpdate"
+      },
       "Body_upload_document_api_v1_documents_upload_post": {
         "properties": {
           "file": {
@@ -5034,7 +5468,14 @@
             "title": "Space Id"
           },
           "conversation_id": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Conversation Id"
           },
           "summary": {
@@ -5044,7 +5485,9 @@
           "decisions": {
             "anyOf": [
               {
-                "items": {},
+                "items": {
+                  "type": "string"
+                },
                 "type": "array"
               },
               {
@@ -5056,7 +5499,9 @@
           "open_questions": {
             "anyOf": [
               {
-                "items": {},
+                "items": {
+                  "type": "string"
+                },
                 "type": "array"
               },
               {
@@ -5240,6 +5685,15 @@
           "closed_at"
         ],
         "title": "ConversationResponse"
+      },
+      "ConversationStatus": {
+        "type": "string",
+        "enum": [
+          "active",
+          "closed",
+          "interrupted"
+        ],
+        "title": "ConversationStatus"
       },
       "DashboardResponse": {
         "properties": {
@@ -5964,8 +6418,7 @@
             "title": "Target Item Id"
           },
           "link_type": {
-            "type": "string",
-            "title": "Link Type",
+            "$ref": "#/components/schemas/LinkType",
             "default": "related_to"
           }
         },
@@ -5990,8 +6443,7 @@
             "title": "Target Item Id"
           },
           "link_type": {
-            "type": "string",
-            "title": "Link Type"
+            "$ref": "#/components/schemas/LinkType"
           },
           "created_at": {
             "type": "string",
@@ -6033,8 +6485,7 @@
             "title": "Space Id"
           },
           "item_type": {
-            "type": "string",
-            "title": "Item Type"
+            "$ref": "#/components/schemas/ItemType"
           },
           "is_agent_task": {
             "type": "boolean",
@@ -6343,6 +6794,13 @@
         ],
         "title": "LayoutResponse"
       },
+      "LinkType": {
+        "type": "string",
+        "enum": [
+          "related_to"
+        ],
+        "title": "LinkType"
+      },
       "MemoryCreate": {
         "properties": {
           "namespace": {
@@ -6375,22 +6833,6 @@
             "type": "string",
             "title": "Source",
             "default": "user"
-          },
-          "importance": {
-            "type": "number",
-            "title": "Importance",
-            "default": 0.5
-          },
-          "category": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category"
           }
         },
         "type": "object",
@@ -6927,6 +7369,71 @@
         ],
         "title": "RecordChildrenResponse"
       },
+      "RuleSourceType": {
+        "type": "string",
+        "enum": [
+          "correction",
+          "validation"
+        ],
+        "title": "RuleSourceType"
+      },
+      "RunningSessionResponse": {
+        "properties": {
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          },
+          "agent_id": {
+            "type": "string",
+            "title": "Agent Id"
+          },
+          "space_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Space Id"
+          },
+          "sdk_session_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sdk Session Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "started_at": {
+            "type": "string",
+            "title": "Started At"
+          },
+          "last_activity": {
+            "type": "string",
+            "title": "Last Activity"
+          }
+        },
+        "type": "object",
+        "required": [
+          "conversation_id",
+          "agent_id",
+          "space_id",
+          "sdk_session_id",
+          "status",
+          "started_at",
+          "last_activity"
+        ],
+        "title": "RunningSessionResponse"
+      },
       "ScanResponse": {
         "properties": {
           "new_count": {
@@ -7271,6 +7778,24 @@
         ],
         "title": "SteerRequest"
       },
+      "SteerResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "conversation_id": {
+            "type": "string",
+            "title": "Conversation Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "conversation_id"
+        ],
+        "title": "SteerResponse"
+      },
       "SummaryResponse": {
         "properties": {
           "id": {
@@ -7299,7 +7824,9 @@
           "decisions": {
             "anyOf": [
               {
-                "items": {},
+                "items": {
+                  "type": "string"
+                },
                 "type": "array"
               },
               {
@@ -7311,7 +7838,9 @@
           "open_questions": {
             "anyOf": [
               {
-                "items": {},
+                "items": {
+                  "type": "string"
+                },
                 "type": "array"
               },
               {

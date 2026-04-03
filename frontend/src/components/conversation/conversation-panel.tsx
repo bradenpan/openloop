@@ -119,6 +119,11 @@ export function ConversationPanel({ conversationId, onClose }: ConversationPanel
             break;
           }
 
+          case 'stream_end': {
+            finalizeStreaming();
+            break;
+          }
+
           case 'error': {
             // Error terminates streaming
             if (isStreaming) {
@@ -154,6 +159,16 @@ export function ConversationPanel({ conversationId, onClose }: ConversationPanel
     }
     prevMessageCountRef.current = messages.length;
   }, [messages, isStreaming, finalizeStreaming]);
+
+  // Fallback: if stream_end is never received (network issue, backend bug),
+  // finalize after 10 seconds of silence (no new tokens)
+  useEffect(() => {
+    if (!isStreaming || streamingContent === null) return;
+    const timer = setTimeout(() => {
+      finalizeStreaming();
+    }, 10_000);
+    return () => clearTimeout(timer);
+  }, [isStreaming, streamingContent, finalizeStreaming]);
 
   const handleSend = (content: string) => {
     // Reset streaming state for the new response cycle

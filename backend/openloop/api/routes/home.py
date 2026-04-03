@@ -1,19 +1,10 @@
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from backend.openloop.api.schemas import DashboardResponse
 from backend.openloop.database import get_db
 from backend.openloop.db.models import Conversation, Item, PermissionRequest, Space
 from backend.openloop.services import notification_service
-
-
-class DashboardResponse(BaseModel):
-    total_spaces: int
-    open_task_count: int
-    pending_approvals: int
-    active_conversations: int
-    unread_notifications: int
-
 
 router = APIRouter(prefix="/api/v1/home", tags=["home"])
 

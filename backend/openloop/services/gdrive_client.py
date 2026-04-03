@@ -18,7 +18,14 @@ from googleapiclient.http import MediaIoBaseUpload
 
 logger = logging.getLogger(__name__)
 
-SCOPES = ["https://www.googleapis.com/auth/drive"]
+# Least-privilege scopes:
+#   drive.readonly — list/read/export files in linked folders (files the user owns)
+#   drive.file     — create files in specific folders (only files this app created)
+# Changing scopes requires re-authentication: delete token.json and re-authorize.
+SCOPES = [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+]
 
 # Project root is 3 levels up from services/
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]

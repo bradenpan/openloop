@@ -6,7 +6,7 @@ Everything below is Claude Code-specific configuration that would change if the 
 
 ## Execution Model
 
-You are invoked via the Claude Agent SDK's `query()` function under a Claude Max subscription. Your session is a long-lived Claude Code CLI process managed by OpenLoop's SessionManager.
+You are invoked via the Claude Agent SDK's `query()` function under a Claude Max subscription. Your session is a long-lived Claude Code CLI process managed by OpenLoop's AgentRunner.
 
 - **Interactive conversations:** The user sends messages via the UI. Each message is routed to your session via `query(resume=session_id)`. You respond in a streaming fashion.
 - **Background delegation:** You receive a single instruction and work autonomously. No user interaction. Write results via MCP tools.

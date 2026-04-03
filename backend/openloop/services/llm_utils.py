@@ -3,10 +3,37 @@
 import json
 import logging
 import re
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 DEDUP_MODEL = "claude-haiku-4-5-20251001"
+
+
+def _cleanup_session_file(session_id: str | None) -> None:
+    """Delete the SDK session JSONL file for a one-shot utility call.
+
+    SDK query() calls persist sessions as JSONL files under
+    ``~/.claude/projects/<project-slug>/<session_id>.jsonl``.  Utility calls
+    (dedup, consolidation) are stateless and never resumed, so their session
+    files are pure waste.  This helper finds and removes the file.
+
+    Silently ignores missing files or permission errors — cleanup failure must
+    never affect the caller.
+    """
+    if not session_id:
+        return
+    try:
+        claude_projects = Path.home() / ".claude" / "projects"
+        if not claude_projects.is_dir():
+            return
+        filename = f"{session_id}.jsonl"
+        for match in claude_projects.glob(f"*/{filename}"):
+            match.unlink()
+            logger.debug("Cleaned up utility session file: %s", match)
+            return
+    except OSError:
+        logger.debug("Failed to clean up session file for %s", session_id, exc_info=True)
 
 
 async def llm_compare_facts(new_fact: str, existing_facts: list[dict]) -> dict:
@@ -50,13 +77,17 @@ async def llm_compare_facts(new_fact: str, existing_facts: list[dict]) -> dict:
         from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
         response_text = ""
+        session_id: str | None = None
         async for event in query(
             prompt=prompt,
             options=ClaudeAgentOptions(model=DEDUP_MODEL),
         ):
             if isinstance(event, ResultMessage):
                 response_text = event.result
+                session_id = event.session_id
                 break
+
+        _cleanup_session_file(session_id)
 
         if not response_text:
             logger.warning("Empty response from SDK dedup call, defaulting to ADD")
@@ -109,13 +140,17 @@ async def llm_consolidate_facts(facts: list[dict]) -> dict:
         from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
         response_text = ""
+        session_id: str | None = None
         async for event in query(
             prompt=prompt,
             options=ClaudeAgentOptions(model=DEDUP_MODEL),
         ):
             if isinstance(event, ResultMessage):
                 response_text = event.result
+                session_id = event.session_id
                 break
+
+        _cleanup_session_file(session_id)
 
         if not response_text:
             logger.warning("Empty response from SDK consolidation call, returning empty report")

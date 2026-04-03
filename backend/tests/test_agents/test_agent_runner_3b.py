@@ -1,9 +1,9 @@
-"""Tests for Phase 3b session manager safety mechanisms.
+"""Tests for Phase 3b agent runner safety mechanisms.
 
 Covers: flush_memory, verify_compaction, _estimate_conversation_context,
 and proactive budget enforcement.
 
-These tests mock the Claude SDK heavily since the session manager bridges
+These tests mock the Claude SDK heavily since the agent runner bridges
 to the external SDK.
 """
 
@@ -16,13 +16,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from backend.openloop.agents.session_manager import (
+from backend.openloop.agents.agent_runner import (
     CONTEXT_WINDOW_TOKENS,
     FLUSH_MEMORY_PROMPT,
-    SessionState,
-    _clear_active_sessions,
     _estimate_conversation_context,
-    _get_active_sessions,
     flush_memory,
     verify_compaction,
 )
@@ -66,16 +63,9 @@ class FakeResultMessage:
 
 
 @pytest.fixture(autouse=True)
-def _clear_sessions():
-    _clear_active_sessions()
-    yield
-    _clear_active_sessions()
-
-
-@pytest.fixture(autouse=True)
 def _mock_permission_hooks():
     with patch(
-        "backend.openloop.agents.session_manager._build_hooks_dict",
+        "backend.openloop.agents.agent_runner._build_hooks_dict",
         return_value={"PreToolUse": []},
     ):
         yield
@@ -88,7 +78,7 @@ def _mock_permission_hooks():
 
 class TestFlushMemory:
     @pytest.mark.asyncio
-    @patch("backend.openloop.agents.session_manager.build_agent_tools")
+    @patch("backend.openloop.agents.agent_runner.build_agent_tools")
     async def test_sends_flush_prompt(self, mock_build_tools, db_session: Session):
         """flush_memory should send FLUSH_MEMORY_PROMPT to the SDK."""
         space = _make_space(db_session)
@@ -97,14 +87,10 @@ class TestFlushMemory:
 
         mock_build_tools.return_value = MagicMock()
 
-        state = SessionState(
-            sdk_session_id="sess-flush-001",
-            agent_id=agent.id,
-            conversation_id=conv.id,
-            space_id=space.id,
-            status="active",
+        # Set sdk_session_id on the conversation (required for flush_memory to act)
+        conversation_service.update_conversation(
+            db_session, conv.id, sdk_session_id="sess-flush-001"
         )
-        _get_active_sessions()[conv.id] = state
 
         captured_prompts = []
 
@@ -117,24 +103,30 @@ class TestFlushMemory:
         fake_sdk.ClaudeAgentOptions = MagicMock()
         fake_sdk.ResultMessage = FakeResultMessage
 
-        with patch.dict("sys.modules", {"claude_agent_sdk": fake_sdk}):
+        with (
+            patch.dict("sys.modules", {"claude_agent_sdk": fake_sdk}),
+            patch(
+                "backend.openloop.agents.agent_runner._new_db_session",
+                return_value=db_session,
+            ),
+        ):
             await flush_memory(db_session, conversation_id=conv.id)
 
         assert len(captured_prompts) == 1
         assert captured_prompts[0] == FLUSH_MEMORY_PROMPT
 
     @pytest.mark.asyncio
-    async def test_noop_without_active_session(self, db_session: Session):
-        """flush_memory should do nothing if there's no active session."""
+    async def test_noop_without_sdk_session_id(self, db_session: Session):
+        """flush_memory should do nothing if conversation has no sdk_session_id."""
         space = _make_space(db_session)
         agent = _make_agent(db_session, name="NoSessFlush")
         conv = _make_conversation(db_session, space.id, agent.id)
 
-        # No active session registered — should return without error
+        # No sdk_session_id set — should return without error
         await flush_memory(db_session, conversation_id=conv.id)
 
     @pytest.mark.asyncio
-    @patch("backend.openloop.agents.session_manager.build_agent_tools")
+    @patch("backend.openloop.agents.agent_runner.build_agent_tools")
     async def test_catches_exceptions(self, mock_build_tools, db_session: Session):
         """flush_memory should catch and log exceptions, not raise them."""
         space = _make_space(db_session)
@@ -143,14 +135,10 @@ class TestFlushMemory:
 
         mock_build_tools.return_value = MagicMock()
 
-        state = SessionState(
-            sdk_session_id="sess-err-flush",
-            agent_id=agent.id,
-            conversation_id=conv.id,
-            space_id=space.id,
-            status="active",
+        # Set sdk_session_id so flush_memory actually tries to call the SDK
+        conversation_service.update_conversation(
+            db_session, conv.id, sdk_session_id="sess-err-flush"
         )
-        _get_active_sessions()[conv.id] = state
 
         async def _raise_query(*args, **kwargs):
             raise RuntimeError("SDK exploded")
@@ -190,7 +178,7 @@ class TestVerifyCompaction:
         # Compressed content mentions the same decision (no extra lines that trigger patterns)
         compressed = "We decided to use FastAPI for the backend"
 
-        with caplog.at_level(logging.WARNING, logger="backend.openloop.agents.session_manager"):
+        with caplog.at_level(logging.WARNING, logger="backend.openloop.agents.agent_runner"):
             await verify_compaction(
                 db_session,
                 conversation_id=conv.id,
@@ -210,7 +198,7 @@ class TestVerifyCompaction:
         # No memory entries at all — compressed content has decisions
         compressed = "user: We decided to use GraphQL instead of REST"
 
-        with caplog.at_level(logging.WARNING, logger="backend.openloop.agents.session_manager"):
+        with caplog.at_level(logging.WARNING, logger="backend.openloop.agents.agent_runner"):
             await verify_compaction(
                 db_session,
                 conversation_id=conv.id,
@@ -227,7 +215,7 @@ class TestVerifyCompaction:
         agent = _make_agent(db_session, name="VerifyEmpty")
         conv = _make_conversation(db_session, space.id, agent.id)
 
-        with caplog.at_level(logging.WARNING, logger="backend.openloop.agents.session_manager"):
+        with caplog.at_level(logging.WARNING, logger="backend.openloop.agents.agent_runner"):
             await verify_compaction(
                 db_session,
                 conversation_id=conv.id,
@@ -309,7 +297,7 @@ class TestEstimateConversationContext:
 
 class TestProactiveBudgetEnforcement:
     @pytest.mark.asyncio
-    @patch("backend.openloop.agents.session_manager.build_agent_tools")
+    @patch("backend.openloop.agents.agent_runner.build_agent_tools")
     async def test_flush_and_compress_called_above_threshold(
         self, mock_build_tools, db_session: Session
     ):
@@ -320,15 +308,10 @@ class TestProactiveBudgetEnforcement:
 
         mock_build_tools.return_value = MagicMock()
 
-        # Set up active session
-        state = SessionState(
-            sdk_session_id="sess-budget-001",
-            agent_id=agent.id,
-            conversation_id=conv.id,
-            space_id=space.id,
-            status="active",
+        # Set sdk_session_id to simulate an existing session (non-first message)
+        conversation_service.update_conversation(
+            db_session, conv.id, sdk_session_id="sess-budget-001"
         )
-        _get_active_sessions()[conv.id] = state
 
         # Pre-save the user message (the API route does this)
         conversation_service.add_message(
@@ -351,20 +334,20 @@ class TestProactiveBudgetEnforcement:
         with (
             patch.dict("sys.modules", {"claude_agent_sdk": fake_sdk}),
             patch(
-                "backend.openloop.agents.session_manager._estimate_conversation_context",
+                "backend.openloop.agents.agent_runner._estimate_conversation_context",
                 return_value=high_utilization,
             ),
             patch(
-                "backend.openloop.agents.session_manager.flush_memory",
+                "backend.openloop.agents.agent_runner.flush_memory",
             ) as mock_flush,
             patch(
-                "backend.openloop.agents.session_manager._compress_conversation",
+                "backend.openloop.agents.agent_runner._compress_conversation",
             ) as mock_compress,
         ):
-            from backend.openloop.agents.session_manager import send_message
+            from backend.openloop.agents.agent_runner import run_interactive
 
             events = []
-            async for evt in send_message(
+            async for evt in run_interactive(
                 db_session, conversation_id=conv.id, message="test"
             ):
                 events.append(evt)
@@ -373,7 +356,7 @@ class TestProactiveBudgetEnforcement:
             mock_compress.assert_called_once()
 
     @pytest.mark.asyncio
-    @patch("backend.openloop.agents.session_manager.build_agent_tools")
+    @patch("backend.openloop.agents.agent_runner.build_agent_tools")
     async def test_no_flush_below_threshold(
         self, mock_build_tools, db_session: Session
     ):
@@ -384,14 +367,10 @@ class TestProactiveBudgetEnforcement:
 
         mock_build_tools.return_value = MagicMock()
 
-        state = SessionState(
-            sdk_session_id="sess-low-001",
-            agent_id=agent.id,
-            conversation_id=conv.id,
-            space_id=space.id,
-            status="active",
+        # Set sdk_session_id to simulate an existing session
+        conversation_service.update_conversation(
+            db_session, conv.id, sdk_session_id="sess-low-001"
         )
-        _get_active_sessions()[conv.id] = state
 
         conversation_service.add_message(
             db_session, conversation_id=conv.id, role="user", content="test"
@@ -412,20 +391,20 @@ class TestProactiveBudgetEnforcement:
         with (
             patch.dict("sys.modules", {"claude_agent_sdk": fake_sdk}),
             patch(
-                "backend.openloop.agents.session_manager._estimate_conversation_context",
+                "backend.openloop.agents.agent_runner._estimate_conversation_context",
                 return_value=low_utilization,
             ),
             patch(
-                "backend.openloop.agents.session_manager.flush_memory",
+                "backend.openloop.agents.agent_runner.flush_memory",
             ) as mock_flush,
             patch(
-                "backend.openloop.agents.session_manager._compress_conversation",
+                "backend.openloop.agents.agent_runner._compress_conversation",
             ) as mock_compress,
         ):
-            from backend.openloop.agents.session_manager import send_message
+            from backend.openloop.agents.agent_runner import run_interactive
 
             events = []
-            async for evt in send_message(
+            async for evt in run_interactive(
                 db_session, conversation_id=conv.id, message="test"
             ):
                 events.append(evt)

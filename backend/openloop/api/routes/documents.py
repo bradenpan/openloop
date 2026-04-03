@@ -84,11 +84,14 @@ def get_document(document_id: str, db: Session = Depends(get_db)) -> DocumentRes
     return DocumentResponse.model_validate(doc)
 
 
-@router.get("/{document_id}/content")
+@router.get(
+    "/{document_id}/content",
+    responses={200: {"content": {"text/plain": {}, "application/octet-stream": {}}}},
+)
 def get_document_content(document_id: str, db: Session = Depends(get_db)):
     file_path, mime_type = document_service.get_document_content(db, document_id)
     # For text files, return plain text
-    if document_service._is_text_file(file_path.name):
+    if document_service.is_text_file(file_path.name):
         text = file_path.read_text(encoding="utf-8", errors="replace")
         return PlainTextResponse(content=text)
     # For other files, stream as file download

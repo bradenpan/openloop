@@ -13,10 +13,10 @@ from backend.openloop.api.schemas import (
 from backend.openloop.database import get_db
 from backend.openloop.services import memory_service, space_service
 
-router = APIRouter(tags=["memory"])
+router = APIRouter(prefix="/api/v1/memory", tags=["memory"])
 
 
-@router.post("/api/v1/memory", response_model=MemoryResponse, status_code=201)
+@router.post("", response_model=MemoryResponse, status_code=201)
 def create_entry(body: MemoryCreate, db: Session = Depends(get_db)) -> MemoryResponse:
     entry = memory_service.create_entry(
         db,
@@ -29,27 +29,28 @@ def create_entry(body: MemoryCreate, db: Session = Depends(get_db)) -> MemoryRes
     return MemoryResponse.model_validate(entry)
 
 
-@router.get("/api/v1/memory", response_model=list[MemoryResponse])
+@router.get("", response_model=list[MemoryResponse])
 def list_entries(
     namespace: str | None = Query(None),
     search: str | None = Query(None),
+    include_archived: bool = Query(False),
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[MemoryResponse]:
     entries = memory_service.list_entries(
-        db, namespace=namespace, search=search, limit=limit, offset=offset
+        db, namespace=namespace, search=search, include_archived=include_archived, limit=limit, offset=offset
     )
     return [MemoryResponse.model_validate(e) for e in entries]
 
 
-@router.get("/api/v1/memory/{entry_id}", response_model=MemoryResponse)
+@router.get("/{entry_id}", response_model=MemoryResponse)
 def get_entry(entry_id: str, db: Session = Depends(get_db)) -> MemoryResponse:
     entry = memory_service.get_entry(db, entry_id)
     return MemoryResponse.model_validate(entry)
 
 
-@router.patch("/api/v1/memory/{entry_id}", response_model=MemoryResponse)
+@router.patch("/{entry_id}", response_model=MemoryResponse)
 def update_entry(
     entry_id: str, body: MemoryUpdate, db: Session = Depends(get_db)
 ) -> MemoryResponse:
@@ -58,23 +59,25 @@ def update_entry(
     return MemoryResponse.model_validate(entry)
 
 
-@router.post("/api/v1/memory/{entry_id}/archive", status_code=204)
+@router.post("/{entry_id}/archive", status_code=204)
 def archive_entry(entry_id: str, db: Session = Depends(get_db)) -> None:
     memory_service.archive_entry(db, entry_id)
 
 
-@router.delete("/api/v1/memory/{entry_id}", status_code=204)
+@router.delete("/{entry_id}", status_code=204)
 def delete_entry(entry_id: str, db: Session = Depends(get_db)) -> None:
     memory_service.delete_entry(db, entry_id)
 
 
 # ---------------------------------------------------------------------------
-# Phase 7.1a: Memory lifecycle endpoints
+# Phase 7.1a: Memory lifecycle endpoints (space-scoped)
 # ---------------------------------------------------------------------------
 
+space_memory_router = APIRouter(prefix="/api/v1/spaces", tags=["memory"])
 
-@router.get(
-    "/api/v1/spaces/{space_id}/memory/health",
+
+@space_memory_router.get(
+    "/{space_id}/memory/health",
     response_model=MemoryHealthResponse,
 )
 def get_memory_health(
@@ -85,8 +88,8 @@ def get_memory_health(
     return MemoryHealthResponse(**stats)
 
 
-@router.post(
-    "/api/v1/spaces/{space_id}/memory/consolidate",
+@space_memory_router.post(
+    "/{space_id}/memory/consolidate",
     response_model=ConsolidationReportResponse,
 )
 async def consolidate_memory(
@@ -97,8 +100,8 @@ async def consolidate_memory(
     return ConsolidationReportResponse(**report)
 
 
-@router.post(
-    "/api/v1/spaces/{space_id}/memory/consolidate/apply",
+@space_memory_router.post(
+    "/{space_id}/memory/consolidate/apply",
     response_model=ConsolidationApplyResponse,
 )
 def apply_consolidation(

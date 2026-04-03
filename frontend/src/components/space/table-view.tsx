@@ -77,6 +77,7 @@ export function TableView({ spaceId, boardColumns, boardEnabled }: TableViewProp
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [columnsPopoverOpen, setColumnsPopoverOpen] = useState(false);
+  const [configVersion, setConfigVersion] = useState(0);
 
   // Fetch items with server-side sorting
   const serverSortable = ['title', 'created_at', 'updated_at', 'sort_position', 'priority', 'due_date', 'stage'];
@@ -121,7 +122,7 @@ export function TableView({ spaceId, boardColumns, boardEnabled }: TableViewProp
       visible: saved ? (saved[`cf:${f.name}`] ?? true) : true,
     }));
     return [...builtins, ...customs];
-  }, [spaceId, fieldSchema, boardColumns]);
+  }, [spaceId, fieldSchema, boardColumns, configVersion]);
 
   const visibleColumns = useMemo(() => allColumns.filter((c) => c.visible), [allColumns]);
 
@@ -132,10 +133,7 @@ export function TableView({ spaceId, boardColumns, boardEnabled }: TableViewProp
       newConfig[col.key] = col.key === key ? !col.visible : col.visible;
     }
     saveColumnConfig(spaceId, newConfig);
-    // Force re-render by invalidating the query (schema doesn't change, but columns do)
-    queryClient.invalidateQueries({
-      queryKey: ['get', '/api/v1/spaces/{space_id}/field-schema'],
-    });
+    setConfigVersion(v => v + 1);
   }
 
   // Client-side search filter
@@ -200,6 +198,7 @@ export function TableView({ spaceId, boardColumns, boardEnabled }: TableViewProp
         <select
           value={stageFilter}
           onChange={(e) => setStageFilter(e.target.value)}
+          aria-label="Filter by stage"
           className="bg-raised text-foreground border border-border rounded-md px-2 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
         >
           <option value="">All Stages</option>
@@ -423,6 +422,7 @@ function EditableCell({ column, item, boardColumns, onSave }: EditableCellProps)
           onBlur={(e) => handleSave(e.target.value)}
           onChange={(e) => handleSave(e.target.value)}
           onClick={(e) => e.stopPropagation()}
+          aria-label="Stage"
           className="bg-raised text-foreground border border-primary rounded px-1.5 py-0.5 text-xs w-full focus:outline-none"
         >
           {boardColumns.map((col) => (
@@ -441,6 +441,7 @@ function EditableCell({ column, item, boardColumns, onSave }: EditableCellProps)
           onBlur={(e) => handleSave(e.target.value)}
           onChange={(e) => handleSave(e.target.value)}
           onClick={(e) => e.stopPropagation()}
+          aria-label={column.label}
           className="bg-raised text-foreground border border-primary rounded px-1.5 py-0.5 text-xs w-full focus:outline-none"
         >
           <option value="">--</option>

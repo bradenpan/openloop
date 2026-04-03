@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from contract.enums import ConversationStatus
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -98,6 +99,13 @@ def update_conversation(db: Session, conversation_id: str, **kwargs) -> Conversa
     """Update conversation fields (name, model_override, sdk_session_id, status)."""
     conv = get_conversation(db, conversation_id)
     updatable = {"name", "model_override", "sdk_session_id", "status"}
+    if "status" in kwargs and kwargs["status"] is not None:
+        valid = {s.value for s in ConversationStatus}
+        if kwargs["status"] not in valid:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid status '{kwargs['status']}'. Valid: {sorted(valid)}",
+            )
     for field, value in kwargs.items():
         if field in updatable:
             setattr(conv, field, value)
@@ -131,13 +139,21 @@ def add_message(
     return msg
 
 
-def get_messages(db: Session, conversation_id: str) -> list[ConversationMessage]:
-    """Get all messages for a conversation, ordered by creation time."""
+def get_messages(
+    db: Session,
+    conversation_id: str,
+    *,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[ConversationMessage]:
+    """Get messages for a conversation, ordered by creation time, with pagination."""
     get_conversation(db, conversation_id)  # Verify exists
     return (
         db.query(ConversationMessage)
         .filter(ConversationMessage.conversation_id == conversation_id)
         .order_by(ConversationMessage.created_at.asc())
+        .offset(offset)
+        .limit(limit)
         .all()
     )
 

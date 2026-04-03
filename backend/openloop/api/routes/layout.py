@@ -42,13 +42,13 @@ def update_widget(
     # Convert enum values to strings for storage
     if "size" in updates and updates["size"] is not None:
         updates["size"] = updates["size"].value
-    widget = layout_service.update_widget(db, widget_id, **updates)
+    widget = layout_service.update_widget(db, space_id, widget_id, **updates)
     return WidgetResponse.model_validate(widget)
 
 
 @router.delete("/{space_id}/layout/widgets/{widget_id}", status_code=204)
 def remove_widget(space_id: str, widget_id: str, db: Session = Depends(get_db)) -> Response:
-    layout_service.remove_widget(db, widget_id)
+    layout_service.remove_widget(db, space_id, widget_id)
     return Response(status_code=204)
 
 

@@ -14,8 +14,6 @@ __all__ = [
 
 
 class AutomationCreate(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     name: str
     description: str | None = None
     agent_id: str
@@ -41,8 +39,6 @@ class AutomationCreate(BaseModel):
 
 
 class AutomationUpdate(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
     name: str | None = None
     description: str | None = None
     agent_id: str | None = None

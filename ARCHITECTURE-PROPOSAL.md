@@ -9,7 +9,7 @@
 
 OpenLoop is a coordination layer between a human, a web UI, and multiple Claude Max sessions. It doesn't do AI work — it manages the plumbing: routing messages, storing state, assembling context, enforcing permissions, and tracking what agents are doing.
 
-**Key terminology change:** "Projects" are now **Spaces** — a broader abstraction that can be a project, a knowledge base, a CRM, or a simple task list. All tracked work is an **item** (task or record) in a single unified model — views (list, kanban, table) are presentation, not data model. **Odin** is the always-visible AI front door (Haiku-powered), replacing the separate command bar.
+**Key terminology change:** "Projects" are now **Spaces** — a broader abstraction that can be a project, a knowledge base, a CRM, or a simple task list. All tracked work is an **item** (task or record) in a single unified model — views (list, kanban, table) are presentation, not data model. **Odin** is the always-visible AI front door at the bottom of the screen (Haiku-powered), replacing the separate command bar.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -32,9 +32,9 @@ OpenLoop is a coordination layer between a human, a web UI, and multiple Claude 
 │  └────────────────────┬──────────────────────────────┘  │
 │                       │                                 │
 │  ┌────────────────────▼──────────────────────────────┐  │
-│  │           Session Manager                          │  │
-│  │  Tracks active SDK sessions, routes messages,      │  │
-│  │  manages lifecycle (start/resume/close/summarize)  │  │
+│  │           Agent Runner                              │  │
+│  │  Thin wrapper around Claude SDK query(). DB is     │  │
+│  │  single source of truth (no in-memory state).      │  │
 │  └────────────────────┬──────────────────────────────┘  │
 │                       │                                 │
 │  ┌────────────────────▼──────────────────────────────┐  │
@@ -70,6 +70,30 @@ OpenLoop is a coordination layer between a human, a web UI, and multiple Claude 
       Google Drive    Git Repos     Web/APIs
       (documents)     (code)        (search, email)
 ```
+
+### How OpenLoop Relates to Claude Code
+
+OpenLoop runs on top of the Claude Agent SDK, which is a programmatic interface to Claude Code. Each `query()` call spawns or resumes a Claude Code CLI process under a Claude Max subscription. The SDK manages conversation history as local JSONL files and handles session resume transparently.
+
+This means every OpenLoop agent is, at the infrastructure level, a Claude Code session. Claude Code already provides file access, bash execution, MCP tool support, and conversation persistence. A reasonable question is: what does OpenLoop add?
+
+**What Claude Code provides (and OpenLoop inherits):**
+- LLM reasoning (Claude models via Max subscription)
+- File read/write, bash execution, tool use
+- Conversation persistence via JSONL session files
+- Session resume via `query(resume=session_id)`
+
+**What OpenLoop adds on top:**
+- **Multi-agent identity** — Claude Code is one agent in one terminal. OpenLoop runs multiple agents simultaneously, each with a distinct system prompt, tool set, and permission boundary, organized by domain (recruiting, code, health, etc.).
+- **Structured context injection** — Claude Code gets CLAUDE.md files and whatever it reads during a conversation. OpenLoop assembles ~8,000 tokens of curated context before every first message: behavioral rules, conversation summaries, scored facts, and live board state — ranked by importance and ordered for maximum model attention.
+- **Persistent memory across conversations** — Claude Code's memory is per-project markdown files. OpenLoop has four-tier memory (semantic facts, episodic summaries, procedural rules, working state) with write-time dedup, temporal tracking, scored retrieval, and lifecycle management. An agent on conversation #30 knows decisions from conversation #2.
+- **Work tracking** — items (tasks, records), boards, spaces, CRM pipelines. Agents read and write structured data, not just files.
+- **Permission enforcement** — every tool call goes through a permission layer with per-agent, per-resource, per-operation grants. Claude Code has its own permission model, but OpenLoop adds domain-specific controls (e.g., "this agent can read Drive files but needs approval to edit them").
+- **Orchestration** — background delegation with managed turn loops, mid-task steering, progress tracking, automation scheduling. Claude Code runs one conversation at a time in a terminal. OpenLoop coordinates multiple concurrent agents working autonomously.
+- **Resilience** — stale session recovery (if an SDK session expires, retry with fresh context automatically), rate limit retry with exponential backoff, crash recovery, proactive context compression.
+- **Web UI** — everything is accessible through a browser instead of a terminal. Streaming responses, real-time updates, cross-space dashboards.
+
+The Agent Runner (`agent_runner.py`) is intentionally thin (~800 lines). It doesn't reimpose lifecycle management or duplicate state the SDK already tracks. Its job is to bridge OpenLoop's conversation model to the SDK's `query()` function: assemble context on first message, pass `resume` on subsequent messages, handle errors, and coordinate background work. The heavy lifting — context assembly, memory management, permission enforcement — happens in the layers around it.
 
 ---
 
@@ -205,12 +229,12 @@ Business logic. Stateless functions that operate on the database and coordinate 
 - **OdinService** — system-level agent session management. Routes Odin messages to a persistent Haiku session. Handles routing instructions (open conversation, create task, navigate) and delegates complex requests.
 - **DataSourceService** — manage connected data sources per space (Drive folders, repos, API integrations). Config storage, status tracking, refresh scheduling.
 - **NotificationService** — create, list, mark read. Stores notifications for background task completion, permission requests, proactive alerts. Feeds the Home dashboard and SSE event stream.
-- **SessionManager** — the core orchestration piece. Manages active Claude SDK sessions:
-  - `start_session(conversation_id, agent_id)` → spawns a new SDK session with assembled context
-  - `send_message(conversation_id, message)` → routes message to the right SDK session, returns an async stream of response chunks
-  - `close_session(conversation_id)` → asks the agent to summarize, then terminates the SDK session
-  - `list_active()` → returns all running sessions with status
-  - Handles session lifecycle: start, message routing, streaming, error recovery, cleanup
+- **AgentRunner** — a thin wrapper around the Claude SDK's `query()` function. No in-memory session state — the DB is the single source of truth for `sdk_session_id`. Functions:
+  - `run_interactive(db, conversation_id, message)` → sends a message (handles both first message and continuation). First message assembles context and passes it as `system_prompt` in `ClaudeAgentOptions`; subsequent messages use `resume=sdk_session_id`. Returns an async stream of response chunks.
+  - `close_conversation(db, conversation_id)` → triggers summary generation, memory flush, consolidation check, and closes the conversation in the DB
+  - `delegate_background(db, agent_id, instruction, ...)` → runs autonomous agent work in a managed turn loop
+  - `steer(conversation_id, message)` → mid-task course correction for background tasks
+  - `list_running(db)` → returns all running/queued agent sessions (DB query, not in-memory state)
 - **ContextAssembler** — builds the prompt context for a new session:
   - Reads space memory (facts tier)
   - Reads conversation summaries (summary tier)
@@ -229,60 +253,71 @@ Business logic. Stateless functions that operate on the database and coordinate 
 - **~~ToolRegistryService~~** — *Deferred. Agent tool configurations live in the `agents` table (`tools` and `mcp_tools` JSON fields). A dedicated registry is not needed for P0/P1.*
 - **AutomationService** — CRUD for automation definitions. Runs the cron scheduler (checks every minute for matching automations). Fires matching automations as background tasks. Tracks run history. Event listener for event-based automations (P2).
 - **AutomationScheduler** — background loop within the FastAPI process. Every 60 seconds, checks all enabled cron-based automations against the current time. When matched, creates a background task with the automation's agent + instruction. Lightweight — no external dependencies (no Celery, no Redis). On startup, checks for missed runs during downtime and surfaces notifications. Max concurrent automation sessions configurable (default 2); user conversations always take priority.
-- **SummaryService** — generates conversation summaries. Called when conversations close. Uses the agent's own SDK session (asks it to summarize before closing) or a lightweight summary call.
 
-### Layer 4: Session Manager (Detail)
+### Layer 4: Agent Runner (Detail)
 
 This is the most architecturally significant component. It bridges OpenLoop's conversation model with Claude SDK sessions.
 
 ```
 ┌─────────────────────────────────────────────────┐
-│                Session Manager                   │
+│                Agent Runner                      │
 │                                                 │
-│  Active Sessions (dict: conversation_id → state)│
-│                                                 │
-│  Each session state:                            │
-│  ├── sdk_session_id: str                        │
-│  ├── agent_id: str                              │
-│  ├── conversation_id: str                       │
-│  ├── space_id: str (nullable for Odin)          │
-│  ├── status: active | background | closing      │
-│  ├── started_at: datetime                       │
-│  ├── last_activity: datetime                    │
-│  └── mcp_server: SDK MCP server instance        │
+│  No in-memory state. sdk_session_id lives on    │
+│  the Conversation DB record only. The DB is the │
+│  single source of truth for all session state.  │
 │                                                 │
 │  Operations:                                    │
-│  ├── start_session()                            │
+│  ├── run_interactive(db, conversation_id, msg)  │
+│  │   Handles both first message and continuation│
+│  │   — no separate start step.                  │
+│  │                                              │
+│  │   First message (sdk_session_id is null):    │
 │  │   1. Load agent config                       │
 │  │   2. Assemble context (ContextAssembler)     │
-│  │   3. Load tool config from agent record        │
+│  │   3. Load tool config from agent record      │
 │  │   4. Build MCP tools (builtin OpenLoop tools │
 │  │      from agent's mcp_tools config)          │
 │  │   5. Register permission hooks               │
-│  │   6. Call SDK query() with assembled prompt   │
-│  │   7. Store session state                     │
+│  │   6. Call SDK query(prompt=msg, options=      │
+│  │      {system_prompt: context})               │
+│  │   7. Store sdk_session_id on conversation    │
+│  │      record in DB                            │
 │  │                                              │
-│  ├── send_message()                             │
-│  │   1. Look up active session                  │
-│  │   2. PROACTIVE BUDGET CHECK: estimate total  │
-│  │      context (system prompt + memory +        │
-│  │      history + pending message). If >70%:    │
+│  │   Subsequent messages (sdk_session_id set):  │
+│  │   1. PROACTIVE BUDGET CHECK (before LLM call)│
+│  │      Estimate total context (system prompt + │
+│  │      memory + history + pending message).    │
+│  │      If >70%:                                │
 │  │      a. Run flush_memory() first             │
 │  │      b. Compress older turns (observation    │
-│  │         masking: keep recent 5-10 exchanges  │
+│  │         masking: keep recent 7 exchanges      │
 │  │         verbatim, summarize the rest)         │
 │  │      c. Post-compaction verification: check  │
 │  │         key facts from compressed section    │
 │  │         exist in persistent memory           │
 │  │      d. Compress at turn boundaries only —   │
 │  │         never split tool-call sequences      │
-│  │   3. Call SDK query(resume=session_id)        │
-│  │   4. Stream response chunks to SSE           │
-│  │   5. Process tool calls through Permission   │
+│  │      Note: this is distinct from the reactive│
+│  │      monitor_context_usage() which runs AFTER│
+│  │      the response and creates a checkpoint   │
+│  │      (not compress). Two-tier enforcement:   │
+│  │      proactive = flush + compress before call│
+│  │      reactive = flush + checkpoint after call│
+│  │   2. Call SDK query(prompt=msg, options=      │
+│  │      {resume: sdk_session_id})               │
+│  │      Stale-session fallback: if resume fails │
+│  │      (SDK session expired/invalid), clear    │
+│  │      sdk_session_id, reassemble fresh context│
+│  │      + inject conversation summary, retry as │
+│  │      first message. User sees seamless       │
+│  │      continuation.                           │
+│  │   3. Stream response chunks to SSE           │
+│  │   4. Process tool calls through Permission   │
 │  │      Enforcer                                │
-│  │   6. Store message + response in DB          │
+│  │   5. Store message + response in DB          │
 │  │                                              │
-│  ├── close_session()                            │
+│  ├── close_conversation(db, conversation_id)    │
+│  │   Called directly by the close route.         │
 │  │   1. Run flush_memory() — agent saves any    │
 │  │      unsaved facts to persistent memory      │
 │  │   2. Send "summarize this conversation" msg  │
@@ -290,10 +325,10 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 │  │   4. Check summary consolidation threshold   │
 │  │      (if space has 20+ unconsolidated         │
 │  │      summaries, generate meta-summary)        │
-│  │   5. Terminate SDK session                   │
-│  │   6. Clean up session state                  │
+│  │   5. Close conversation in DB                │
+│  │      (status="closed", closed_at=now)        │
 │  │                                              │
-│  ├── flush_memory()                             │
+│  ├── flush_memory(db, conversation_id)          │
 │  │   Mandatory pre-compaction safety step.       │
 │  │   1. Inject instruction: "Review this convo  │
 │  │      for important facts, decisions, or       │
@@ -301,11 +336,14 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 │  │      Save them now using your memory tools."  │
 │  │   2. Agent calls save_fact() as needed        │
 │  │   3. Return — normal flow continues           │
-│  │   Called by: close_session() and              │
-│  │   send_message() before compression.          │
+│  │   Called by: close_conversation() and          │
+│  │   run_interactive() before compression.        │
+│  │                                              │
+│  Internal helpers (called by the above):         │
 │  │                                              │
 │  ├── verify_compaction(compressed_content)       │
 │  │   Post-compaction safety check.               │
+│  │   Called by: _compress_conversation()          │
 │  │   1. Scan compressed content for fact-like    │
 │  │      statements (decisions, preferences,      │
 │  │      specific values)                         │
@@ -314,7 +352,6 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 │  │      trigger a targeted save for missed facts │
 │  │   Lightweight — not a full re-extraction,     │
 │  │   just a spot check for obvious gaps.         │
-│  │   Called by: send_message() after compression.│
 │  │                                              │
 │  ├── steer(conversation_id, message)            │
 │  │   Mid-task course correction.                │
@@ -336,7 +373,8 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 │  ├── delegate_background()                      │
 │  │   Managed turn loop — agent works in         │
 │  │   discrete turns with steering checkpoints.  │
-│  │   1. Start session, create background_task   │
+│  │   1. Create background_task, assemble context│
+│  │      call SDK query() with system_prompt     │
 │  │   2. Enter turn loop:                        │
 │  │      a. query(resume=session_id, message=    │
 │  │         steering_queue.pop() or "continue")  │
@@ -355,46 +393,70 @@ This is the most architecturally significant component. It bridges OpenLoop's co
 │  │   per turn. Report what you did and what you │
 │  │   plan to do next."                          │
 │  │                                              │
-│  └── monitor_context_usage()                    │
-│      Runs after each agent response as backup.  │
-│      (Primary budget enforcement is proactive   │
-│      in send_message(), this is the safety net.)│
-│      1. Check context window usage from SDK     │
-│         session metadata                        │
-│      2. If usage > 70% of window:               │
-│         a. Run flush_memory() first              │
-│         b. Create checkpoint summary             │
-│         c. Store as conversation_summary with   │
-│            is_checkpoint=true                   │
-│         d. Conversation continues normally —    │
-│            the CLI handles its own compression  │
-│         e. But the checkpoint ensures state is  │
-│            captured in the DB before any CLI    │
-│            compression degrades quality         │
-│      3. If usage > 90%: surface a notification  │
-│         suggesting the user close and start a   │
-│         new conversation                        │
+│  ├── monitor_context_usage()                    │
+│  │   Reactive safety net — runs after each      │
+│  │   agent response. Distinct from the proactive│
+│  │   check in run_interactive() (see below).    │
+│  │   Called by: run_interactive() post-response  │
+│  │   1. Check context window usage from SDK     │
+│  │      session metadata                        │
+│  │   2. If usage > 70% of window:               │
+│  │      a. Run flush_memory() first              │
+│  │      b. Create checkpoint summary             │
+│  │         (NOT compress — that's the proactive │
+│  │         path's job)                           │
+│  │      c. Store as conversation_summary with   │
+│  │         is_checkpoint=true                   │
+│  │      d. Conversation continues normally —    │
+│  │         the CLI handles its own compression  │
+│  │      e. But the checkpoint ensures state is  │
+│  │         captured in the DB before any CLI    │
+│  │         compression degrades quality         │
+│  │   3. If usage > 90%: surface a notification  │
+│  │      suggesting the user close and start a   │
+│  │      new conversation                        │
+│  │                                              │
+│  └── recover_from_crash(db)                     │
+│      Simplified — no in-memory state to clear.  │
+│      1. Scan conversations table for            │
+│         status='active'                         │
+│      2. Mark all as 'interrupted'               │
+│      3. Create notification: "N conversations   │
+│         were interrupted by a restart"          │
+│      4. Mark orphaned background tasks (running/ │
+│         queued at crash time) as failed          │
+│      5. When user reopens an interrupted convo: │
+│         a. Attempt resume=sdk_session_id with   │
+│            fresh MCP tools and hooks            │
+│         b. If resume fails: start fresh with    │
+│            conversation summary + recent msgs   │
+│            injected as context                  │
 │                                                 │
-│  Crash Recovery (on startup):                   │
-│  1. Scan conversations table for status='active'│
-│  2. Mark all as 'interrupted'                   │
-│  3. Create notification: "N conversations were  │
-│     interrupted by a restart"                   │
-│  4. When user reopens an interrupted convo:     │
-│     a. Attempt resume=sdk_session_id with fresh │
-│        MCP tools and hooks                      │
-│     b. If resume fails: start new session with  │
-│        conversation summary + recent messages   │
-│        injected as context                      │
-│  5. Clean up any orphaned CLI processes         │
-│                                                 │
+│  ├── list_running(db)                           │
+│  │   DB query replacing old in-memory dict.     │
+│  │   Returns active conversations (status=      │
+│  │   'active' with sdk_session_id set) plus     │
+│  │   running background tasks. Survives server  │
+│  │   restarts — no in-memory state to lose.     │
+│  │                                              │
 │  Concurrency Control:                           │
-│  - Max concurrent sessions configurable         │
-│    (default 5)                                  │
+│  - Per-conversation asyncio lock prevents       │
+│    concurrent sends to the same conversation    │
+│    (_conversation_locks dict). Cleaned up on    │
+│    conversation close.                          │
+│  - Max concurrent interactive sessions: 5       │
 │  - Interactive conversations have priority over │
 │    background tasks and automations             │
 │  - Max concurrent automation sessions: 2        │
-│  - When limit hit: queue with notification      │
+│  - When limit hit: 429 with notification        │
+│                                                 │
+│  Rate Limit Retry:                              │
+│  - All SDK query() calls wrapped in             │
+│    _query_with_retry() with exponential backoff │
+│    (30s, 60s, 120s). Max 3 retries.            │
+│  - On rate limit: creates notification, publishes│
+│    rate_limited SSE event, then retries.        │
+│  - No retry if partial events already streamed.  │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -473,7 +535,7 @@ These tools are only available to Odin's session, not to space agents.
 
 ### Layer 4b: Odin — The Front Door (Detail)
 
-Odin is a system-level agent that runs on Haiku. It is always visible in the UI and serves as the universal entry point.
+Odin is a system-level agent that runs on Haiku. It is always visible at the bottom of the screen and serves as the universal entry point.
 
 ```
 ┌──────────────────────────────────────────────────┐
@@ -484,9 +546,9 @@ Odin is a system-level agent that runs on Haiku. It is always visible in the UI 
 │  Session: persistent conversation record          │
 │           (space_id=null in conversations table)  │
 │                                                  │
-│  Session Lifecycle:                              │
-│  1. On app load: resume existing Odin session    │
-│     (or create a new one if none exists)         │
+│  Conversation Flow:                              │
+│  1. On app load: resume existing Odin            │
+│     conversation (or create one if none exists)  │
 │  2. Each user message → query(resume=session_id) │
 │  3. Odin handles simple actions directly via     │
 │     MCP tools (create_item, list_spaces, etc.)   │
@@ -521,16 +583,18 @@ Odin is a system-level agent that runs on Haiku. It is always visible in the UI 
 │       initial_message="Help me plan the          │
 │         recruiting pipeline"                     │
 │     )                                            │
-│  3. Backend creates conversation record,          │
-│     starts SDK session for Recruiting Agent      │
+│  3. Backend creates conversation record           │
+│     (no SDK session yet — that starts on first   │
+│     message via AgentRunner.run_interactive())    │
 │  4. Odin responds: "Opening a conversation with  │
 │     your Recruiting Agent..."                    │
 │  5. SSE event to frontend:                       │
 │     { type: "route", space_id, conversation_id } │
 │  6. Frontend navigates to Recruiting space,      │
 │     opens the new conversation panel             │
-│  7. Initial message is forwarded as first user   │
-│     message in the new conversation              │
+│  7. Initial message forwarded as first user      │
+│     message → run_interactive() assembles        │
+│     context and starts SDK session               │
 │  8. Odin's chat collapses to input-only          │
 │                                                  │
 │  Memory:                                         │
@@ -724,7 +788,7 @@ spaces
 ├── description
 ├── template ("project" | "crm" | "knowledge_base" | "simple")
 ├── board_enabled (boolean, default true)
-├── default_view ("board" | "table" | null)
+├── default_view ("list" | "board" | "table" | null)
 ├── board_columns (JSON array, default: ["idea","scoping","todo","in_progress","done"])
 ├── created_at
 └── updated_at
@@ -784,6 +848,7 @@ agents
 ├── description
 ├── system_prompt (text)
 ├── default_model (string, default "sonnet")
+├── skill_path (string, nullable — path to agent skill file for Agent Builder-created agents)
 ├── tools (JSON array — which Claude tools are enabled)
 ├── mcp_tools (JSON array — which OpenLoop MCP tools are enabled)
 ├── status ("active" | "inactive")
@@ -828,7 +893,7 @@ conversations
 conversation_messages
 ├── id (UUID, PK)
 ├── conversation_id (FK → conversations, indexed)
-├── role ("user" | "agent")
+├── role ("user" | "assistant" | "tool")
 ├── content (text)
 ├── tool_calls (JSON, nullable)
 ├── created_at
@@ -1037,14 +1102,7 @@ Frontend: POST /api/v1/conversations
   │
   ▼
 Backend: ConversationService.create()
-  → Creates conversation record in DB
-  → SessionManager.start_session()
-    → ContextAssembler.build(space_id, agent_id)
-      → Loads: agent prompt, board state, conversation summaries, space facts, global facts, tool docs
-    → Builds MCP tools (board ops, memory ops, doc ops)
-    → Registers permission hooks via PermissionEnforcer
-    → Calls SDK query() with assembled system prompt
-    → Stores sdk_session_id
+  → Creates conversation record in DB (no SDK call yet)
   → Returns conversation_id
   │
   ▼
@@ -1058,8 +1116,15 @@ Frontend: POST /api/v1/conversations/{id}/messages
   { content: "What candidates need follow-up this week?" }
   │
   ▼
-Backend: SessionManager.send_message()
-  → SDK query(prompt=message, options={resume: session_id})
+Backend: AgentRunner.run_interactive()
+  → First message: assembles context (ContextAssembler.build), builds MCP tools,
+    registers permission hooks, calls query(prompt=message, options={system_prompt: context})
+    → SDK creates session, stores sdk_session_id on conversation record
+  → Subsequent messages: calls query(prompt=message, options={resume: sdk_session_id})
+    → If resume fails (SDK session expired/invalid):
+      a. Clear stale sdk_session_id
+      b. Reassemble fresh context + inject conversation summary
+      c. Retry as first message (user sees seamless continuation)
   → Streams response chunks to SSE endpoint
   → Agent may call MCP tools:
     → list_items(space_id, type="record") → PermissionEnforcer: Read on board → Always → allow
@@ -1079,22 +1144,40 @@ During a conversation, user says: "Go research Sarah Chen's company background"
 Agent decides to delegate (or user explicitly triggers via "delegate this")
   │
   ▼
-Backend: SessionManager.delegate_background()
-  → Creates background_task record
-  → Starts new SDK session (no SSE streaming to user)
-  → Agent works: WebSearch, reads Drive docs, etc.
-  → Activity logged to background_task record
+Backend: AgentRunner.delegate_background()
+  → Concurrency check (max 2 background sessions)
+  → Creates background_task record (status="running")
+  → Creates a dedicated conversation record for the task
+     (name="Background: {instruction[:50]}", linked to background_task)
+  → Fires managed turn loop as asyncio task (fire-and-forget)
+  │
+  ▼
+Managed Turn Loop (_run_background_task):
+  → Assembles context via ContextAssembler
+  → Turn 1: sends task instruction with system prompt including
+    "Work incrementally. Complete one meaningful step per turn.
+     Report what you did. Say TASK_COMPLETE when finished."
+  → Each subsequent turn (up to MAX_TURNS=20):
+    a. Check steering queue for user corrections
+    b. If steering message found → use it as next prompt
+    c. If empty → send CONTINUATION_PROMPT ("Continue working...")
+    d. Agent completes one turn of work
+    e. Update step progress (current_step, step_results on task)
+    f. Publish background_progress SSE event for monitoring
+    g. Check for TASK_COMPLETE signal in response → exit loop
   │
   ▼
 Frontend: Home dashboard shows "Research Agent working on 'Company background for Sarah Chen' — 2m elapsed"
   Click to expand → SSE stream of agent activity log
   │
   ▼
-Agent completes:
+Agent signals TASK_COMPLETE (or MAX_TURNS reached):
   → Writes results to document (create_document MCP tool)
   → Updates item if applicable (update_item MCP tool)
   → Writes to memory if applicable
-  → background_task.status = "completed"
+  → background_task.status = "completed", result_summary stored
+  → Notification created
+  → Background tracking cleaned up (_background_conversations, _steering_queues)
   │
   ▼
 Frontend: notification "Background task complete: Company background for Sarah Chen"
@@ -1160,24 +1243,22 @@ User clicks "Close conversation" on a long-running thread
 Frontend: POST /api/v1/conversations/{id}/close
   │
   ▼
-Backend: ConversationService.close()
-  → SessionManager.close_session()
-    → flush_memory(): "Save any important unsaved facts to memory now"
-    → Agent calls save_fact() as needed (write-time dedup runs on each)
-    → Sends final message: "Summarize this conversation: key decisions, outcomes, open questions"
-    → Agent responds with summary
-    → Store summary in conversation_summaries table
-    → Store summary text on conversation record
-    → Check consolidation threshold: if space has 20+ unconsolidated summaries,
-      generate meta-summary and mark individual summaries as consolidated
-    → Terminate SDK session
-    → conversation.status = "closed", conversation.closed_at = now()
+Backend: AgentRunner.close_conversation()
+  → flush_memory(): "Save any important unsaved facts to memory now"
+  → Agent calls save_fact() as needed (write-time dedup runs on each)
+  → Sends final message: "Summarize this conversation: key decisions, outcomes, open questions"
+  → Agent responds with summary
+  → Store summary in conversation_summaries table (via conversation_service.add_summary())
+  → Check consolidation threshold: if space has 20+ unconsolidated summaries,
+    generate meta-summary and mark individual summaries as consolidated
+  → conversation.status = "closed", conversation.closed_at = now()
+  → Clean up per-conversation lock (_conversation_locks.pop)
   │
   ▼
 Later: User starts new conversation with same agent in same space
   │
   ▼
-Backend: SessionManager.start_session()
+Backend: AgentRunner.run_interactive() (first message in new conversation)
   → ContextAssembler.build()
     → Loads conversation summaries (including the one just created)
     → New agent sees: "Previous conversation (March 28): discussed X, decided Y, open question Z"
@@ -1257,12 +1338,12 @@ User delegates: "Research competitor X's pricing strategy"
   ▼
 Turn 1: Agent receives instruction, plans approach, starts research
   → query() returns after turn completes
-  → Session Manager: steering queue empty → auto-continue
+  → Agent Runner: steering queue empty → auto-continue
   │
   ▼
 Turn 2: Agent executes WebSearch("competitor X pricing"), reads results
   → query(resume=session_id) returns after turn completes
-  → Session Manager: steering queue empty → auto-continue
+  → Agent Runner: steering queue empty → auto-continue
   │
   ▼
 User sees activity log, realizes agent is researching wrong company
@@ -1274,13 +1355,13 @@ Frontend: POST /api/v1/conversations/{id}/steer
   │
   ▼
 Turn 3 completes (agent finishes current turn of work normally):
-  → Session Manager checks steering queue → message found
+  → Agent Runner checks steering queue → message found
   → query(resume=session_id, message="Wrong company — I mean X Corp, the SaaS one")
   │
   ▼
 Turn 4: Agent receives correction, adjusts course, continues with correct target
   → All prior results preserved (they're in session history)
-  → Session Manager: steering queue empty → auto-continue
+  → Agent Runner: steering queue empty → auto-continue
   → Agent works to completion
 
 
@@ -1289,13 +1370,15 @@ The auto-continuation between turns is invisible — no user interaction unless 
 choose to steer. Latency between turns is minimal (the next query() fires immediately).
 ```
 
-### Flow 9: Proactive Budget Enforcement (during send_message)
+### Flow 9: Two-Tier Context Budget Enforcement
 
 ```
 User sends message in a long-running conversation
   │
   ▼
-Backend: SessionManager.send_message()
+Backend: AgentRunner.run_interactive()
+
+TIER 1 — Proactive (before LLM call):
   → Estimate total context: system_prompt + memory + conversation_history + pending_message
   │
   ├── Under 70% of context window → proceed normally with query()
@@ -1304,14 +1387,27 @@ Backend: SessionManager.send_message()
       │
       ▼
       1. flush_memory(): agent saves unsaved facts to persistent memory
-      2. Observation masking: keep recent 5-10 exchanges verbatim
+      2. Observation masking: keep recent 7 exchanges verbatim
       3. Summarize older exchanges (cut at turn boundaries only)
       4. Post-compaction verification: spot-check that key facts survived
-      5. Store checkpoint summary in conversation_summaries
       │
       ▼
       Proceed with query() using compressed context
       (user sees no interruption — this is transparent)
+
+TIER 2 — Reactive (after LLM response):
+  → monitor_context_usage() checks actual token counts from SDK usage metadata
+  │
+  ├── Under 70% → no action
+  │
+  ├── Over 70% → safety-net checkpoint:
+  │   1. flush_memory(): save unsaved facts
+  │   2. Create checkpoint summary (NOT compress — that's proactive's job)
+  │   3. Store as conversation_summary with is_checkpoint=true
+  │   The checkpoint captures state in the DB before any CLI-side
+  │   compression degrades quality.
+  │
+  └── Over 90% → notification: suggest closing and starting fresh
 ```
 
 ---
@@ -1377,9 +1473,9 @@ Behavioral rules accumulate from two sources: user corrections ("don't do X", "a
 This is the raw message history within an active SDK session.
 
 **Pruning mechanisms:**
-- **Proactive budget enforcement:** Before each LLM call, the Session Manager estimates total context size. If it exceeds 70% of the context window, compression is triggered before the call — not as error recovery after the fact.
+- **Proactive budget enforcement:** Before each LLM call, the Agent Runner estimates total context size. If it exceeds 70% of the context window, compression is triggered before the call — not as error recovery after the fact.
 - **Mandatory pre-compaction flush:** Before any compression, the `flush_memory()` operation runs: the agent is prompted to save unsaved facts to persistent memory. This prevents information loss during the inherently lossy summarization step.
-- **Observation masking:** During compression, the most recent 5-10 complete exchanges (user message + agent response, configurable — default 7) are kept verbatim. Only older exchanges are summarized. This preserves the immediate working context. JetBrains research found that 10 turns gave the best balance — a 2.6% task completion improvement while being 52% cheaper than full summarization. Shorter windows (5) may be used for simple Q&A; longer windows (10) for complex multi-step work.
+- **Observation masking:** During compression, the most recent 7 complete exchanges (user message + agent response) are kept verbatim (`RECENT_TURNS_VERBATIM = 7`). Only older exchanges are summarized. This preserves the immediate working context. JetBrains research found that ~7-10 turns gave the best balance — a 2.6% task completion improvement while being 52% cheaper than full summarization.
 - **Post-compaction verification:** After compression, spot-check that key facts from the compressed section exist in persistent memory. If gaps are found, log a warning and optionally trigger a targeted save. This catches cases where the flush missed something critical.
 - **Turn-boundary compression:** Compression always cuts at user-message boundaries — never in the middle of a tool-call sequence. This preserves conversation coherence.
 - **User-initiated close:** When context becomes unwieldy, the user closes the conversation. Flush + final summary is generated. New conversation starts with summary context.
@@ -1461,10 +1557,10 @@ Restore = replace the SQLite file with a backup copy and restart the backend. Co
 | Backend framework | FastAPI (Python) | Already in use. Async support for SSE streaming. Good SDK integration (SDK is Python). |
 | Frontend framework | React 19 + Vite | Already in use. React Query for server state. Zustand for UI state. EventSource API for SSE. |
 | CSS | Tailwind CSS v4 | Already in use. Utility-first, fast iteration on UI. |
-| Process model | Single process (initial) | Simpler. SessionManager runs SDK sessions as async tasks within the FastAPI process. Architecture designed so worker separation is a clean refactor if needed. |
+| Process model | Single process (initial) | Simpler. AgentRunner runs SDK sessions as async tasks within the FastAPI process. Architecture designed so worker separation is a clean refactor if needed. |
 | Session model | Long-lived SDK sessions with resume | SDK manages conversation history. OpenLoop manages context injection for new sessions. Conversation close/summarize handles context pruning. Upgrade SDK to v0.1.51+ to fix hook timeout bug (#554/#730). Use `query()` with resume, not `ClaudeSDKClient`. |
 | Model stack | Haiku (Odin) + Sonnet (default agents) + Opus (on demand) | Haiku for fast routing/simple actions. Sonnet for most agent work. Opus for complex reasoning. Per-conversation model override. |
-| Odin | System-level Haiku agent, always visible | Replaces command bar. One interaction model. Routes to space agents for complex work. |
+| Odin | System-level Haiku agent, always visible at bottom of screen | Replaces command bar. One interaction model. Routes to space agents for complex work. |
 | Document storage | Google Drive (primary) + local (fallback) | User's existing storage. Accessible from anywhere. Agents interact via Drive API (P1). |
 | Contract / types | Pydantic → OpenAPI → TypeScript (same as current) | Type safety across the stack. Auto-generated frontend types. |
 
@@ -1473,11 +1569,11 @@ Restore = replace the SQLite file with a backup copy and restart the backend. Co
 ## What This Architecture Enables
 
 1. **Streaming conversations** — SSE gives real-time, token-by-token agent responses. Same feel as Claude CLI.
-2. **Multiple concurrent sessions** — SessionManager tracks multiple SDK sessions. Up to 5 concurrent (per user's estimate).
+2. **Multiple concurrent sessions** — AgentRunner manages multiple SDK sessions. Up to 5 concurrent (per user's estimate).
 3. **Context that survives** — four-tier memory (semantic, episodic, working, procedural) + scored retrieval + attention-optimized assembly. New agents in a space automatically know what happened before, how to behave, and what's important.
 4. **Granular permissions** — every tool call goes through the PermissionEnforcer. Per-agent, per-resource, per-operation. In-conversation and background approval flows.
-5. **Odin front door** — always-visible Haiku-powered chat. Handles simple actions directly (~1-2s), routes complex work to space agents.
-6. **Background delegation** — agents work asynchronously via managed turn loop (session manager auto-continues between turns, checks steering queue at each boundary). Results flow back to the board/conversation. Progress monitoring via SSE. User can steer mid-task without restart.
+5. **Odin front door** — always-visible Haiku-powered chat at the bottom of the screen. Handles simple actions directly (~1-2s), routes complex work to space agents.
+6. **Background delegation** — agents work asynchronously via managed turn loop (agent runner auto-continues between turns, checks steering queue at each boundary). Results flow back to the board/conversation. Progress monitoring via SSE. User can steer mid-task without restart.
 7. **Progressive autonomy** — permission matrix supports Always/Approval/Never per operation. Flip gates as trust increases.
 8. **Future remote access** — API-first design. Every operation is an API call. Discord/Slack/mobile clients plug in without rearchitecting.
 9. **Clean agent creation** — Agent Builder designs agents through conversation. Permission matrix set at creation time.
@@ -1502,7 +1598,7 @@ The current codebase has reusable pieces:
 What gets rebuilt:
 - Data model (new schema)
 - API routes (new endpoints for conversations, items, permissions)
-- Session management (new — the core of the new architecture)
+- Agent runner (new — the core of the new architecture)
 - Context assembly (new — four-tier system with scored retrieval, attention-optimized ordering, and lifecycle management)
 - Permission enforcement (new — granular matrix)
 - Frontend (significant rework — conversation panels, home dashboard, table view)

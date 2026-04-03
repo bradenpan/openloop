@@ -274,7 +274,7 @@ def test_auto_demotion_in_context_assembler(db_session: Session):
     db_session.add_all([rule1, rule2])
     db_session.commit()
 
-    section = _build_behavioral_rules_section(db_session, agent.id, read_only=True)
+    section = _build_behavioral_rules_section(db_session, agent.id, read_only=False)
 
     # rule1 should be demoted
     db_session.refresh(rule1)

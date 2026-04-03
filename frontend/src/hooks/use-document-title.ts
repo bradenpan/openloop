@@ -8,6 +8,7 @@ import { $api } from '../api/hooks';
 export function useDocumentTitle() {
   const { data: dashboard } = $api.useQuery('get', '/api/v1/home/dashboard', {}, {
     refetchInterval: 30_000, // re-check every 30s
+    refetchIntervalInBackground: false,
   });
 
   useEffect(() => {

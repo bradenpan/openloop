@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 interface PanelProps {
@@ -8,9 +8,11 @@ interface PanelProps {
   children: ReactNode;
   width?: string;
   className?: string;
+  noPadding?: boolean;
 }
 
-export function Panel({ open, onClose, title, children, width = '400px', className = '' }: PanelProps) {
+export function Panel({ open, onClose, title, children, width = '400px', className = '', noPadding = false }: PanelProps) {
+  const panelId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(false);
 
@@ -64,17 +66,18 @@ export function Panel({ open, onClose, title, children, width = '400px', classNa
         onClick={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={title}
+        aria-labelledby={title ? panelId : undefined}
+        aria-label={title ? undefined : 'Panel'}
       >
         {title && (
           <div className="px-5 py-4 border-b border-border flex items-center justify-between sticky top-0 bg-surface z-10">
-            <h3 className="text-base font-semibold text-foreground">{title}</h3>
+            <h3 id={panelId} className="text-base font-semibold text-foreground">{title}</h3>
             <button onClick={onClose} className="text-muted hover:text-foreground transition-colors p-1 rounded-md hover:bg-raised" aria-label="Close panel">
               &#x2715;
             </button>
           </div>
         )}
-        <div className="p-5">{children}</div>
+        <div className={noPadding ? '' : 'p-5'}>{children}</div>
       </div>
     </div>,
     document.body,

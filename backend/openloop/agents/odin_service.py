@@ -7,12 +7,13 @@ has space_id=None (system-level).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncGenerator
 
 from sqlalchemy.orm import Session
 
-from backend.openloop.agents import session_manager
+from backend.openloop.agents import agent_runner
 from backend.openloop.db.models import Agent, Conversation
 from backend.openloop.services import agent_service, conversation_service
 
@@ -38,6 +39,7 @@ If you're unsure which space or agent to use, ask a clarifying question.\
 """
 
 ODIN_MCP_TOOLS = [
+    # Standard tools (shared with space agents)
     "create_task",
     "complete_task",
     "list_tasks",
@@ -52,6 +54,14 @@ ODIN_MCP_TOOLS = [
     "archive_item",
     "read_memory",
     "write_memory",
+    "save_fact",
+    "update_fact",
+    "recall_facts",
+    "delete_fact",
+    "save_rule",
+    "confirm_rule",
+    "override_rule",
+    "list_rules",
     "read_document",
     "list_documents",
     "create_document",
@@ -62,6 +72,16 @@ ODIN_MCP_TOOLS = [
     "search_summaries",
     "get_conversation_messages",
     "delegate_task",
+    "update_task_progress",
+    "read_drive_file",
+    "list_drive_files",
+    "create_drive_file",
+    "get_space_layout",
+    "add_widget",
+    "update_widget",
+    "remove_widget",
+    "set_space_layout",
+    # Odin-only tools
     "list_spaces",
     "list_agents",
     "open_conversation",
@@ -76,9 +96,10 @@ class OdinService:
 
     _agent_id: str | None = None
     _conversation_id: str | None = None
+    _lock: asyncio.Lock = asyncio.Lock()
 
-    async def ensure_agent(self, db: Session) -> str:
-        """Ensure the Odin agent exists in DB. Create if missing. Return agent_id."""
+    def _ensure_agent_unlocked(self, db: Session) -> str:
+        """Inner implementation of ensure_agent. Caller must hold self._lock."""
         if self._agent_id is not None:
             # Verify it still exists
             existing = db.query(Agent).filter(Agent.id == self._agent_id).first()
@@ -103,52 +124,58 @@ class OdinService:
         self._agent_id = agent.id
         return agent.id
 
+    async def ensure_agent(self, db: Session) -> str:
+        """Ensure the Odin agent exists in DB. Create if missing. Return agent_id."""
+        async with self._lock:
+            return self._ensure_agent_unlocked(db)
+
     async def ensure_conversation(self, db: Session) -> str:
         """Ensure an active Odin conversation exists. Create if none. Return conversation_id."""
-        agent_id = await self.ensure_agent(db)
+        async with self._lock:
+            agent_id = self._ensure_agent_unlocked(db)
 
-        if self._conversation_id is not None:
-            # Verify it still exists and is active
+            if self._conversation_id is not None:
+                # Verify it still exists and is active
+                existing = (
+                    db.query(Conversation)
+                    .filter(
+                        Conversation.id == self._conversation_id,
+                        Conversation.status == "active",
+                    )
+                    .first()
+                )
+                if existing:
+                    return self._conversation_id
+
+            # Look for an existing active Odin conversation (space_id=null)
             existing = (
                 db.query(Conversation)
                 .filter(
-                    Conversation.id == self._conversation_id,
+                    Conversation.space_id.is_(None),
+                    Conversation.agent_id == agent_id,
                     Conversation.status == "active",
                 )
                 .first()
             )
             if existing:
-                return self._conversation_id
+                self._conversation_id = existing.id
+                return existing.id
 
-        # Look for an existing active Odin conversation (space_id=null)
-        existing = (
-            db.query(Conversation)
-            .filter(
-                Conversation.space_id.is_(None),
-                Conversation.agent_id == agent_id,
-                Conversation.status == "active",
+            # Create a new Odin conversation
+            conv = conversation_service.create_conversation(
+                db,
+                agent_id=agent_id,
+                name="Odin",
+                space_id=None,
             )
-            .first()
-        )
-        if existing:
-            self._conversation_id = existing.id
-            return existing.id
-
-        # Create a new Odin conversation
-        conv = conversation_service.create_conversation(
-            db,
-            agent_id=agent_id,
-            name="Odin",
-            space_id=None,
-        )
-        self._conversation_id = conv.id
-        return conv.id
+            self._conversation_id = conv.id
+            return conv.id
 
     async def send_message(self, db: Session, message: str) -> AsyncGenerator[dict, None]:
         """Send a message to Odin and stream the response."""
         conversation_id = await self.ensure_conversation(db)
 
-        async for event in session_manager.send_message(
+        async for event in agent_runner.run_interactive(
             db,
             conversation_id=conversation_id,
             message=message,

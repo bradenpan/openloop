@@ -285,10 +285,10 @@ function AutomationForm({ open, onClose, editing, onSaved }: AutomationFormProps
           params: { path: { automation_id: editing.id } },
           body: updateBody,
         });
-        if ((res as { error?: unknown }).error) throw new Error('Save failed');
+        if (res.error) throw new Error('Save failed');
       } else {
         const res = await api.POST('/api/v1/automations', { body: createBody });
-        if ((res as { error?: unknown }).error) throw new Error('Save failed');
+        if (res.error) throw new Error('Save failed');
       }
 
       onSaved();
@@ -557,7 +557,7 @@ function DetailPanel({ automation, onClose, onEdit, onDeleted, onTriggered }: De
       const res = await api.POST('/api/v1/automations/{automation_id}/trigger', {
         params: { path: { automation_id: automation.id } },
       });
-      if ((res as { error?: unknown }).error) throw new Error();
+      if (res.error) throw new Error();
       setConfirmRun(false);
       qc.invalidateQueries({ queryKey: ['get', '/api/v1/automations/{automation_id}/runs'] });
       onTriggered();
@@ -814,8 +814,8 @@ export default function Automations() {
         params: { path: { automation_id: automation.id } },
         body: { enabled: !automation.enabled },
       });
-      if ((res as { error?: unknown }).error) {
-        console.error('Toggle failed for automation', automation.id, (res as { error?: unknown }).error);
+      if (res.error) {
+        console.error('Toggle failed for automation', automation.id, res.error);
         return;
       }
       qc.invalidateQueries({ queryKey: ['get', '/api/v1/automations'] });

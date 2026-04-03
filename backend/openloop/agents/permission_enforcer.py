@@ -10,14 +10,22 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
+from datetime import UTC, datetime
 from fnmatch import fnmatch
 
-from contract.enums import GrantLevel, Operation, PermissionRequestStatus
+from contract.enums import GrantLevel, NotificationType, Operation, PermissionRequestStatus
 from sqlalchemy.orm import Session
 
 from backend.openloop.db.models import AgentPermission, PermissionRequest
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Approval timeout — how long to wait before auto-denying a pending request
+# ---------------------------------------------------------------------------
+
+APPROVAL_TIMEOUT_SECONDS: int = 1800  # 30 minutes
 
 # ---------------------------------------------------------------------------
 # System guardrails — always blocked, cannot be overridden by permissions
@@ -41,9 +49,9 @@ def is_system_blocked(resource: str) -> bool:
 
     Returns True if the resource must always be blocked.
     """
-    normalized = resource.replace("\\", "/")
+    normalized = resource.replace("\\", "/").lower()
     for pattern in BLOCKED_PATTERNS:
-        if fnmatch(normalized, pattern):
+        if fnmatch(normalized, pattern.lower()):
             return True
     return False
 
@@ -294,10 +302,13 @@ async def _poll_for_approval(db: Session, request_id: str) -> str:
     """Poll DB every 2 seconds until the permission request is resolved.
 
     Returns the resolved status string ("approved" or "denied").
-    No timeout — agents wait indefinitely for the user to act, per spec.
+    Times out after APPROVAL_TIMEOUT_SECONDS, auto-denying the request.
     If the request row is deleted, treats as denied.
     """
+    from backend.openloop.services import notification_service
+
     poll_interval = 2.0
+    start = time.monotonic()
     while True:
         db.expire_all()
         req = db.query(PermissionRequest).filter(PermissionRequest.id == request_id).first()
@@ -306,6 +317,34 @@ async def _poll_for_approval(db: Session, request_id: str) -> str:
             return PermissionRequestStatus.DENIED
         if req.status != PermissionRequestStatus.PENDING:
             return req.status
+
+        # Check timeout
+        elapsed = time.monotonic() - start
+        if elapsed >= APPROVAL_TIMEOUT_SECONDS:
+            logger.warning(
+                "Permission request %s timed out after %d seconds — auto-denying",
+                request_id,
+                int(elapsed),
+            )
+            req.status = PermissionRequestStatus.DENIED
+            req.resolved_by = "system"
+            req.resolved_at = datetime.now(UTC).replace(tzinfo=None)
+            db.commit()
+
+            notification_service.create_notification(
+                db,
+                type=NotificationType.SYSTEM,
+                title="Approval request expired",
+                body=(
+                    f"Approval for tool '{req.tool_name}' on '{req.resource}' "
+                    f"expired after {APPROVAL_TIMEOUT_SECONDS // 60} minutes "
+                    f"with no response."
+                ),
+                conversation_id=req.conversation_id,
+            )
+
+            return PermissionRequestStatus.DENIED
+
         await asyncio.sleep(poll_interval)
 
 

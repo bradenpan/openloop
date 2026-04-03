@@ -74,6 +74,11 @@ export interface SSEErrorEvent {
   message: string;
 }
 
+export interface SSEStreamEndEvent {
+  type: 'stream_end';
+  conversation_id: string;
+}
+
 export type SSEEvent =
   | SSETokenEvent
   | SSEToolCallEvent
@@ -84,7 +89,8 @@ export type SSEEvent =
   | SSEBackgroundUpdateEvent
   | SSEBackgroundProgressEvent
   | SSERateLimitedEvent
-  | SSEErrorEvent;
+  | SSEErrorEvent
+  | SSEStreamEndEvent;
 
 export type SSEStatus = 'connecting' | 'connected' | 'disconnected' | 'error';
 type SSEHandler = (event: SSEEvent) => void;
@@ -117,7 +123,7 @@ const BASE_RETRY_DELAY = 1_000;
 const EVENT_TYPES = [
   'token', 'tool_call', 'tool_result', 'approval_request',
   'notification', 'route', 'background_update', 'background_progress',
-  'rate_limited', 'error',
+  'rate_limited', 'error', 'stream_end',
 ];
 
 function dispatch(event: SSEEvent) {

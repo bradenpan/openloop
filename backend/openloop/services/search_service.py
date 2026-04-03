@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import html
 import re
+from datetime import UTC, datetime
 
 from sqlalchemy import text
 from sqlalchemy.orm import Session
@@ -209,8 +210,11 @@ def search_memory(
         FROM fts_memory_entries fts
         JOIN memory_entries me ON me.rowid = fts.rowid
         WHERE fts_memory_entries MATCH :query
+          AND me.archived_at IS NULL
+          AND (me.valid_until IS NULL OR me.valid_until > :now)
     """
-    params: dict = {"query": safe_q, "limit": limit, "snip_open": _SNIPPET_OPEN, "snip_close": _SNIPPET_CLOSE}
+    now = datetime.now(UTC).replace(tzinfo=None)
+    params: dict = {"query": safe_q, "limit": limit, "snip_open": _SNIPPET_OPEN, "snip_close": _SNIPPET_CLOSE, "now": now}
 
     if namespace:
         sql += " AND me.namespace = :namespace"
@@ -338,7 +342,7 @@ def rebuild_fts_indexes(db: Session) -> None:
         "fts_memory_entries",
         "fts_documents",
     ]:
-        db.execute(text(f"INSERT INTO {table}({table}) VALUES('rebuild');"))
+        db.execute(text(f"INSERT INTO {table}({table}) VALUES('rebuild');"))  # noqa: S608
     db.commit()
 
 

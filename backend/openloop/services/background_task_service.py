@@ -69,7 +69,7 @@ def list_background_tasks(
         query = query.filter(BackgroundTask.agent_id == agent_id)
     if parent_task_id is not None:
         query = query.filter(BackgroundTask.parent_task_id == parent_task_id)
-    return query.order_by(BackgroundTask.started_at.desc()).all()
+    return query.order_by(BackgroundTask.created_at.desc()).all()
 
 
 def list_child_tasks(db: Session, parent_task_id: str) -> list[BackgroundTask]:

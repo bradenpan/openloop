@@ -23,14 +23,14 @@ def _escape_like(s: str) -> str:
     return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
-def _is_text_file(filename: str) -> bool:
+def is_text_file(filename: str) -> bool:
     """Check if a file has a text extension."""
     return Path(filename).suffix.lower() in TEXT_EXTENSIONS
 
 
 def _extract_text(file_path: Path) -> str | None:
     """Extract text content from a file if it has a text extension."""
-    if not _is_text_file(file_path.name):
+    if not is_text_file(file_path.name):
         return None
     try:
         return file_path.read_text(encoding="utf-8", errors="replace")
@@ -117,18 +117,17 @@ def list_documents(
     if tags is not None:
         # Filter documents whose tags JSON array contains ALL specified tags.
         # SQLite JSON: use json_each to check containment.
-        for tag in tags:
+        for i, tag in enumerate(tags):
             query = query.filter(
                 Document.tags.isnot(None),
-                Document.title.is_not(None),  # keep query valid
             )
             # Use a simple approach: cast to string and check containment
             # For SQLite, we check if the JSON array contains the tag as a string element
             # func, literal_column, text imported at module level
 
             query = query.filter(
-                text(f"EXISTS (SELECT 1 FROM json_each(documents.tags) WHERE json_each.value = :tag_{tag.replace('-', '_')})").bindparams(
-                    **{f"tag_{tag.replace('-', '_')}": tag}
+                text(f"EXISTS (SELECT 1 FROM json_each(documents.tags) WHERE json_each.value = :tag_{i})").bindparams(
+                    **{f"tag_{i}": tag}
                 )
             )
 
@@ -190,7 +189,7 @@ def upload_document(
 
     # Sanitize filename to prevent path traversal
     filename = Path(filename).name
-    if not filename or ".." in filename:
+    if not filename:
         raise HTTPException(status_code=422, detail="Invalid filename")
 
     # Write file
@@ -200,7 +199,7 @@ def upload_document(
     # Determine metadata
     file_size = len(file_content)
     mime = content_type or _guess_mime_type(filename)
-    content_text = _extract_text(file_path) if _is_text_file(filename) else None
+    content_text = _extract_text(file_path) if is_text_file(filename) else None
 
     doc = Document(
         space_id=space_id,

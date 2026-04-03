@@ -186,6 +186,8 @@ Browser (React)  ←→  FastAPI Backend  ←→  Claude Agent SDK  ←→  Clau
 
 OpenLoop is a coordination layer. It doesn't do AI work — it manages the plumbing: routing messages, storing state, assembling context, enforcing permissions, and tracking what agents are doing. The actual intelligence comes from Claude via the Agent SDK.
 
+**How it relates to Claude Code:** Every OpenLoop agent is, under the hood, a Claude Code session. The Claude Agent SDK is a programmatic interface to Claude Code — each `query()` call spawns or resumes a Claude Code CLI process under your Max subscription. Claude Code already handles file access, tool use, and conversation history. What OpenLoop adds is multi-agent identity (each agent has its own prompt, tools, and permissions), persistent memory that accumulates across conversations, structured work tracking (items, boards, spaces), permission enforcement, background orchestration (multiple agents working simultaneously with steering), and a web UI instead of a terminal. The Agent Runner is intentionally thin — it bridges OpenLoop's conversation model to the SDK without duplicating what the SDK already does.
+
 **Tech stack:** Python 3.12, FastAPI, SQLAlchemy, SQLite, Alembic (migrations). React 19, Tailwind CSS v4, Vite, Zustand, React Query. Claude Agent SDK.
 
 **Communication:** HTTP REST for CRUD operations. Server-Sent Events (SSE) for streaming agent responses and real-time updates. The frontend opens a persistent SSE connection to receive events (agent responses, background task progress, permission requests, notifications).
@@ -323,15 +325,15 @@ Long conversations risk losing information when context is compressed. Three mec
 
 2. **Proactive budget enforcement** — the system checks context size *before* each LLM call (not after). If it exceeds 70%, compression happens first at a clean turn boundary. You never see a "context almost full" warning that arrives too late.
 
-3. **Observation masking** — during compression, the most recent 5-10 exchanges are kept verbatim. Only older history is summarized. The immediate working context stays intact.
+3. **Observation masking** — during compression, the most recent 7 exchanges are kept verbatim. Only older history is summarized. The immediate working context stays intact.
 
-## Session Manager
+## Agent Runner
 
-The session manager bridges OpenLoop conversations with Claude SDK sessions.
+The agent runner bridges OpenLoop conversations with Claude SDK sessions. It replaced the earlier SessionManager, eliminating redundant in-memory state in favor of using the DB as the single source of truth for `sdk_session_id`.
 
-**Interactive conversations:** Your message is sent via `query(resume=session_id)`. The SDK resumes the session, the agent responds, and the response streams back via SSE token by token.
+**Interactive conversations:** Your message is sent via `run_interactive()`, which calls `query(resume=sdk_session_id)`. The SDK resumes the session, the agent responds, and the response streams back via SSE token by token. The first message in a conversation creates the SDK session; subsequent messages resume it. If the SDK session has expired (e.g., after a server restart), the system automatically retries with fresh context and injects conversation summaries for continuity.
 
-**Background delegation:** Uses a managed turn loop instead of fire-and-forget. The agent works in discrete turns (max 20). Between turns, the session manager checks a steering queue for user corrections. If a correction exists, it's injected as the next message. Otherwise, the agent auto-continues. The agent signals completion with `TASK_COMPLETE`.
+**Background delegation:** Uses a managed turn loop instead of fire-and-forget. The agent works in discrete turns (max 20). Between turns, the agent runner checks a steering queue for user corrections. If a correction exists, it's injected as the next message. Otherwise, the agent auto-continues. The agent signals completion with `TASK_COMPLETE`.
 
 **Rate limit handling:** If the SDK returns a 429, the system retries with exponential backoff (30s, 60s, 120s, max 3 retries), creates a notification, and publishes an SSE event so the UI can show status.
 
@@ -391,7 +393,7 @@ All three use the same pattern: asyncio task started in the app lifespan, cancel
 
 ```
 backend/openloop/
-├── agents/             # Session manager, context assembler, MCP tools, schedulers
+├── agents/             # Agent runner, context assembler, MCP tools, schedulers
 ├── api/
 │   ├── routes/         # One file per domain (spaces, items, memory, events, etc.)
 │   └── schemas/        # Pydantic models, one file per domain

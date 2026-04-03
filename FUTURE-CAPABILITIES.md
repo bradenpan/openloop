@@ -135,7 +135,7 @@ These patterns are drawn from Paperclip's architecture. They address operational
 6. SURFACE     — create notifications for anything that needs human attention
 ```
 
-This is injected into the agent's system prompt as behavioral guidance, not enforced by code. Agents that follow the protocol produce consistent, auditable output. The session manager's `delegate_background()` already provides the turn loop — this adds structure to what happens within each turn.
+This is injected into the agent's system prompt as behavioral guidance, not enforced by code. Agents that follow the protocol produce consistent, auditable output. The agent runner's `delegate_background()` already provides the turn loop — this adds structure to what happens within each turn.
 
 **Not adopted from Paperclip:** The org chart / reporting hierarchy, CEO/manager/IC roles, agent "hiring" with board approval. These are organizational metaphors that don't serve a single-user tool.
 
@@ -178,16 +178,15 @@ On the item model: `checked_out_by` (agent_id, nullable), `checkout_run_id` (for
 
 **Problem:** OpenLoop currently assumes Claude SDK everywhere. If you want Odin on Haiku, a research agent using Gemini's grounding for web search, or a coding agent using a local model, there's no clean abstraction for swapping the underlying model.
 
-**Solution:** A model adapter interface between the session manager and the execution layer.
+**Solution:** A model adapter interface between the agent runner and the execution layer.
 
 ```python
 class ModelAdapter(Protocol):
-    async def start_session(self, config: SessionConfig) -> SessionHandle: ...
-    async def send_message(self, session: SessionHandle, message: str) -> AsyncIterator[Chunk]: ...
-    async def close_session(self, session: SessionHandle) -> None: ...
+    async def run_interactive(self, config: SessionConfig, message: str) -> AsyncIterator[Chunk]: ...
+    async def close_conversation(self, session: SessionHandle) -> None: ...
 ```
 
-The Claude SDK adapter is the default and primary implementation. Others (Gemini, OpenAI, local models) are added as needed. The session manager calls the adapter, not the SDK directly.
+The Claude SDK adapter is the default and primary implementation. Others (Gemini, OpenAI, local models) are added as needed. The agent runner calls the adapter, not the SDK directly.
 
 **When this matters:** Not until you want non-Claude models for specific agents. The current architecture (Claude SDK everywhere) is correct for now. This is an extraction refactor when the need arises, not an upfront abstraction.
 
@@ -210,7 +209,7 @@ Not an org chart. Not AI employees. The use cases are:
 
 ### Architecture Extensions Needed
 
-The current session manager + delegate_background() handles single-agent background work. Multi-agent coordination adds:
+The current agent runner + delegate_background() handles single-agent background work. Multi-agent coordination adds:
 
 1. **Agent-to-agent task assignment:** An agent creates a task and assigns it to another agent. The assigned agent is woken (same as automation trigger). Results flow back through the task system (status updates, comments, linked artifacts).
 

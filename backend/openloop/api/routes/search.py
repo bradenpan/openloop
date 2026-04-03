@@ -24,37 +24,40 @@ def search(
         description="Filter by type: messages, summaries, memory, documents",
     ),
     limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> SearchResponse:
     """Full-text search across conversations, summaries, memory, and documents."""
+    # Fetch extra rows to satisfy offset, then slice
+    fetch_limit = limit + offset
     if type:
         # Single-type search
         results: dict[str, list] = {}
         if type == "messages":
             results["messages"] = search_service.search_messages(
-                db, q, space_id=space_id, conversation_id=conversation_id, limit=limit
+                db, q, space_id=space_id, conversation_id=conversation_id, limit=fetch_limit
             )
         elif type == "summaries":
             results["summaries"] = search_service.search_summaries(
-                db, q, space_id=space_id, limit=limit
+                db, q, space_id=space_id, limit=fetch_limit
             )
         elif type == "memory":
-            results["memory"] = search_service.search_memory(db, q, limit=limit)
+            results["memory"] = search_service.search_memory(db, q, limit=fetch_limit)
         elif type == "documents":
             results["documents"] = search_service.search_documents(
-                db, q, space_id=space_id, limit=limit
+                db, q, space_id=space_id, limit=fetch_limit
             )
         else:
             results = {}
     else:
-        results = search_service.search_all(db, q, space_id=space_id, limit=limit)
+        results = search_service.search_all(db, q, space_id=space_id, limit=fetch_limit)
 
-    # Convert raw dicts to pydantic models
+    # Convert raw dicts to pydantic models, applying offset
     typed_results: dict[str, list[SearchResultItem]] = {}
     total = 0
     for key, items in results.items():
-        typed_results[key] = [SearchResultItem(**item) for item in items]
-        total += len(items)
+        typed_results[key] = [SearchResultItem(**item) for item in items[offset:]]
+        total += len(typed_results[key])
 
     return SearchResponse(query=q, total_count=total, results=typed_results)
 

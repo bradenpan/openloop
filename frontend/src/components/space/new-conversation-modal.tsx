@@ -23,7 +23,7 @@ export function NewConversationModal({ open, onClose, spaceId }: NewConversation
   const [modelOverride, setModelOverride] = useState('');
 
   const { data: agentsData } = $api.useQuery('get', '/api/v1/agents', {}, { enabled: open });
-  const agents = agentsData?.data ?? [];
+  const agents = agentsData ?? [];
 
   const createConversation = $api.useMutation('post', '/api/v1/conversations', {
     onSuccess: () => {

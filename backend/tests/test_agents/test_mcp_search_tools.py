@@ -582,13 +582,12 @@ class TestRecallFacts:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_access_tracking(self, search_data: dict, fts_db: Session) -> None:
-        """FTS5 recall should increment access_count on matched entries."""
+    async def test_recall_is_read_only(self, search_data: dict, fts_db: Session) -> None:
+        """FTS5 recall should NOT modify entries (read-only operation)."""
         mem = search_data["mem1"]
         original_count = mem.access_count
 
         await recall_facts(query="OAuth2", _db=fts_db)
 
         fts_db.refresh(mem)
-        assert mem.access_count > original_count
-        assert mem.last_accessed is not None
+        assert mem.access_count == original_count

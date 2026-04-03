@@ -2,7 +2,6 @@ import asyncio
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,46 +18,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     setup_logging()
 
     # Crash recovery — mark any previously-active conversations as interrupted
-    from backend.openloop.agents.session_manager import recover_from_crash
+    from backend.openloop.agents.agent_runner import recover_from_crash
 
     db = SessionLocal()
     try:
         count = recover_from_crash(db)
         if count > 0:
             logger.info("Crash recovery: marked %d conversations as interrupted", count)
-    finally:
-        db.close()
-
-    # Orphaned task cleanup — mark running/queued background tasks as failed
-    from backend.openloop.services import background_task_service, notification_service
-
-    db = SessionLocal()
-    try:
-        running_tasks = background_task_service.list_background_tasks(db, status="running")
-        queued_tasks = background_task_service.list_background_tasks(db, status="queued")
-        orphaned = running_tasks + queued_tasks
-        running_count = len(running_tasks)
-        for task in orphaned:
-            background_task_service.update_background_task(
-                db,
-                task.id,
-                status="failed",
-                error="Server restarted",
-                completed_at=datetime.now(UTC),
-            )
-        # Create notifications only for tasks that were actively running
-        if running_count > 0:
-            notification_service.create_notification(
-                db,
-                type="system",
-                title="Background tasks interrupted",
-                body=f"{running_count} running task(s) were interrupted by a server restart.",
-            )
-        if orphaned:
-            logger.info(
-                "Orphaned task cleanup: marked %d task(s) as failed (server restarted)",
-                len(orphaned),
-            )
     finally:
         db.close()
 
@@ -105,25 +71,29 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     stop_lifecycle_scheduler()
 
     # Graceful shutdown — close all active SDK sessions
-    from backend.openloop.agents.session_manager import close_session, list_active
+    from backend.openloop.agents.agent_runner import close_conversation, list_running
 
-    active = list_active()
+    shutdown_db = SessionLocal()
+    try:
+        active = list_running(shutdown_db)
+    finally:
+        shutdown_db.close()
     # Only close interactive sessions — background sessions have status="background"
     # and close_conversation() requires status="active"
-    interactive = [s for s in active if s.status == "active"]
+    interactive = [s for s in active if s["status"] == "active"]
     if interactive:
         logger.info("Shutdown: closing %d interactive SDK session(s)...", len(interactive))
 
         async def _close_one(conversation_id: str):
             db = SessionLocal()
             try:
-                await close_session(db, conversation_id=conversation_id)
+                await close_conversation(db, conversation_id=conversation_id)
             except Exception:
                 logger.warning("Shutdown: failed to close session %s", conversation_id, exc_info=True)
             finally:
                 db.close()
 
-        close_tasks = [_close_one(s.conversation_id) for s in interactive]
+        close_tasks = [_close_one(s["conversation_id"]) for s in interactive]
         try:
             await asyncio.wait_for(
                 asyncio.gather(*close_tasks, return_exceptions=True),
@@ -155,6 +125,7 @@ app.add_middleware(
 # --- Routers ---
 from backend.openloop.api.routes.agents import router as agents_router  # noqa: E402
 from backend.openloop.api.routes.automations import router as automations_router  # noqa: E402
+from backend.openloop.api.routes.behavioral_rules import router as behavioral_rules_router  # noqa: E402
 from backend.openloop.api.routes.conversations import router as conversations_router  # noqa: E402
 from backend.openloop.api.routes.data_sources import router as data_sources_router  # noqa: E402
 from backend.openloop.api.routes.documents import router as documents_router  # noqa: E402
@@ -164,6 +135,7 @@ from backend.openloop.api.routes.home import router as home_router  # noqa: E402
 from backend.openloop.api.routes.items import router as items_router  # noqa: E402
 from backend.openloop.api.routes.layout import router as layout_router  # noqa: E402
 from backend.openloop.api.routes.memory import router as memory_router  # noqa: E402
+from backend.openloop.api.routes.memory import space_memory_router  # noqa: E402
 from backend.openloop.api.routes.notifications import router as notifications_router  # noqa: E402
 from backend.openloop.api.routes.odin import router as odin_router  # noqa: E402
 from backend.openloop.api.routes.running import router as running_router  # noqa: E402
@@ -177,6 +149,7 @@ from backend.openloop.api.routes.system import router as system_router  # noqa: 
 app.include_router(running_router)
 app.include_router(agents_router)
 app.include_router(automations_router)
+app.include_router(behavioral_rules_router)
 app.include_router(conversations_router)
 app.include_router(data_sources_router)
 app.include_router(events_router)
@@ -185,6 +158,7 @@ app.include_router(drive_router)
 app.include_router(home_router)
 app.include_router(items_router)
 app.include_router(memory_router)
+app.include_router(space_memory_router)
 app.include_router(notifications_router)
 app.include_router(odin_router)
 app.include_router(layout_router)

@@ -339,17 +339,20 @@ def _build_behavioral_rules_section(db: Session, agent_id: str, read_only: bool 
         return ""
 
     # Auto-demotion check: deactivate low-confidence rules with enough history
+    # Only mutate during real assembly, not estimation/dry-run
     active_rules = []
-    demoted = False
-    for rule in rules:
-        if rule.confidence < 0.3 and rule.apply_count >= 10:
-            rule.is_active = False
-            demoted = True
-            continue
-        active_rules.append(rule)
-
-    if demoted:
-        db.commit()
+    if not read_only:
+        demoted = False
+        for rule in rules:
+            if rule.confidence < 0.3 and rule.apply_count >= 10:
+                rule.is_active = False
+                demoted = True
+                continue
+            active_rules.append(rule)
+        if demoted:
+            db.commit()
+    else:
+        active_rules = [r for r in rules if not (r.confidence < 0.3 and r.apply_count >= 10)]
 
     if not active_rules:
         return ""
@@ -594,7 +597,7 @@ def _build_odin_attention_items(db: Session) -> str:
     lines: list[str] = []
 
     # Due-today items across all spaces
-    all_items = item_service.list_items(db, archived=False)
+    all_items = item_service.list_items(db, archived=False, limit=500)
     due_today = [
         i
         for i in all_items

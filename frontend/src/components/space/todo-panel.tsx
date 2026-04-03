@@ -249,6 +249,7 @@ function TaskRow({ item, boardColumns, onToggleDone, onStageChange, onClick }: T
               e.stopPropagation();
               onStageChange(e.target.value);
             }}
+            aria-label="Stage"
             className="text-[11px] text-muted bg-transparent border border-transparent hover:border-border rounded px-1 py-0 cursor-pointer focus:outline-none focus:ring-1 focus:ring-primary"
           >
             {boardColumns.map((col) => (

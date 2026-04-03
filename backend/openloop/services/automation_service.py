@@ -1,5 +1,6 @@
 """Automation service — CRUD and run management for automations."""
 
+import asyncio
 import logging
 from datetime import UTC, datetime
 
@@ -11,6 +12,14 @@ from sqlalchemy.orm import Session
 from backend.openloop.db.models import Automation, AutomationRun
 
 logger = logging.getLogger(__name__)
+
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _task_done(task: asyncio.Task) -> None:
+    _background_tasks.discard(task)
+    if not task.cancelled() and task.exception():
+        logger.error("Background task failed: %s", task.exception(), exc_info=task.exception())
 
 
 def create_automation(
@@ -27,6 +36,27 @@ def create_automation(
     enabled: bool = True,
 ) -> Automation:
     """Create a new automation."""
+    # Validate trigger_type against enum
+    valid_triggers = {t for t in AutomationTriggerType}
+    if trigger_type not in valid_triggers:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid trigger_type '{trigger_type}'. Must be one of: {', '.join(sorted(valid_triggers))}",
+        )
+
+    # Validate cron-specific requirements
+    if trigger_type == AutomationTriggerType.CRON:
+        if cron_expression is None:
+            raise HTTPException(
+                status_code=422,
+                detail="cron_expression is required when trigger_type is 'cron'",
+            )
+        if not croniter.is_valid(cron_expression):
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid cron_expression: '{cron_expression}'",
+            )
+
     automation = Automation(
         name=name,
         description=description,
@@ -101,14 +131,17 @@ async def trigger_automation(db: Session, automation_id: str) -> "AutomationRun"
     Returns the AutomationRun record (status='running').
     """
     # Import lazily to avoid circular imports (same pattern as task_monitor)
-    import asyncio
-
-    from backend.openloop.agents import session_manager
+    from backend.openloop.agents import agent_runner
 
     automation = get_automation(db, automation_id)
 
     # Create the run record first
     run = create_run(db, automation_id=automation_id)
+
+    # Update last_run_at immediately so the scheduler won't re-trigger
+    # while the async task is still running (double-fire prevention).
+    automation.last_run_at = datetime.now(UTC).replace(tzinfo=None)
+    db.commit()
 
     # Extract scalar values before defining _fire() to avoid detached-object risk
     agent_id = automation.agent_id
@@ -123,7 +156,7 @@ async def trigger_automation(db: Session, automation_id: str) -> "AutomationRun"
 
         task_db = SessionLocal()
         try:
-            task_id = await session_manager.delegate_background(
+            task_id = await agent_runner.delegate_background(
                 task_db,
                 agent_id=agent_id,
                 instruction=instruction,
@@ -151,7 +184,9 @@ async def trigger_automation(db: Session, automation_id: str) -> "AutomationRun"
         finally:
             task_db.close()
 
-    asyncio.create_task(_fire())
+    task = asyncio.create_task(_fire())
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done)
 
     return run
 
@@ -182,7 +217,7 @@ def create_run(
         automation_id=automation_id,
         background_task_id=background_task_id,
         status=BackgroundTaskStatus.RUNNING,
-        started_at=datetime.now(UTC),
+        started_at=datetime.now(UTC).replace(tzinfo=None),
     )
     db.add(run)
     db.commit()
@@ -203,7 +238,7 @@ def complete_run(
     if not run:
         raise ValueError(f"AutomationRun {run_id} not found")
 
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
     run.status = status
     run.result_summary = result_summary
     run.error = error

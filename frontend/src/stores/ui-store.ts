@@ -30,8 +30,13 @@ function applyToDOM(palette: PaletteId, theme: ThemeId) {
   localStorage.setItem('ol-theme', theme);
 }
 
-const savedPalette = (localStorage.getItem('ol-palette') as PaletteId) || 'slate-cyan';
-const savedTheme = (localStorage.getItem('ol-theme') as ThemeId) || 'dark';
+const VALID_PALETTES: PaletteId[] = ['slate-cyan', 'warm-amber', 'neutral-indigo'];
+const VALID_THEMES: ThemeId[] = ['dark', 'light'];
+
+const rawPalette = localStorage.getItem('ol-palette');
+const rawTheme = localStorage.getItem('ol-theme');
+const savedPalette: PaletteId = VALID_PALETTES.includes(rawPalette as PaletteId) ? (rawPalette as PaletteId) : 'slate-cyan';
+const savedTheme: ThemeId = VALID_THEMES.includes(rawTheme as ThemeId) ? (rawTheme as ThemeId) : 'dark';
 applyToDOM(savedPalette, savedTheme);
 
 export const useUIStore = create<UIState>((set, get) => ({

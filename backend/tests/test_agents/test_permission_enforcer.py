@@ -514,3 +514,107 @@ class TestCheckPermissionApproval:
         assert event_data["type"] == "approval_request"
         assert event_data["data"]["tool_name"] == "Bash"
         assert event_data["data"]["resource"] == "bash"
+
+
+# ---------------------------------------------------------------------------
+# _poll_for_approval — timeout behavior
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+class TestPollForApprovalTimeout:
+    async def test_poll_returns_denied_after_timeout(self, db_session):
+        """_poll_for_approval should auto-deny after APPROVAL_TIMEOUT_SECONDS."""
+        from backend.openloop.agents.permission_enforcer import (
+            APPROVAL_TIMEOUT_SECONDS,
+            _poll_for_approval,
+        )
+
+        agent = Agent(name="timeout-agent", default_model="sonnet")
+        db_session.add(agent)
+        db_session.flush()
+
+        req = PermissionRequest(
+            agent_id=agent.id,
+            tool_name="Bash",
+            resource="bash",
+            operation=Operation.EXECUTE,
+            status=PermissionRequestStatus.PENDING,
+        )
+        db_session.add(req)
+        db_session.commit()
+        db_session.refresh(req)
+
+        request_id = req.id
+
+        # Simulate immediate timeout: first call returns 0, second returns past timeout
+        call_count = 0
+        def fake_monotonic():
+            nonlocal call_count
+            call_count += 1
+            if call_count <= 1:
+                return 0.0
+            return float(APPROVAL_TIMEOUT_SECONDS + 1)
+
+        with (
+            patch("backend.openloop.agents.permission_enforcer.time.monotonic", side_effect=fake_monotonic),
+            patch("backend.openloop.agents.permission_enforcer.asyncio.sleep", new_callable=AsyncMock),
+        ):
+            result = await _poll_for_approval(db_session, request_id)
+
+        assert result == PermissionRequestStatus.DENIED
+
+        # Verify DB state was updated
+        db_session.expire_all()
+        updated_req = db_session.query(PermissionRequest).filter(
+            PermissionRequest.id == request_id
+        ).first()
+        assert updated_req.status == PermissionRequestStatus.DENIED
+        assert updated_req.resolved_by == "system"
+        assert updated_req.resolved_at is not None
+
+    async def test_poll_returns_approved_when_resolved_before_timeout(self, db_session):
+        """If the request is approved before timeout, _poll_for_approval returns APPROVED."""
+        from backend.openloop.agents.permission_enforcer import _poll_for_approval
+
+        agent = Agent(name="approve-agent", default_model="sonnet")
+        db_session.add(agent)
+        db_session.flush()
+
+        req = PermissionRequest(
+            agent_id=agent.id,
+            tool_name="Bash",
+            resource="bash",
+            operation=Operation.EXECUTE,
+            status=PermissionRequestStatus.PENDING,
+        )
+        db_session.add(req)
+        db_session.commit()
+        db_session.refresh(req)
+
+        request_id = req.id
+
+        async def fake_sleep(_duration):
+            # Simulate external approval during sleep
+            r = db_session.query(PermissionRequest).filter(
+                PermissionRequest.id == request_id
+            ).first()
+            r.status = PermissionRequestStatus.APPROVED
+            r.resolved_by = "user"
+            db_session.commit()
+
+        monotonic_values = iter([0.0, 0.0, 2.0])
+
+        with (
+            patch(
+                "backend.openloop.agents.permission_enforcer.time.monotonic",
+                side_effect=lambda: next(monotonic_values),
+            ),
+            patch(
+                "backend.openloop.agents.permission_enforcer.asyncio.sleep",
+                side_effect=fake_sleep,
+            ),
+        ):
+            result = await _poll_for_approval(db_session, request_id)
+
+        assert result == PermissionRequestStatus.APPROVED

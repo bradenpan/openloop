@@ -74,7 +74,7 @@ export function DocumentViewer({ documentId, open, onClose }: DocumentViewerProp
       .then((text) => setTextContent(text ?? null))
       .catch(() => setTextContent(null))
       .finally(() => setLoadingContent(false));
-  }, [open, documentId, doc?.local_path, doc?.mime_type]);
+  }, [open, documentId, doc]);
 
   // Reset tag editing state when doc changes
   useEffect(() => {

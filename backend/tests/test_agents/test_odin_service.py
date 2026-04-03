@@ -111,17 +111,17 @@ async def test_ensure_conversation_creates_new_if_closed(db_session, odin_svc):
 
 
 @pytest.mark.asyncio
-async def test_send_message_delegates_to_session_manager(db_session, odin_svc):
-    """send_message should call session_manager.send_message with correct args."""
+async def test_send_message_delegates_to_agent_runner(db_session, odin_svc):
+    """send_message should call agent_runner.run_interactive with correct args."""
     mock_events = [{"type": "stream", "data": "hello"}]
 
-    async def mock_send_message(db, *, conversation_id, message):
+    async def mock_run_interactive(db, *, conversation_id, message):
         for event in mock_events:
             yield event
 
     with patch(
-        "backend.openloop.agents.odin_service.session_manager.send_message",
-        side_effect=mock_send_message,
+        "backend.openloop.agents.odin_service.agent_runner.run_interactive",
+        side_effect=mock_run_interactive,
     ):
         events = []
         async for event in odin_svc.send_message(db_session, "Hello Odin"):

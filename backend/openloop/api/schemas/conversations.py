@@ -8,6 +8,7 @@ __all__ = [
     "MessageCreate",
     "MessageResponse",
     "SteerRequest",
+    "SteerResponse",
     "SummaryCreate",
     "SummaryResponse",
 ]
@@ -37,6 +38,13 @@ class ConversationResponse(BaseModel):
 
 class SteerRequest(BaseModel):
     message: str
+
+
+class SteerResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    status: str
+    conversation_id: str
 
 
 class MessageCreate(BaseModel):
@@ -69,8 +77,8 @@ class SummaryResponse(BaseModel):
     conversation_id: str
     space_id: str | None
     summary: str
-    decisions: list | None
-    open_questions: list | None
+    decisions: list[str] | None
+    open_questions: list[str] | None
     is_checkpoint: bool
     is_meta_summary: bool
     consolidated_into: str | None

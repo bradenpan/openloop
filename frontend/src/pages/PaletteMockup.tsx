@@ -1,3 +1,4 @@
+// Dev utility: palette/theme comparison page. Not routed in production.
 import { useState, type CSSProperties } from 'react';
 
 type Theme = 'dark' | 'light';

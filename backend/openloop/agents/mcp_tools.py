@@ -88,6 +88,21 @@ def _get_agent_space_ids(db: Session, agent_id: str) -> list[str] | None:
     return [r[0] for r in rows]
 
 
+def _validate_space_access(db: Session, agent_id: str, space_id: str) -> str | None:
+    """Check that agent_id has access to space_id.
+
+    Returns None if access is allowed, or an error JSON string if denied.
+    System agents (no space restrictions) are always allowed.
+    """
+    allowed = _get_agent_space_ids(db, agent_id)
+    if allowed is None:
+        # System agent — no restrictions
+        return None
+    if space_id in allowed:
+        return None
+    return _err(f"Agent does not have access to space {space_id}")
+
+
 # ---------------------------------------------------------------------------
 # Standard tools (1–28): available to all agents
 # ---------------------------------------------------------------------------
@@ -95,11 +110,15 @@ def _get_agent_space_ids(db: Session, agent_id: str) -> list[str] | None:
 
 # 1. create_task
 async def create_task(
-    space_id: str, title: str, due_date: str = "", *, _db=None, _agent_name: str = "agent"
+    space_id: str, title: str, due_date: str = "",
+    *, _db=None, _agent_name: str = "agent", _agent_id: str = "",
 ) -> str:
     """Create a task in a space. due_date is optional ISO format (e.g. 2025-01-15)."""
     db = _get_db(_db)
     try:
+        denied = _validate_space_access(db, _agent_id, space_id)
+        if denied:
+            return denied
         item = item_service.create_item(
             db,
             space_id=space_id,
@@ -126,10 +145,18 @@ async def create_task(
 
 
 # 2. complete_task
-async def complete_task(item_id: str, *, _db=None) -> str:
+async def complete_task(
+    item_id: str, *, _db=None, _agent_id: str = "",
+) -> str:
     """Mark a task as done."""
     db = _get_db(_db)
     try:
+        existing = item_service.get_item(db, item_id)
+        denied = _validate_space_access(
+            db, _agent_id, existing.space_id
+        )
+        if denied:
+            return denied
         item = item_service.update_item(db, item_id, is_done=True)
         return _ok({"id": item.id, "title": item.title, "is_done": True})
     except Exception as e:
@@ -141,16 +168,28 @@ async def complete_task(item_id: str, *, _db=None) -> str:
 
 
 # 3. list_tasks
-async def list_tasks(space_id: str = "", is_done: str = "", *, _db=None) -> str:
+async def list_tasks(
+    space_id: str = "", is_done: str = "",
+    *, _db=None, _agent_id: str = "",
+) -> str:
     """List tasks. Empty string = no filter. is_done: 'true'/'false'/''."""
     db = _get_db(_db)
     try:
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
         items = item_service.list_items(
             db,
             space_id=space_id or None,
             item_type="task",
             is_done=_parse_bool(is_done),
         )
+        # Post-filter to agent's allowed spaces when no space_id
+        if not space_id:
+            allowed = _get_agent_space_ids(db, _agent_id)
+            if allowed is not None:
+                items = [i for i in items if i.space_id in allowed]
         return _ok(
             [
                 {
@@ -183,10 +222,14 @@ async def create_item(
     *,
     _db=None,
     _agent_name: str = "agent",
+    _agent_id: str = "",
 ) -> str:
     """Create a board item (task or record) in a space."""
     db = _get_db(_db)
     try:
+        denied = _validate_space_access(db, _agent_id, space_id)
+        if denied:
+            return denied
         item = item_service.create_item(
             db,
             space_id=space_id,
@@ -223,10 +266,17 @@ async def update_item(
     *,
     _db=None,
     _agent_name: str = "agent",
+    _agent_id: str = "",
 ) -> str:
     """Update board item fields. Empty string = don't change."""
     db = _get_db(_db)
     try:
+        existing = item_service.get_item(db, item_id)
+        denied = _validate_space_access(
+            db, _agent_id, existing.space_id
+        )
+        if denied:
+            return denied
         kwargs = {}
         if title:
             kwargs["title"] = title
@@ -252,10 +302,20 @@ async def update_item(
 
 
 # 6. move_item
-async def move_item(item_id: str, stage: str, *, _db=None, _agent_name: str = "agent") -> str:
+async def move_item(
+    item_id: str, stage: str,
+    *, _db=None, _agent_name: str = "agent",
+    _agent_id: str = "",
+) -> str:
     """Move a board item to a different stage."""
     db = _get_db(_db)
     try:
+        existing = item_service.get_item(db, item_id)
+        denied = _validate_space_access(
+            db, _agent_id, existing.space_id
+        )
+        if denied:
+            return denied
         item = item_service.move_item(db, item_id, stage, triggered_by=_agent_name)
         return _ok({"id": item.id, "title": item.title, "stage": item.stage})
     except Exception as e:
@@ -267,11 +327,18 @@ async def move_item(item_id: str, stage: str, *, _db=None, _agent_name: str = "a
 
 
 # 7. get_item
-async def get_item(item_id: str, *, _db=None) -> str:
+async def get_item(
+    item_id: str, *, _db=None, _agent_id: str = "",
+) -> str:
     """Get full details of a board item."""
     db = _get_db(_db)
     try:
         item = item_service.get_item(db, item_id)
+        denied = _validate_space_access(
+            db, _agent_id, item.space_id
+        )
+        if denied:
+            return denied
         return _ok(
             {
                 "id": item.id,
@@ -296,11 +363,17 @@ async def get_item(item_id: str, *, _db=None) -> str:
 
 # 8. list_items
 async def list_items(
-    space_id: str = "", stage: str = "", item_type: str = "", is_done: str = "", limit: str = "20", *, _db=None
+    space_id: str = "", stage: str = "", item_type: str = "",
+    is_done: str = "", limit: str = "20",
+    *, _db=None, _agent_id: str = "",
 ) -> str:
     """List board items with optional filters. is_done: 'true'/'false'/'' (empty = no filter)."""
     db = _get_db(_db)
     try:
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
         limit_int = _parse_int(limit, 20)
         items = item_service.list_items(
             db,
@@ -309,6 +382,11 @@ async def list_items(
             item_type=item_type or None,
             is_done=_parse_bool(is_done),
         )
+        # Post-filter to agent's allowed spaces when no space_id
+        if not space_id:
+            allowed = _get_agent_space_ids(db, _agent_id)
+            if allowed is not None:
+                items = [i for i in items if i.space_id in allowed]
         # Apply limit
         items = items[:limit_int]
         return _ok(
@@ -508,11 +586,7 @@ async def recall_facts(
                         r["category"] = entry.category
                         r["tags"] = entry.tags
                         r["access_count"] = entry.access_count
-                        # Track access
-                        entry.access_count += 1
-                        entry.last_accessed = datetime.now(UTC)
                         filtered.append(r)
-                db.commit()
                 fts_results = filtered
             else:
                 # Enrich results with importance/category/tags from the ORM
@@ -525,9 +599,6 @@ async def recall_facts(
                         r["category"] = entry.category
                         r["tags"] = entry.tags
                         r["access_count"] = entry.access_count
-                        entry.access_count += 1
-                        entry.last_accessed = datetime.now(UTC)
-                db.commit()
 
             return _ok(
                 [
@@ -547,7 +618,7 @@ async def recall_facts(
             )
         elif namespace:
             # Namespace-based scored retrieval (importance ranking)
-            entries = memory_service.get_scored_entries(db, namespace)
+            entries = memory_service.get_scored_entries(db, namespace, read_only=True)
             if category:
                 entries = [e for e in entries if e.category == category]
             return _ok(
@@ -735,11 +806,18 @@ async def list_rules(
 
 
 # 11. read_document
-async def read_document(document_id: str, *, _db=None) -> str:
+async def read_document(
+    document_id: str, *, _db=None, _agent_id: str = "",
+) -> str:
     """Get document metadata by ID."""
     db = _get_db(_db)
     try:
         doc = document_service.get_document(db, document_id)
+        denied = _validate_space_access(
+            db, _agent_id, doc.space_id
+        )
+        if denied:
+            return denied
         return _ok(
             {
                 "id": doc.id,
@@ -760,15 +838,27 @@ async def read_document(document_id: str, *, _db=None) -> str:
 
 
 # 12. list_documents
-async def list_documents(space_id: str = "", search: str = "", *, _db=None) -> str:
+async def list_documents(
+    space_id: str = "", search: str = "",
+    *, _db=None, _agent_id: str = "",
+) -> str:
     """List documents with optional space filter and title search."""
     db = _get_db(_db)
     try:
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
         docs = document_service.list_documents(
             db,
             space_id=space_id or None,
             search=search or None,
         )
+        # Post-filter to agent's allowed spaces when no space_id
+        if not space_id:
+            allowed = _get_agent_space_ids(db, _agent_id)
+            if allowed is not None:
+                docs = [d for d in docs if d.space_id in allowed]
         return _ok(
             [
                 {
@@ -791,11 +881,15 @@ async def list_documents(space_id: str = "", search: str = "", *, _db=None) -> s
 
 # 13. create_document
 async def create_document(
-    space_id: str, title: str, source: str = "local", tags: str = "", *, _db=None
+    space_id: str, title: str, source: str = "local",
+    tags: str = "", *, _db=None, _agent_id: str = "",
 ) -> str:
     """Index a document in a space. tags is comma-separated."""
     db = _get_db(_db)
     try:
+        denied = _validate_space_access(db, _agent_id, space_id)
+        if denied:
+            return denied
         tag_list = [t.strip() for t in tags.split(",") if t.strip()] if tags else None
         doc = document_service.create_document(
             db,
@@ -821,11 +915,15 @@ async def create_document(
 
 
 # 14. get_board_state
-async def get_board_state(space_id: str, *, _db=None) -> str:
+async def get_board_state(space_id: str, *, _db=None, _agent_id: str = "") -> str:
     """Get a summary of all board items grouped by stage."""
     db = _get_db(_db)
     try:
+        denied = _validate_space_access(db, _agent_id, space_id)
+        if denied:
+            return denied
         space = space_service.get_space(db, space_id)
+        # Intentionally high limit to capture the full board state for context assembly
         items = item_service.list_items(db, space_id=space_id, limit=10000)
         grouped: dict[str, list] = {}
         for item in items:
@@ -856,10 +954,14 @@ async def get_board_state(space_id: str, *, _db=None) -> str:
 
 
 # 15. get_task_state
-async def get_task_state(space_id: str = "", *, _db=None) -> str:
+async def get_task_state(space_id: str = "", *, _db=None, _agent_id: str = "") -> str:
     """Get summary of tasks: counts by status, overdue items."""
     db = _get_db(_db)
     try:
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
         all_tasks = item_service.list_items(
             db, space_id=space_id or None, item_type="task", archived=False, limit=200
         )
@@ -894,10 +996,16 @@ async def get_task_state(space_id: str = "", *, _db=None) -> str:
 
 
 # 16. get_conversation_summaries
-async def get_conversation_summaries(space_id: str, limit: str = "5", *, _db=None) -> str:
+async def get_conversation_summaries(
+    space_id: str, limit: str = "5",
+    *, _db=None, _agent_id: str = "",
+) -> str:
     """Get recent conversation summaries for a space."""
     db = _get_db(_db)
     try:
+        denied = _validate_space_access(db, _agent_id, space_id)
+        if denied:
+            return denied
         limit_int = _parse_int(limit, 5)
         summaries = conversation_service.get_summaries(db, space_id=space_id)
         summaries = summaries[:limit_int]
@@ -944,6 +1052,11 @@ async def search_conversations(
     try:
         if not query or not query.strip():
             return _ok([])
+
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
 
         limit_int = _parse_int(limit, 20)
         sid = space_id or None
@@ -1006,6 +1119,11 @@ async def search_summaries(
     try:
         if not query or not query.strip():
             return _ok([])
+
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
 
         limit_int = _parse_int(limit, 20)
         sid = space_id or None
@@ -1075,7 +1193,9 @@ async def get_conversation_messages(conversation_id: str, limit: str = "20", *, 
 
 # 19. delegate_task
 async def delegate_task(
-    agent_name: str, instruction: str, space_id: str = "", parent_task_id: str = "", *, _db=None
+    agent_name: str, instruction: str,
+    space_id: str = "", parent_task_id: str = "",
+    *, _db=None, _agent_id: str = "",
 ) -> str:
     """Delegate a task to another agent to run in the background.
 
@@ -1087,12 +1207,16 @@ async def delegate_task(
     Returns:
         JSON with the background task ID.
     """
-    from backend.openloop.agents import session_manager
+    from backend.openloop.agents import agent_runner
 
     db = _get_db(_db)
     try:
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
         agent = agent_service.get_agent_by_name(db, agent_name)
-        task_id = await session_manager.delegate_background(
+        task_id = await agent_runner.delegate_background(
             db,
             agent_id=agent.id,
             instruction=instruction,
@@ -1228,7 +1352,10 @@ async def register_agent(
             db.close()
 
 
-async def test_agent(skill_name: str, test_prompt: str, space_id: str = "", *, _db=None) -> str:
+async def test_agent(
+    skill_name: str, test_prompt: str, space_id: str = "",
+    *, _db=None, _agent_id: str = "",
+) -> str:
     """Test a draft agent by running a test conversation via delegation.
 
     Args:
@@ -1236,21 +1363,44 @@ async def test_agent(skill_name: str, test_prompt: str, space_id: str = "", *, _
         test_prompt: The test scenario to run against the draft agent.
         space_id: Optional space context for the test.
     """
-    from backend.openloop.agents import session_manager
+    from backend.openloop.agents import agent_runner
 
     db = _get_db(_db)
     try:
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
+
         # Find or create a temporary agent for testing
         agent_name = skill_name
-        existing = db.query(agent_service.Agent).filter(agent_service.Agent.name == agent_name).first()
+        existing = db.query(agent_service.Agent).filter(
+            agent_service.Agent.name == agent_name
+        ).first()
+        caller_space_ids = _get_agent_space_ids(db, _agent_id)
         if not existing:
-            # Register it first
+            # Register it first — link to the calling agent's spaces so the
+            # test agent cannot access data outside the builder's scope.
             skill_path = f"agents/skills/{skill_name}"
             existing = agent_service.create_agent(
-                db, name=agent_name, description=f"Test agent for {skill_name}", skill_path=skill_path,
+                db, name=agent_name,
+                description=f"Test agent for {skill_name}",
+                skill_path=skill_path,
+                space_ids=caller_space_ids,
             )
+        else:
+            # Update space linkage to match caller's current scope
+            existing.spaces.clear()
+            if caller_space_ids:
+                for sid in caller_space_ids:
+                    sp = db.query(space_service.Space).filter(
+                        space_service.Space.id == sid
+                    ).first()
+                    if sp:
+                        existing.spaces.append(sp)
+            db.commit()
 
-        task_id = await session_manager.delegate_background(
+        task_id = await agent_runner.delegate_background(
             db,
             agent_id=existing.id,
             instruction=test_prompt,
@@ -1328,11 +1478,17 @@ async def list_agents(space_id: str = "", *, _db=None) -> str:
 
 # 22. open_conversation
 async def open_conversation(
-    space_id: str, agent_id: str, initial_message: str = "", model: str = "", *, _db=None
+    space_id: str, agent_id: str,
+    initial_message: str = "", model: str = "",
+    *, _db=None, _agent_id: str = "",
 ) -> str:
     """Create a new conversation. Returns routing info for the frontend."""
     db = _get_db(_db)
     try:
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
         conv = conversation_service.create_conversation(
             db,
             space_id=space_id or None,
@@ -1358,10 +1514,13 @@ async def open_conversation(
 
 
 # 23. navigate_to_space
-async def navigate_to_space(space_id: str, *, _db=None) -> str:
+async def navigate_to_space(space_id: str, *, _db=None, _agent_id: str = "") -> str:
     """Returns a navigation instruction for the frontend."""
     db = _get_db(_db)
     try:
+        denied = _validate_space_access(db, _agent_id, space_id)
+        if denied:
+            return denied
         space = space_service.get_space(db, space_id)
         return _ok(
             {
@@ -1542,10 +1701,15 @@ async def create_drive_file(
 
 
 # 29. get_space_layout
-async def get_space_layout(space_id: str, *, _db=None) -> str:
+async def get_space_layout(
+    space_id: str, *, _db=None, _agent_id: str = "",
+) -> str:
     """Get the widget layout for a space. Returns an ordered list of widgets with their types, sizes, positions, and configurations."""
     db = _get_db(_db)
     try:
+        denied = _validate_space_access(db, _agent_id, space_id)
+        if denied:
+            return denied
         widgets = layout_service.get_layout(db, space_id)
         return _ok(
             [
@@ -1576,10 +1740,14 @@ async def add_widget(
     config: str = "",
     *,
     _db=None,
+    _agent_id: str = "",
 ) -> str:
     """Add a widget to a space's layout. widget_type must be one of: todo_panel, kanban_board, data_table, conversations, chart, stat_card, markdown, data_feed. size is one of: small, medium, large, full. position is 0-indexed (omit to append at end). config is optional JSON string for widget-specific settings."""
     db = _get_db(_db)
     try:
+        denied = _validate_space_access(db, _agent_id, space_id)
+        if denied:
+            return denied
         position_int = _parse_int(position)
         config_dict = json.loads(config) if config else None
         widget = layout_service.add_widget(
@@ -1615,6 +1783,7 @@ async def update_widget(
     position: str = "",
     *,
     _db=None,
+    _agent_id: str = "",
 ) -> str:
     """Update a widget's size, config, or position. Only provided fields are changed. config is a JSON string."""
     db = _get_db(_db)
@@ -1626,7 +1795,18 @@ async def update_widget(
             kwargs["config"] = json.loads(config)
         if position:
             kwargs["position"] = _parse_int(position)
-        widget = layout_service.update_widget(db, widget_id, **kwargs)
+        # Look up the widget's space for ownership validation
+        from backend.openloop.db.models import SpaceWidget as _SW
+
+        _w = db.query(_SW.space_id).filter(_SW.id == widget_id).first()
+        if not _w:
+            return _err("Widget not found")
+        denied = _validate_space_access(
+            db, _agent_id, _w.space_id
+        )
+        if denied:
+            return denied
+        widget = layout_service.update_widget(db, _w.space_id, widget_id, **kwargs)
         return _ok(
             {
                 "id": widget.id,
@@ -1645,11 +1825,24 @@ async def update_widget(
 
 
 # 32. remove_widget
-async def remove_widget(widget_id: str, *, _db=None) -> str:
+async def remove_widget(
+    widget_id: str, *, _db=None, _agent_id: str = "",
+) -> str:
     """Remove a widget from a space's layout. Remaining widgets are automatically reordered."""
     db = _get_db(_db)
     try:
-        layout_service.remove_widget(db, widget_id)
+        # Look up the widget's space for ownership validation
+        from backend.openloop.db.models import SpaceWidget as _SW
+
+        _w = db.query(_SW.space_id).filter(_SW.id == widget_id).first()
+        if not _w:
+            return _err("Widget not found")
+        denied = _validate_space_access(
+            db, _agent_id, _w.space_id
+        )
+        if denied:
+            return denied
+        layout_service.remove_widget(db, _w.space_id, widget_id)
         return _ok({"removed": widget_id})
     except Exception as e:
         db.rollback()
@@ -1660,10 +1853,13 @@ async def remove_widget(widget_id: str, *, _db=None) -> str:
 
 
 # 33. set_space_layout
-async def set_space_layout(space_id: str, widgets: str, *, _db=None) -> str:
+async def set_space_layout(space_id: str, widgets: str, *, _db=None, _agent_id: str = "") -> str:
     """Bulk replace a space's entire layout. widgets is a JSON array of objects with widget_type (required), size (optional, default 'medium'), and config (optional). Positions are assigned automatically. Use this for full layout redesigns."""
     db = _get_db(_db)
     try:
+        denied = _validate_space_access(db, _agent_id, space_id)
+        if denied:
+            return denied
         widgets_list = json.loads(widgets)
         new_widgets = layout_service.set_layout(db, space_id, widgets_list)
         return _ok(
@@ -1693,11 +1889,25 @@ async def set_space_layout(space_id: str, widgets: str, *, _db=None) -> str:
 
 # 34. link_items
 async def link_items(
-    source_item_id: str, target_item_id: str, link_type: str = "related_to", *, _db=None
+    source_item_id: str, target_item_id: str,
+    link_type: str = "related_to",
+    *, _db=None, _agent_id: str = "",
 ) -> str:
     """Create an association between two items."""
     db = _get_db(_db)
     try:
+        src = item_service.get_item(db, source_item_id)
+        denied = _validate_space_access(
+            db, _agent_id, src.space_id
+        )
+        if denied:
+            return denied
+        tgt = item_service.get_item(db, target_item_id)
+        denied = _validate_space_access(
+            db, _agent_id, tgt.space_id
+        )
+        if denied:
+            return denied
         link = item_link_service.create_link(
             db,
             source_item_id=source_item_id,
@@ -1721,10 +1931,23 @@ async def link_items(
 
 
 # 35. unlink_items
-async def unlink_items(link_id: str, *, _db=None) -> str:
+async def unlink_items(
+    link_id: str, *, _db=None, _agent_id: str = "",
+) -> str:
     """Remove an association between items by link ID."""
     db = _get_db(_db)
     try:
+        from backend.openloop.db.models import ItemLink as _IL
+
+        lnk = db.query(_IL).filter(_IL.id == link_id).first()
+        if not lnk:
+            return _err("Link not found")
+        src = item_service.get_item(db, lnk.source_item_id)
+        denied = _validate_space_access(
+            db, _agent_id, src.space_id
+        )
+        if denied:
+            return denied
         item_link_service.delete_link(db, link_id)
         return _ok({"deleted": link_id})
     except Exception as e:
@@ -1736,10 +1959,19 @@ async def unlink_items(link_id: str, *, _db=None) -> str:
 
 
 # 36. get_linked_items
-async def get_linked_items(item_id: str, link_type: str = "", *, _db=None) -> str:
+async def get_linked_items(
+    item_id: str, link_type: str = "",
+    *, _db=None, _agent_id: str = "",
+) -> str:
     """Get all items linked to this item (bidirectional)."""
     db = _get_db(_db)
     try:
+        existing = item_service.get_item(db, item_id)
+        denied = _validate_space_access(
+            db, _agent_id, existing.space_id
+        )
+        if denied:
+            return denied
         links = item_link_service.list_links_for_item(
             db, item_id, link_type=link_type or None
         )
@@ -1769,10 +2001,20 @@ async def get_linked_items(item_id: str, link_type: str = "", *, _db=None) -> st
 
 
 # 37. archive_item
-async def archive_item(item_id: str, *, _db=None, _agent_name: str = "agent") -> str:
+async def archive_item(
+    item_id: str,
+    *, _db=None, _agent_name: str = "agent",
+    _agent_id: str = "",
+) -> str:
     """Archive an item (hidden from active views, still searchable)."""
     db = _get_db(_db)
     try:
+        existing = item_service.get_item(db, item_id)
+        denied = _validate_space_access(
+            db, _agent_id, existing.space_id
+        )
+        if denied:
+            return denied
         item = item_service.archive_item(db, item_id, triggered_by=_agent_name)
         return _ok({"id": item.id, "title": item.title, "archived": True})
     except Exception as e:

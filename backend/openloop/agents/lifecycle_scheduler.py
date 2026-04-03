@@ -122,6 +122,10 @@ def start_lifecycle_scheduler() -> None:
     global _scheduler_task
     if _scheduler_task is None or _scheduler_task.done():
         _scheduler_task = asyncio.create_task(_run_scheduler())
+        _scheduler_task.add_done_callback(
+            lambda t: logger.error("Lifecycle scheduler exited: %s", t.exception())
+            if not t.cancelled() and t.exception() else None
+        )
         logger.info("Lifecycle scheduler started (60s interval)")
 
 

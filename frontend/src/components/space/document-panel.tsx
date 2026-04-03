@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
 import { Badge, Button, Modal } from '../ui';
+import { useToastStore } from '../../stores/toast-store';
 
 interface DocumentPanelProps {
   spaceId: string;
@@ -101,7 +102,7 @@ export function DocumentPanel({ spaceId, onSelectDocument }: DocumentPanelProps)
           }
         }
         if (failures.length > 0) {
-          alert(`Upload failed for: ${failures.join(', ')}`);
+          useToastStore.getState().addToast(`Upload failed for: ${failures.join(', ')}`, 'error');
         }
         queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/documents'] });
       } finally {
@@ -147,7 +148,7 @@ export function DocumentPanel({ spaceId, onSelectDocument }: DocumentPanelProps)
     try {
       const resp = await fetch(`/api/v1/drive/refresh/${dataSourceId}`, { method: 'POST' });
       if (!resp.ok) {
-        alert('Drive refresh failed. Check your connection and try again.');
+        useToastStore.getState().addToast('Drive refresh failed. Check your connection and try again.', 'error');
       }
       queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/documents'] });
     } finally {

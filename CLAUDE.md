@@ -9,7 +9,7 @@ OpenLoop is a personal AI command center. FastAPI backend + React 19 frontend + 
 - `backend/openloop/api/schemas/` — Pydantic schemas (one file per domain, re-exported from `__init__.py`)
 - `backend/openloop/services/` — service modules (one file per domain)
 - `backend/openloop/db/models.py` — all SQLAlchemy ORM models
-- `backend/openloop/agents/` — agent execution code (session manager, context assembler, MCP tools)
+- `backend/openloop/agents/` — agent execution code (agent runner, context assembler, MCP tools)
 - `backend/tests/` — pytest tests mirroring source structure
 - `contract/enums.py` — shared enums (imported by both backend and frontend codegen)
 - `frontend/src/` — all TypeScript/React code

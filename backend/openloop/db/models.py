@@ -73,8 +73,8 @@ class Space(Base):
     template: Mapped[str] = mapped_column(String, nullable=False)
     board_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     default_view: Mapped[str | None] = mapped_column(String, nullable=True)
-    board_columns: Mapped[list | None] = mapped_column(
-        SA_JSON, default=lambda: ["idea", "scoping", "todo", "in_progress", "done"]
+    board_columns: Mapped[list] = mapped_column(
+        SA_JSON, nullable=False, default=lambda: ["idea", "scoping", "todo", "in_progress", "done"]
     )
     custom_field_schema: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

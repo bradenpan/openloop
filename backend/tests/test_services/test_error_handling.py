@@ -27,32 +27,32 @@ class TestIsRateLimitError:
     """Tests for _is_rate_limit_error helper."""
 
     def test_429_in_message(self) -> None:
-        from backend.openloop.agents.session_manager import _is_rate_limit_error
+        from backend.openloop.agents.agent_runner import _is_rate_limit_error
 
         exc = Exception("API returned status 429")
         assert _is_rate_limit_error(exc) is True
 
     def test_rate_limit_phrase(self) -> None:
-        from backend.openloop.agents.session_manager import _is_rate_limit_error
+        from backend.openloop.agents.agent_runner import _is_rate_limit_error
 
         exc = Exception("rate limit exceeded, please slow down")
         assert _is_rate_limit_error(exc) is True
 
     def test_overloaded_phrase(self) -> None:
-        from backend.openloop.agents.session_manager import _is_rate_limit_error
+        from backend.openloop.agents.agent_runner import _is_rate_limit_error
 
         exc = Exception("The API is overloaded right now")
         assert _is_rate_limit_error(exc) is True
 
     def test_status_code_attribute(self) -> None:
-        from backend.openloop.agents.session_manager import _is_rate_limit_error
+        from backend.openloop.agents.agent_runner import _is_rate_limit_error
 
         exc = Exception("too many requests")
         exc.status_code = 429  # type: ignore[attr-defined]
         assert _is_rate_limit_error(exc) is True
 
     def test_response_attribute(self) -> None:
-        from backend.openloop.agents.session_manager import _is_rate_limit_error
+        from backend.openloop.agents.agent_runner import _is_rate_limit_error
 
         exc = Exception("request failed")
         response = MagicMock()
@@ -61,20 +61,20 @@ class TestIsRateLimitError:
         assert _is_rate_limit_error(exc) is True
 
     def test_not_rate_limit(self) -> None:
-        from backend.openloop.agents.session_manager import _is_rate_limit_error
+        from backend.openloop.agents.agent_runner import _is_rate_limit_error
 
         exc = Exception("Connection refused")
         assert _is_rate_limit_error(exc) is False
 
     def test_exception_group(self) -> None:
-        from backend.openloop.agents.session_manager import _is_rate_limit_error
+        from backend.openloop.agents.agent_runner import _is_rate_limit_error
 
         inner = Exception("rate limit exceeded")
         group = ExceptionGroup("multiple errors", [inner])
         assert _is_rate_limit_error(group) is True
 
     def test_exception_group_no_rate_limit(self) -> None:
-        from backend.openloop.agents.session_manager import _is_rate_limit_error
+        from backend.openloop.agents.agent_runner import _is_rate_limit_error
 
         inner = Exception("Connection reset")
         group = ExceptionGroup("errors", [inner])
@@ -89,7 +89,7 @@ class TestIsRateLimitError:
 @pytest.mark.asyncio()
 async def test_query_with_retry_succeeds_first_try() -> None:
     """_query_with_retry yields events when query succeeds on first try."""
-    from backend.openloop.agents.session_manager import _query_with_retry
+    from backend.openloop.agents.agent_runner import _query_with_retry
 
     mock_event = {"type": "result", "text": "hello"}
 
@@ -110,7 +110,7 @@ async def test_query_with_retry_succeeds_first_try() -> None:
 @pytest.mark.asyncio()
 async def test_query_with_retry_retries_on_rate_limit() -> None:
     """_query_with_retry retries on rate limit errors with backoff."""
-    from backend.openloop.agents.session_manager import _query_with_retry
+    from backend.openloop.agents.agent_runner import _query_with_retry
 
     call_count = 0
     mock_event = {"type": "result", "text": "success"}
@@ -124,8 +124,8 @@ async def test_query_with_retry_retries_on_rate_limit() -> None:
 
     # Patch sleep to avoid waiting and the event_bus publish
     with (
-        patch("backend.openloop.agents.session_manager.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
-        patch("backend.openloop.agents.session_manager.notification_service") as mock_notif,
+        patch("backend.openloop.agents.agent_runner.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+        patch("backend.openloop.agents.agent_runner.notification_service") as mock_notif,
         patch("backend.openloop.agents.event_bus.event_bus.publish", new_callable=AsyncMock),
     ):
         mock_notif.create_notification = MagicMock()
@@ -150,15 +150,15 @@ async def test_query_with_retry_retries_on_rate_limit() -> None:
 @pytest.mark.asyncio()
 async def test_query_with_retry_raises_after_max_retries() -> None:
     """_query_with_retry raises after exhausting all retries."""
-    from backend.openloop.agents.session_manager import _query_with_retry
+    from backend.openloop.agents.agent_runner import _query_with_retry
 
     async def mock_query(**kwargs):
         raise Exception("rate limit exceeded")
         yield  # type: ignore[misc] # make it a generator  # noqa: E501
 
     with (
-        patch("backend.openloop.agents.session_manager.asyncio.sleep", new_callable=AsyncMock),
-        patch("backend.openloop.agents.session_manager.notification_service") as mock_notif,
+        patch("backend.openloop.agents.agent_runner.asyncio.sleep", new_callable=AsyncMock),
+        patch("backend.openloop.agents.agent_runner.notification_service") as mock_notif,
         patch("backend.openloop.agents.event_bus.event_bus.publish", new_callable=AsyncMock),
     ):
         mock_notif.create_notification = MagicMock()
@@ -174,7 +174,7 @@ async def test_query_with_retry_raises_after_max_retries() -> None:
 @pytest.mark.asyncio()
 async def test_query_with_retry_does_not_retry_non_rate_limit() -> None:
     """_query_with_retry re-raises non-rate-limit errors immediately."""
-    from backend.openloop.agents.session_manager import _query_with_retry
+    from backend.openloop.agents.agent_runner import _query_with_retry
 
     async def mock_query(**kwargs):
         raise Exception("Connection refused")
@@ -292,60 +292,6 @@ def test_orphaned_task_cleanup_creates_notification(db_session: Session) -> None
 # ---------------------------------------------------------------------------
 # Graceful shutdown
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio()
-async def test_graceful_shutdown_closes_sessions() -> None:
-    """Graceful shutdown calls close_session for all active sessions."""
-    from backend.openloop.agents.session_manager import (
-        SessionState,
-        _clear_active_sessions,
-        _get_active_sessions,
-    )
-
-    _clear_active_sessions()
-
-    # Add fake active sessions
-    sessions = _get_active_sessions()
-    sessions["conv-1"] = SessionState(
-        sdk_session_id="sdk-1",
-        agent_id="a1",
-        conversation_id="conv-1",
-        space_id=None,
-        status="active",
-    )
-    sessions["conv-2"] = SessionState(
-        sdk_session_id="sdk-2",
-        agent_id="a2",
-        conversation_id="conv-2",
-        space_id=None,
-        status="background",
-    )
-
-    close_calls = []
-
-    async def mock_close_session(db, *, conversation_id):
-        close_calls.append(conversation_id)
-        return "summary"
-
-    from backend.openloop.agents.session_manager import list_active
-
-    active = list_active()
-    assert len(active) == 2
-
-    close_tasks = [
-        mock_close_session(None, conversation_id=s.conversation_id)
-        for s in active
-    ]
-
-    await asyncio.wait_for(
-        asyncio.gather(*close_tasks, return_exceptions=True),
-        timeout=5.0,
-    )
-
-    assert set(close_calls) == {"conv-1", "conv-2"}
-
-    _clear_active_sessions()
 
 
 @pytest.mark.asyncio()

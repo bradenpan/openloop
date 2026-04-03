@@ -300,7 +300,7 @@ Before any compression or summarization happens, the system tells the agent: "Sa
 
 **How it works (simplified):**
 
-This is a mandatory pipeline stage, not an optional prompt. Before `monitor_context_usage()` triggers a checkpoint (at 70%) and before `close_session()` generates a final summary, the system injects a flush instruction: "Review this conversation for any important facts, decisions, or user preferences that haven't been saved to memory yet. Save them now using your memory tools." The agent processes this instruction, calls `save_fact` as many times as needed, and then the normal checkpoint/close flow continues.
+This is a mandatory pipeline stage, not an optional prompt. Before `monitor_context_usage()` triggers a checkpoint (at 70%) and before `close_conversation()` generates a final summary, the system injects a flush instruction: "Review this conversation for any important facts, decisions, or user preferences that haven't been saved to memory yet. Save them now using your memory tools." The agent processes this instruction, calls `save_fact` as many times as needed, and then the normal checkpoint/close flow continues.
 
 After compression completes, a **post-compaction verification** step checks that key facts referenced in the compressed section exist in persistent memory. If the flush missed something critical (agents can fail to save, as documented in Letta's known failure modes), the system flags the gap rather than silently losing the information. This is a lightweight check — scan the compressed content for fact-like statements and verify they appear in the memory store — not a full re-extraction.
 
@@ -324,9 +324,9 @@ The system checks the budget before each message is sent to the LLM, not after. 
 
 **How it works (simplified):**
 
-Before every `query()` call, the session manager estimates total context size (system prompt + memory + conversation history + pending message). If it exceeds 70% of the context window:
+Before every `query()` call, the agent runner estimates total context size (system prompt + memory + conversation history + pending message). If it exceeds 70% of the context window:
 1. Trigger the pre-compaction flush (B1) to save important facts
-2. Compress older conversation turns at a turn boundary (keeping the most recent 5-10 turns verbatim, replacing older turns with a summary)
+2. Compress older conversation turns at a turn boundary (keeping the most recent 7 exchanges verbatim, replacing older turns with a summary)
 3. Then proceed with the LLM call
 
 The key detail: compression happens at turn boundaries — complete user message + agent response pairs. Never in the middle of a tool-call sequence. This preserves conversation coherence.
@@ -345,16 +345,16 @@ When conversation context gets compressed, the system generates a summary of the
 
 **What the user experiences after this change:**
 
-The most recent exchanges (your message + agent response, configurable — default 5-10 depending on conversation complexity) are always kept verbatim — never summarized. Only older exchanges get compressed. This means the immediate working context — the thread you're actively pulling on — stays intact. The agent always has perfect recall of what just happened, even if older history has been condensed.
+The most recent 7 exchanges (your message + agent response) are always kept verbatim — never summarized. Only older exchanges get compressed. This means the immediate working context — the thread you're actively pulling on — stays intact. The agent always has perfect recall of what just happened, even if older history has been condensed.
 
 **How it works (simplified):**
 
 During context compression (triggered by B2), the system applies "observation masking" instead of full summarization:
-- **Keep verbatim:** The most recent user-agent exchange pairs (configurable, default 5-10 exchanges depending on conversation length)
+- **Keep verbatim:** The most recent 7 user-agent exchange pairs
 - **Compress:** Everything older, into a summary that captures decisions, open questions, and key facts
 - **Extract:** Important discrete facts from the compressed section into persistent memory (via B1)
 
-JetBrains research found that "keeping a window of the latest 10 turns gave the best balance" — a 2.6% improvement in task completion while being 52% cheaper than full summarization approaches. The observation masking approach outperformed recursive summarization. PicoClaw keeps 4 messages; Lossless Claw keeps 64. A window of 5-10 exchanges balances context preservation against token budget, and should be tunable per agent or conversation type (shorter for simple Q&A, longer for complex multi-step work).
+JetBrains research found that "keeping a window of the latest 10 turns gave the best balance" — a 2.6% improvement in task completion while being 52% cheaper than full summarization approaches. The observation masking approach outperformed recursive summarization. PicoClaw keeps 4 messages; Lossless Claw keeps 64. OpenLoop uses 7 exchanges, balancing context preservation against token budget.
 
 **Why it's important:**
 
@@ -408,19 +408,19 @@ For interactive conversations, steering is the natural interaction model — the
 
 **How it works (simplified):**
 
-Background delegation uses a **managed turn loop** rather than a single fire-and-forget query. The session manager controls the agent's execution cycle:
+Background delegation uses a **managed turn loop** rather than a single fire-and-forget query. The agent runner controls the agent's execution cycle:
 
 1. Send initial instruction via `query()`
 2. Agent completes one turn of work (may include multiple tool calls within that turn)
-3. Agent returns — session manager now has control
+3. Agent returns — agent runner now has control
 4. Check steering queue for user messages
 5. If steering message exists → `query(resume=session_id)` with the steering message as the next user input
 6. If no steering → `query(resume=session_id)` with a continuation prompt
 7. Repeat until agent reports completion
 
-The user experiences this identically to fire-and-forget delegation — the agent works autonomously in the background, and the session manager auto-continues between turns without any user involvement. The steering queue sits empty 99% of the time. Only when the user voluntarily sends a correction does it get picked up at the next turn boundary.
+The user experiences this identically to fire-and-forget delegation — the agent works autonomously in the background, and the agent runner auto-continues between turns without any user involvement. The steering queue sits empty 99% of the time. Only when the user voluntarily sends a correction does it get picked up at the next turn boundary.
 
-**SDK context:** The Claude Agent SDK does not currently expose mid-tool-call message injection (Issue #70, closed without commitment). The managed turn loop works within the SDK's existing `query()` + `resume` mechanism — each turn is a separate `query()` call, and the session manager has full control between turns. This is the same pattern OpenClaw uses with its heartbeat daemon (agent runs in discrete cycles, messages queue via the gateway) and PicoClaw's thread-safe steering queue (max 10 messages per scope, one-at-a-time for corrections, drain-all for stop commands).
+**SDK context:** The Claude Agent SDK does not currently expose mid-tool-call message injection (Issue #70, closed without commitment). The managed turn loop works within the SDK's existing `query()` + `resume` mechanism — each turn is a separate `query()` call, and the agent runner has full control between turns. This is the same pattern OpenClaw uses with its heartbeat daemon (agent runs in discrete cycles, messages queue via the gateway) and PicoClaw's thread-safe steering queue (max 10 messages per scope, one-at-a-time for corrections, drain-all for stop commands).
 
 Agent system prompts for background work include instructions to work incrementally: "Complete one meaningful step per turn. Report what you did and what you plan to do next." This creates natural turn boundaries where steering can be injected, and makes step-level progress tracking (D1) fall out naturally — each turn ≈ a trackable step.
 
@@ -462,14 +462,16 @@ The current single-task model breaks down for anything non-trivial. Real work is
 
 ## Priority and Timing
 
+**Implementation status:** All items in this document (A1-A8, B1-B4, C1, D1) have been fully implemented as of the Phase 7 build. This document preserves the original analysis and rationale that informed the implementation. See PROGRESS.md for build details.
+
 ### Now — Before Phase 3 Starts
 
 These are low-disruption backend changes to code that already exists:
 
 | Item | What Changes | Effort |
 |---|---|---|
-| **B1** Pre-compaction flush | Add one prompt step before checkpoint/close logic in session manager | Small |
-| **B2** Proactive budget check | Add pre-call estimation to session manager's send flow | Small |
+| **B1** Pre-compaction flush | Add one prompt step before checkpoint/close logic in agent runner | Small |
+| **B2** Proactive budget check | Add pre-call estimation to agent runner's send flow | Small |
 | **A5** Agent memory tools | Enhance existing MCP tools, add memory management instructions to agent prompts | Small-Medium |
 | **A6** Context ordering | Reorder existing context assembly output | Small |
 
@@ -482,8 +484,8 @@ These need schema changes and/or new UI surfaces:
 | **A1** Procedural memory | New `behavioral_rules` table, context assembly changes, new UI section in agent settings | Medium |
 | **A2** Temporal facts | Add `valid_from`/`valid_until` to `memory_entries`, modify write-time logic | Medium |
 | **A3** Write-time dedup | Add LLM comparison step to memory write flow | Medium |
-| **B3** Observation masking | Modify compression strategy in session manager | Small |
-| **C1** Mid-task steering | Steering queue in session manager, message input on background task UI | Medium |
+| **B3** Observation masking | Modify compression strategy in agent runner | Small |
+| **C1** Mid-task steering | Steering queue in agent runner, message input on background task UI | Medium |
 
 ### Phase 4 — With Search Infrastructure (FTS5)
 

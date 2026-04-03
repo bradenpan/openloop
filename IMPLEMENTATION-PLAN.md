@@ -282,7 +282,7 @@ TypeScript types generated for all SSE events alongside the REST API types.
 
 ---
 
-## Phase 2: Session Manager + Agent Conversations
+## Phase 2: Agent Runner + Agent Conversations
 
 **Goal:** You can start a conversation with an agent and get streaming responses.
 
@@ -323,40 +323,39 @@ Each tool has try/except, db rollback on error, returns `is_error: True` on fail
 
 **Deliverable:** A well-defined tool registry module that Task 2.3a and 2.5 import.
 
-**Acceptance criteria:** All tools callable, produce correct results, handle errors gracefully. Module has clear interface for SessionManager to consume.
+**Acceptance criteria:** All tools callable, produce correct results, handle errors gracefully. Module has clear interface for AgentRunner to consume.
 
 **Architecture doc reference:** MCP Tools section under Layer 4
 
-### Task 2.3a: Session Manager — Core Lifecycle
+### Task 2.3a: Agent Runner — Core Lifecycle
 **Agent:** 1 agent
 **Complexity:** Large
 **Depends on:** 2.1, 2.2, and spike results from 0.1
 
-The core session lifecycle (happy path):
-- `start_session(conversation_id, agent_id)` — load agent config, assemble context (via ContextAssembler), build MCP tool set, register permission hooks, call `query()` with assembled prompt, store session state in memory dict
-- `send_message(conversation_id, message)` — look up active session, call `query(resume=session_id)`, yield response chunks for SSE streaming, store user message + agent response in DB
-- `close_session(conversation_id)` — send "summarize this conversation" as final message, store summary in conversation_summaries, terminate SDK session, update conversation status to "closed"
-- Active session tracking: `dict[conversation_id → SessionState]`
+The core agent lifecycle (happy path):
+- `run_interactive(conversation_id, message)` — load agent config, assemble context (via ContextAssembler), build MCP tool set, register permission hooks, call `query(resume=sdk_session_id)`, yield response chunks for SSE streaming, store user message + agent response in DB. First message creates the SDK session; subsequent messages resume it.
+- `close_conversation(conversation_id)` — send "summarize this conversation" as final message, store summary in conversation_summaries, terminate SDK session, update conversation status to "closed"
+- DB is single source of truth for `sdk_session_id` — no in-memory session dict.
 
-**Claude Max outage handling:** SDK calls (`query()`) can fail due to Claude Max outages, rate limits, or network errors. The SessionManager must:
+**Claude Max outage handling:** SDK calls (`query()`) can fail due to Claude Max outages, rate limits, or network errors. The AgentRunner must:
 - Catch SDK connection/API errors and surface them as SSE `error` events to the frontend (not silent failures)
 - Mark the conversation status as `interrupted` (not `closed`) on unrecoverable SDK errors
 - Create a notification: "Conversation X was interrupted: Claude is unavailable"
 - The frontend should render a clear "Claude is unavailable — try again later" state in the conversation panel (not a generic error)
 - Do NOT implement retry logic for outages (the user decides when to retry). Rate limit 429s can be retried with backoff (Task 7.3 handles the retry policy).
 
-**Acceptance criteria:** Can start a session, send multiple messages with resume, close with summary generation. Session state tracked correctly. SDK errors result in clear error events and conversation marked as interrupted.
+**Acceptance criteria:** Can send first message (creates SDK session implicitly), send subsequent messages with resume, close with summary generation. Session state tracked correctly. SDK errors result in clear error events and conversation marked as interrupted.
 
-**Architecture doc reference:** Layer 4: Session Manager (Detail) — start_session, send_message, close_session operations
+**Architecture doc reference:** Layer 4: Agent Runner (Detail) — run_interactive, close_conversation operations
 
-### Task 2.3b: Session Manager — Delegation, Recovery, Concurrency
+### Task 2.3b: Agent Runner — Delegation, Recovery, Concurrency
 **Agent:** 1 agent
 **Complexity:** Medium
 **Depends on:** 2.3a
 
-Extended session manager capabilities:
+Extended agent runner capabilities:
 - `delegate_background(agent_id, instruction, space_id, item_id?)` — simple fire-and-forget version: start session without SSE streaming, log activity to background_tasks, notify on completion. **Note: Task 5.2b replaces this with the managed turn loop (discrete turns with steering checkpoints). This Phase 2 version is intentionally simple — it gets background delegation working without the turn loop complexity.**
-- `reopen_conversation(conversation_id)` — attempt `resume=sdk_session_id`. If resume fails, start new session with conversation summary + recent messages as context.
+- `reopen_conversation(conversation_id)` — flips conversation status back to active via `conversation_service.reopen_conversation()`. The next `run_interactive()` call handles SDK session creation lazily — if the old `sdk_session_id` is stale, it falls back to a fresh session with conversation summaries injected for continuity.
 - Crash recovery on startup: scan for `status='active'` conversations, mark as `interrupted`, create notification
 - Concurrency control: max 5 interactive sessions, max 2 automation sessions, user conversations priority over automations. Queue when limit hit.
 - `monitor_context_usage()` — after each response, estimate context usage. At 70% trigger auto-checkpoint summary. At 90% surface notification suggesting close.
@@ -391,7 +390,7 @@ Extended session manager capabilities:
 - Uses Odin-specific MCP tools from Task 2.2
 - Uses Odin-specific context assembly from Task 2.1
 - `POST /api/v1/odin/message` endpoint
-- Session lifecycle: start on first message (or resume existing), auto-checkpoint at high context, periodic restart
+- Conversation flow: SDK session created on first message (or resumed if existing), auto-checkpoint at high context, periodic restart
 - Routing: `open_conversation` tool returns routing action → SSE event → frontend navigates
 - Memory namespace: "odin" — learns user preferences across sessions
 - Error handling: ambiguous requests → ask clarifying questions, no matching agent → suggest creating one
@@ -437,7 +436,7 @@ The `resource_pattern` field in `agent_permissions` uses these matching rules:
 
 Set up structured logging for agent session diagnostics:
 - Python `logging` module with JSON formatter, output to `data/logs/openloop.log` (rotated, 10MB max, 5 backups)
-- Log levels: `INFO` for session lifecycle events (start, message, close, resume), `WARNING` for permission denials and context budget overflows, `ERROR` for SDK failures and unhandled exceptions
+- Log levels: `INFO` for conversation events (first message, message, close, resume), `WARNING` for permission denials and context budget overflows, `ERROR` for SDK failures and unhandled exceptions
 - Key events to log:
   - Session start/resume/close (conversation_id, agent_id, model)
   - Tool calls (conversation_id, tool_name, resource, permission decision)
@@ -447,7 +446,7 @@ Set up structured logging for agent session diagnostics:
 - Utility: `get_logger(name: str)` that returns a pre-configured logger
 - All log entries include timestamp, conversation_id (where applicable), and agent_id
 
-**Acceptance criteria:** Logging configured and importable. Session Manager, Permission Enforcer, and Context Assembler use it. Logs are human-readable JSON in `data/logs/`. Log rotation works.
+**Acceptance criteria:** Logging configured and importable. Agent Runner, Permission Enforcer, and Context Assembler use it. Logs are human-readable JSON in `data/logs/`. Log rotation works.
 
 ### Task 2.8: Phase 2 Tests
 **Agent:** 1 agent
@@ -456,7 +455,7 @@ Set up structured logging for agent session diagnostics:
 
 - Context assembler tests (all tiers, token budgets, Odin mode)
 - MCP tool tests (each tool, error paths, per-tool DB session isolation)
-- Session manager tests (lifecycle, crash recovery, reopen)
+- Agent runner tests (lifecycle, crash recovery, reopen)
 - **Concurrency test: start 5 sessions, verify no interference**
 - SSE streaming tests (connection, demultiplexing, event contract compliance)
 - Permission hook tests (path validation, approval flow, no-timeout behavior)
@@ -484,13 +483,13 @@ Set up structured logging for agent session diagnostics:
 **Complexity:** Medium
 
 - Design system: color tokens (CSS variables, dark/light), distinctive typography selection, spacing scale, component primitives (button, input, badge, panel, modal, card)
-- App shell: sidebar navigation (Home link, space list with activity indicators), main content area, Odin chat input (fixed top, always visible)
+- App shell: sidebar navigation (Home link, space list with activity indicators), main content area, Odin chat input (fixed bottom, always visible)
 - Router setup (Home view, Space view, Settings view)
 - API client setup (openapi-fetch + openapi-react-query using generated types)
 - Zustand stores (UI state: current space, selected item, panel open/closed; theme state)
 - SSE connection manager (connect to `GET /api/v1/events`, demultiplex by source ID, auto-reconnect on disconnect, expose as React hooks)
 
-**Acceptance criteria:** App loads, sidebar shows navigation, Odin input at top. Theme toggle works. SSE connection established and events demultiplexed. Looks distinctive and polished, not generic.
+**Acceptance criteria:** App loads, sidebar shows navigation, Odin input at bottom. Theme toggle works. SSE connection established and events demultiplexed. Looks distinctive and polished, not generic.
 
 ### Task 3.2: Home Dashboard
 **Agent:** 1 agent using `frontend-design` skill
@@ -498,7 +497,7 @@ Set up structured logging for agent session diagnostics:
 **Can run in parallel with 3.3**
 
 Layout (top to bottom, priority order):
-1. Odin chat panel (fixed top, expandable/collapsible, streaming responses, inline action cards for routing/creation)
+1. Odin chat panel (fixed bottom, expandable/collapsible, streaming responses, inline action cards for routing/creation)
 2. Attention items (pending approvals with badge count, due-today items, agent results to review, automation failures)
 3. Active agents (compact status indicators, expandable activity logs via SSE)
 4. Space list (cards with activity indicators, click to navigate)
@@ -563,7 +562,7 @@ Playwright tests:
 - Space navigation (Home → Space → Home via sidebar)
 - To-do CRUD (create, check off, delete)
 - Board drag-and-drop (move item between columns)
-- **End-to-end streaming test: send a real message through Session Manager, verify tokens appear in the browser** (requires Phase 2 backend running)
+- **End-to-end streaming test: send a real message through AgentRunner, verify tokens appear in the browser** (requires Phase 2 backend running)
 - Agent CRUD (create, edit, view permissions)
 - Theme toggle (dark/light)
 - First-run state display
@@ -582,7 +581,7 @@ Playwright tests:
 ## Phase 3b: Memory Architecture + Context Safety
 
 **Goal:** Upgrade memory system to four tiers (semantic, episodic, working, procedural). Add write-time dedup, temporal fact management, scored retrieval, context safety mechanisms. All backend — no frontend changes.
-**Depends on:** Phase 2 (session manager, MCP tools, context assembler) and Phase 3 (complete).
+**Depends on:** Phase 2 (agent runner, MCP tools, context assembler) and Phase 3 (complete).
 **Rationale:** Memory infrastructure is foundational. Agents using better memory tools from Phase 4 onward means higher quality from day one. These are all modifications to existing Phase 2 backend code.
 
 ### Task 3b.1: Schema Migration
@@ -679,28 +678,28 @@ Rewrite `context_assembler.py` to implement attention-optimized ordering and sco
 
 **Architecture doc reference:** Layer 6: Context Assembler (Detail), Context Pruning and Memory Lifecycle Strategy (Overall Context Budget)
 
-### Task 3b.5: Session Manager Context Safety
+### Task 3b.5: Agent Runner Context Safety
 **Agent:** 1 agent
 **Complexity:** Medium
 **Depends on:** 3b.3 (needs enhanced memory tools for flush)
 
-Add three safety mechanisms to `session_manager.py`:
+Add three safety mechanisms to `agent_runner.py`:
 
 1. **`flush_memory(conversation_id)`** — mandatory pre-compaction step:
    - Inject instruction to the agent: "Review this conversation for any important facts, decisions, or user preferences that haven't been saved to memory yet. Save them now using your memory tools."
    - Agent processes the instruction, calls save_fact/save_rule as needed
    - Return — normal flow continues
-   - Wire into `close_session()`: call flush_memory() BEFORE generating the final summary
+   - Wire into `close_conversation()`: call flush_memory() BEFORE generating the final summary
    - Wire into `monitor_context_usage()`: call flush_memory() BEFORE creating a checkpoint summary
 
-2. **Proactive budget enforcement in `send_message()`**:
+2. **Proactive budget enforcement in `run_interactive()`**:
    - Before each `query()` call, estimate total context size (system prompt + assembled context + conversation history + pending message)
    - Use `estimate_tokens()` utility (already exists, 4 chars ≈ 1 token)
    - If >70% of context window (200K × 0.7 = 140K tokens): trigger compression before the LLM call
    - Compression: call flush_memory() first, then apply observation masking (below)
 
 3. **Observation masking** — compression strategy:
-   - Keep the most recent 5-10 complete exchanges (user message + agent response) verbatim (configurable — default 7 as a named constant in session manager)
+   - Keep the most recent 7 complete exchanges (user message + agent response) verbatim (named constant in agent runner)
    - Summarize older exchanges into a compact block (use the agent or a lightweight summary call)
    - Cut at turn boundaries only — never split a tool-call sequence
    - Store the compressed summary as a checkpoint in conversation_summaries
@@ -710,11 +709,11 @@ Add three safety mechanisms to `session_manager.py`:
    - Check each against persistent memory (memory_entries where valid_until IS NULL)
    - If gaps found: log a warning with the missed content. Optionally trigger a targeted `save_fact` for clearly missed facts
    - Non-blocking — do not hold up the conversation for verification
-   - Wire into `send_message()`: call after compression completes, before proceeding with query()
+   - Wire into `run_interactive()`: call after compression completes, before proceeding with query()
 
-**Acceptance criteria:** flush_memory() runs before every close and every checkpoint. Proactive check triggers compression before LLM call when needed. Observation masking preserves recent turns verbatim. Post-compaction verification runs after compression. Compression happens at clean turn boundaries. All existing session manager tests still pass.
+**Acceptance criteria:** flush_memory() runs before every close and every checkpoint. Proactive check triggers compression before LLM call when needed. Observation masking preserves recent turns verbatim. Post-compaction verification runs after compression. Compression happens at clean turn boundaries. All existing agent runner tests still pass.
 
-**Architecture doc reference:** Session Manager operations (flush_memory, send_message proactive check), Flow 5 (updated close flow), Flow 9 (Proactive Budget Enforcement)
+**Architecture doc reference:** Agent Runner operations (flush_memory, run_interactive proactive check), Flow 5 (updated close flow), Flow 9 (Proactive Budget Enforcement)
 
 ### Task 3b.6: Phase 3b Tests
 **Agent:** 1 agent
@@ -1077,7 +1076,7 @@ Context assembler:
 **Can run in parallel with 5.1**
 
 - Implement `delegate_task` MCP tool (placeholder from Phase 2)
-- Backend: creates `background_task` record, starts new SDK session for the sub-agent via SessionManager
+- Backend: creates `background_task` record, starts new SDK session for the sub-agent via AgentRunner
 - Sub-agent gets context from: space context + parent conversation summary + delegation instruction
 - Results flow back: sub-agent writes to memory/documents/items, background_task record updated
 - Notification sent when sub-agent completes or fails
@@ -1092,7 +1091,7 @@ Context assembler:
 **Complexity:** Large (rewrites delegate_background from Phase 2's fire-and-forget into managed turn loop, plus adds steering queue)
 **Depends on:** 5.2a
 
-- `steer(conversation_id, message)` operation on SessionManager:
+- `steer(conversation_id, message)` operation on AgentRunner:
   - Add message to conversation's steering queue (max 10 pending messages)
   - Managed turn loop in `delegate_background()` checks queue between turns
   - At next turn boundary: steering message used as next user input in `query(resume=session_id)`
@@ -1141,7 +1140,7 @@ Context assembler:
 **Complexity:** Medium
 
 - `AutomationService` — CRUD, run history tracking
-- `AutomationScheduler` — background loop (every 60s), cron expression matching (use `croniter` library), fires matching automations as background tasks via SessionManager
+- `AutomationScheduler` — background loop (every 60s), cron expression matching (use `croniter` library), fires matching automations as background tasks via AgentRunner
 - On startup: detect missed runs during downtime, create notifications ("Morning Briefing was missed, server was down at 7:00 AM. Run now?")
 - Concurrency: max 2 concurrent automation sessions, user conversations always priority
 - API endpoints: POST create, GET list, GET detail + runs, PATCH update, DELETE, POST manual trigger, GET run history
@@ -1206,7 +1205,7 @@ Phase 3b built the write-time infrastructure (dedup, caps, scoring). This task a
 **Can run in parallel with 7.1a**
 
 - **Threshold-triggered meta-summary generation**: when a space has 20+ unconsolidated summaries (where `consolidated_into IS NULL` and `is_meta_summary = false`), generate a meta-summary
-- **Trigger point**: wired into `close_session()` — after storing the new summary, check unconsolidated count. If >= 20, generate meta-summary.
+- **Trigger point**: wired into `close_conversation()` — after storing the new summary, check unconsolidated count. If >= 20, generate meta-summary.
 - **Generation**: LLM reads all unconsolidated summaries chronologically, produces a condensed overview covering: key decisions, outcomes, trajectory, open threads.
 - **Storage**: meta-summary stored as `conversation_summary` with `is_meta_summary = true`. Individual summaries marked with `consolidated_into` pointing to the meta-summary.
 - **Successive consolidation**: when a second round of 20 accumulates, the new meta-summary covers both the old meta-summary and the new individuals. Old meta-summary gets `consolidated_into` pointing to the new one.
@@ -1283,7 +1282,7 @@ Full workflow Playwright tests:
 |-------|-------------|-------|-------------|
 | 0 | SDK validated, scaffold, schema, reference impl, seed data | 5 | 2 |
 | 1 | Full REST API + type generation + SSE contract | 8 | 3 |
-| 2 | Session Manager, Odin, streaming, permissions, logging | 10 | 4 |
+| 2 | Agent Runner, Odin, streaming, permissions, logging | 10 | 4 |
 | 3 | Full frontend — dashboard, board, conversations | 7 | 3-4 |
 | 3b | Four-tier memory, write-time dedup, temporal facts, context safety, procedural memory | 6 | 2 |
 | 4 | CRM, table view, documents, Drive, search + cross-space FTS5 search | 7 | 4 |
@@ -1321,8 +1320,8 @@ Each task should be given to an agent with:
 | 1.5 | Layer 2: API, SSE Event Contract | — |
 | 2.1 | Layer 6: Context Assembler | Memory and Documents |
 | 2.2 | Layer 4: MCP Tools list | — |
-| 2.3a | Layer 4: Session Manager (start, send, close) | Agent Interaction |
-| 2.3b | Layer 4: Session Manager (delegation, recovery, concurrency) | Background Agent Monitoring |
+| 2.3a | Layer 4: Agent Runner (run_interactive, close_conversation) | Agent Interaction |
+| 2.3b | Layer 4: Agent Runner (delegation, recovery, concurrency) | Background Agent Monitoring |
 | 2.4 | Layer 2: SSE endpoint, SSE Event Contract | Response Time Expectations |
 | 2.5 | Layer 4b: Odin — The Front Door | Odin — The Front Door |
 | 2.6 | Layer 5: Permission Enforcer | Permissions and Security |
@@ -1336,7 +1335,7 @@ Each task should be given to an agent with:
 | 3b.2 | Context Pruning (Tier 1: Semantic Memory), Flow 7 | Memory and Documents (temporal facts, write-time dedup) |
 | 3b.3 | MCP Tools (Memory, Behavioral rule operations) | Memory and Documents (agent-managed memory) |
 | 3b.4 | Layer 6: Context Assembler, Context Budget | Memory and Documents (context ordering, scored retrieval) |
-| 3b.5 | Layer 4: Session Manager (flush_memory, send_message), Flow 5, Flow 9 | Context management (P0 item 8) |
+| 3b.5 | Layer 4: Agent Runner (flush_memory, run_interactive), Flow 5, Flow 9 | Context management (P0 item 8) |
 | 4.1-4.2 | Data Model: items (custom_fields) | Items (Records), Space Layouts (Table view) |
 | 4.3-4.4 | Layer 7: Data Layer, Data Model: documents, data_sources | Memory and Documents |
 | 4.5a | Layer 7: FTS5, FTS5 Virtual Tables | — |
@@ -1351,7 +1350,7 @@ Each task should be given to an agent with:
 | 4c.4 | Layer 1: Frontend (list view, kanban done toggle) | Items (views), Space View |
 | 5.1 | — | Agent Creation (Agent Builder) |
 | 5.2a | Layer 4: delegate_background, Flow 8 | Agent Interaction (Sub-agents), Background Monitoring |
-| 5.2b | Layer 4: Session Manager (steer), Flow 8 | Agent Interaction (Steering mode), Resolved Decision 26 |
+| 5.2b | Layer 4: Agent Runner (steer), Flow 8 | Agent Interaction (Steering mode), Resolved Decision 26 |
 | 5.2c | — | Background Agent Monitoring |
 | 6.1-6.3 | Data Model: automations, automation_runs | Automations, Proactive System |
 | 7.1a | Context Pruning (Tier 1 lifecycle, Tier 4 procedural) | Memory and Documents (lifecycle), Resolved Decision 22 |
@@ -1389,7 +1388,7 @@ Phase 1: 1.1 || 1.2 || 1.3 (services, all parallel)
               ↓
 Phase 2: 2.1 || 2.2 || 2.7 (context + tools + logging, parallel)
               ↓
-         2.3a (session manager core, depends on 2.1 + 2.2 + spike)
+         2.3a (agent runner core, depends on 2.1 + 2.2 + spike)
               ↓
          2.3b || 2.4 || 2.5 || 2.6 (all depend on 2.3a, parallel)
               ↓
@@ -1407,7 +1406,7 @@ Phase 3b: 3b.1 (schema migration)
               ↓
          3b.3 || 3b.4 (MCP tools || context assembler, parallel)
               ↓
-         3b.5 (session manager context safety, depends on 3b.3)
+         3b.5 (agent runner context safety, depends on 3b.3)
               ↓
          3b.6 (tests)
               ↓

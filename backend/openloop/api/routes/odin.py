@@ -14,6 +14,15 @@ from backend.openloop.services import conversation_service
 
 logger = logging.getLogger(__name__)
 
+_background_tasks: set[asyncio.Task] = set()
+
+
+def _task_done(task: asyncio.Task) -> None:
+    _background_tasks.discard(task)
+    if not task.cancelled() and task.exception():
+        logger.error("Background task failed: %s", task.exception(), exc_info=task.exception())
+
+
 router = APIRouter(prefix="/api/v1/odin", tags=["odin"])
 
 
@@ -52,6 +61,8 @@ async def send_odin_message(
         finally:
             bg_db.close()
 
-    asyncio.create_task(_process_odin_response())
+    task = asyncio.create_task(_process_odin_response())
+    _background_tasks.add(task)
+    task.add_done_callback(_task_done)
 
     return MessageResponse.model_validate(user_msg)

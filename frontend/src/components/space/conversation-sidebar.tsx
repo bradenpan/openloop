@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { $api } from '../../api/hooks';
-import { Badge, Button } from '../ui';
+import { Badge, Button, Panel } from '../ui';
 import { formatDate } from '../../utils/dates';
 import { NewConversationModal } from './new-conversation-modal';
 import { ConversationPanel } from '../conversation';
@@ -98,17 +98,19 @@ export function ConversationSidebar({ spaceId, collapsed, onToggle }: Conversati
       <NewConversationModal open={modalOpen} onClose={() => setModalOpen(false)} spaceId={spaceId} />
 
       {/* Active conversation panel rendered alongside the sidebar */}
-      {activeConversationId && (
-        <div className="fixed inset-0 z-40 flex">
-          <div className="flex-1 bg-black/30" onClick={() => setActiveConversationId(null)} />
-          <div className="w-[600px] h-full bg-background border-l border-border shadow-xl">
-            <ConversationPanel
-              conversationId={activeConversationId}
-              onClose={() => setActiveConversationId(null)}
-            />
-          </div>
-        </div>
-      )}
+      <Panel
+        open={!!activeConversationId}
+        onClose={() => setActiveConversationId(null)}
+        width="600px"
+        noPadding
+      >
+        {activeConversationId && (
+          <ConversationPanel
+            conversationId={activeConversationId}
+            onClose={() => setActiveConversationId(null)}
+          />
+        )}
+      </Panel>
     </div>
   );
 }

@@ -97,7 +97,7 @@ def test_update_widget_size(db_session: Session):
     widgets = layout_service.get_layout(db_session, space.id)
     widget_id = widgets[0].id
 
-    updated = layout_service.update_widget(db_session, widget_id, size="full")
+    updated = layout_service.update_widget(db_session, space.id, widget_id, size="full")
     assert updated.size == "full"
     assert updated.position == 0  # unchanged
 
@@ -108,7 +108,7 @@ def test_update_widget_config(db_session: Session):
     widget_id = widgets[0].id
 
     updated = layout_service.update_widget(
-        db_session, widget_id, config={"show_completed": True}
+        db_session, space.id, widget_id, config={"show_completed": True}
     )
     assert updated.config == {"show_completed": True}
     assert updated.size == "large"  # unchanged from default
@@ -123,7 +123,7 @@ def test_update_widget_position_move_down(db_session: Session):
     conv_id = widgets[2].id
 
     # Move todo_panel from position 0 to position 2
-    updated = layout_service.update_widget(db_session, todo_id, position=2)
+    updated = layout_service.update_widget(db_session, space.id, todo_id, position=2)
     assert updated.position == 2
 
     layout = layout_service.get_layout(db_session, space.id)
@@ -144,7 +144,7 @@ def test_update_widget_position_move_up(db_session: Session):
     conv_id = widgets[2].id
 
     # Move conversations from position 2 to position 0
-    updated = layout_service.update_widget(db_session, conv_id, position=0)
+    updated = layout_service.update_widget(db_session, space.id, conv_id, position=0)
     assert updated.position == 0
 
     layout = layout_service.get_layout(db_session, space.id)
@@ -165,7 +165,7 @@ def test_remove_widget_closes_gap(db_session: Session):
     conv_id = widgets[2].id
 
     # Remove kanban_board (middle widget)
-    layout_service.remove_widget(db_session, kanban_id)
+    layout_service.remove_widget(db_session, space.id, kanban_id)
 
     layout = layout_service.get_layout(db_session, space.id)
     assert len(layout) == 2
@@ -210,3 +210,41 @@ def test_add_widget_invalid_space(db_session: Session):
     with pytest.raises(HTTPException) as exc_info:
         layout_service.add_widget(db_session, "nonexistent-id", widget_type="chart")
     assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Widget ownership mismatch
+# ---------------------------------------------------------------------------
+
+
+def test_update_widget_wrong_space_returns_404(db_session: Session):
+    """Updating a widget that belongs to Space A using Space B's ID should 404."""
+    space_a = space_service.create_space(db_session, name="Space A", template="simple")
+    space_b = space_service.create_space(db_session, name="Space B", template="simple")
+
+    widgets_a = layout_service.get_layout(db_session, space_a.id)
+    assert len(widgets_a) > 0
+    widget_id = widgets_a[0].id
+
+    with pytest.raises(HTTPException) as exc_info:
+        layout_service.update_widget(db_session, space_b.id, widget_id, size="full")
+    assert exc_info.value.status_code == 404
+
+
+def test_remove_widget_wrong_space_returns_404(db_session: Session):
+    """Removing a widget that belongs to Space A using Space B's ID should 404."""
+    space_a = space_service.create_space(db_session, name="Space A", template="simple")
+    space_b = space_service.create_space(db_session, name="Space B", template="simple")
+
+    widgets_a = layout_service.get_layout(db_session, space_a.id)
+    assert len(widgets_a) > 0
+    widget_id = widgets_a[0].id
+
+    with pytest.raises(HTTPException) as exc_info:
+        layout_service.remove_widget(db_session, space_b.id, widget_id)
+    assert exc_info.value.status_code == 404
+
+    # Verify the widget still exists in Space A
+    layout_a = layout_service.get_layout(db_session, space_a.id)
+    widget_ids = [w.id for w in layout_a]
+    assert widget_id in widget_ids

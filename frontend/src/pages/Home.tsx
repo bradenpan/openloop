@@ -98,8 +98,8 @@ export default function Home() {
         <AttentionItems dashboard={dashboard.data} isLoading={dashboard.isLoading} />
       </section>
 
-      {/* Backup reminder */}
-      {backupStatus.data?.needs_backup && (
+      {/* Backup reminder (hidden on query error) */}
+      {backupStatus.isSuccess && backupStatus.data?.needs_backup && (
         <p className="text-xs text-muted">
           {backupStatus.data.hours_since_backup != null
             ? `No backup in ${Math.floor(backupStatus.data.hours_since_backup / 24)} day(s) \u2014 run make backup`

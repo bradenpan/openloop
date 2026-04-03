@@ -60,6 +60,10 @@ def start_task_monitor() -> None:
     global _monitor_task
     if _monitor_task is None or _monitor_task.done():
         _monitor_task = asyncio.create_task(_check_stale_stuck())
+        _monitor_task.add_done_callback(
+            lambda t: logger.error("Task monitor exited: %s", t.exception())
+            if not t.cancelled() and t.exception() else None
+        )
         logger.info("Task monitor started (60s interval)")
 
 

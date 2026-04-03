@@ -89,9 +89,10 @@ def _slugify(text: str, max_len: int = 50) -> str:
 
 def _active_filter(query):
     """Apply filters for active (non-archived, temporally valid) entries."""
+    now = datetime.now(UTC).replace(tzinfo=None)
     return query.filter(
         MemoryEntry.archived_at.is_(None),
-        MemoryEntry.valid_until.is_(None),
+        (MemoryEntry.valid_until.is_(None)) | (MemoryEntry.valid_until > now),
     )
 
 
@@ -158,9 +159,10 @@ def list_entries(
     """
     query = db.query(MemoryEntry)
     if not include_archived:
+        now = datetime.now(UTC).replace(tzinfo=None)
         query = query.filter(
             MemoryEntry.archived_at.is_(None),
-            MemoryEntry.valid_until.is_(None),
+            (MemoryEntry.valid_until.is_(None)) | (MemoryEntry.valid_until > now),
         )
     if namespace is not None:
         query = query.filter(MemoryEntry.namespace == namespace)
@@ -221,7 +223,7 @@ def delete_entry(db: Session, entry_id: str) -> None:
 def supersede_entry(db: Session, entry_id: str) -> MemoryEntry:
     """Mark a memory entry as superseded by setting valid_until=now."""
     entry = get_entry(db, entry_id)
-    entry.valid_until = datetime.now(UTC)
+    entry.valid_until = datetime.now(UTC).replace(tzinfo=None)
     db.commit()
     db.refresh(entry)
     return entry
@@ -248,9 +250,10 @@ def get_scored_entries(
     """
     query = db.query(MemoryEntry).filter(MemoryEntry.namespace == namespace)
     if not include_archived:
+        now = datetime.now(UTC).replace(tzinfo=None)
         query = query.filter(
             MemoryEntry.archived_at.is_(None),
-            MemoryEntry.valid_until.is_(None),
+            (MemoryEntry.valid_until.is_(None)) | (MemoryEntry.valid_until > now),
         )
 
     entries = query.all()
@@ -263,7 +266,7 @@ def get_scored_entries(
 
     # Update access tracking on retrieved entries (skip in read_only mode)
     if not read_only:
-        now = datetime.now(UTC)
+        now = datetime.now(UTC).replace(tzinfo=None)
         for entry in entries:
             entry.access_count += 1
             entry.last_accessed = now
@@ -280,7 +283,7 @@ def get_scored_entries(
 def archive_entry(db: Session, entry_id: str) -> MemoryEntry:
     """Soft-archive a memory entry by setting archived_at."""
     entry = get_entry(db, entry_id)
-    entry.archived_at = datetime.now(UTC)
+    entry.archived_at = datetime.now(UTC).replace(tzinfo=None)
     db.commit()
     db.refresh(entry)
     return entry
@@ -308,7 +311,7 @@ async def save_fact_with_dedup(
     """
     from backend.openloop.services.llm_utils import llm_compare_facts
 
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     # Load active facts in namespace
     active_query = _active_filter(
@@ -346,7 +349,6 @@ async def save_fact_with_dedup(
             target = db.query(MemoryEntry).filter(MemoryEntry.id == target_id).first()
             if target:
                 target.value = merged_content or content
-                target.updated_at = now
                 db.commit()
                 db.refresh(target)
                 return (decision, target)
@@ -415,7 +417,7 @@ def _enforce_namespace_cap(
     if len(counted) >= cap:
         # Find lowest-scored entry to archive
         lowest = min(counted, key=_compute_score)
-        lowest.archived_at = datetime.now(UTC)
+        lowest.archived_at = datetime.now(UTC).replace(tzinfo=None)
         db.flush()
 
 
@@ -467,12 +469,13 @@ async def consolidate_space_memory(db: Session, space_id: str) -> dict:
     stale_cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(days=60)  # naive, matches SQLite storage
 
     # Load active facts
+    now_naive = datetime.now(UTC).replace(tzinfo=None)
     active_entries = (
         db.query(MemoryEntry)
         .filter(
             MemoryEntry.namespace == namespace,
             MemoryEntry.archived_at.is_(None),
-            MemoryEntry.valid_until.is_(None),
+            (MemoryEntry.valid_until.is_(None)) | (MemoryEntry.valid_until > now_naive),
         )
         .all()
     )
@@ -521,7 +524,7 @@ def apply_consolidation_report(db: Session, space_id: str, report: dict) -> dict
     Returns a summary dict with counts of applied actions.
     """
     namespace = f"space:{space_id}"
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
     merged_count = 0
     archived_count = 0
 
@@ -572,12 +575,13 @@ def get_memory_health(db: Session, space_id: str) -> dict:
     """
     namespace = f"space:{space_id}"
 
+    now = datetime.now(UTC).replace(tzinfo=None)
     active_facts = (
         db.query(MemoryEntry)
         .filter(
             MemoryEntry.namespace == namespace,
             MemoryEntry.archived_at.is_(None),
-            MemoryEntry.valid_until.is_(None),
+            (MemoryEntry.valid_until.is_(None)) | (MemoryEntry.valid_until > now),
         )
         .count()
     )

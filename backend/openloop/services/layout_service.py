@@ -86,10 +86,10 @@ def add_widget(
     return widget
 
 
-def update_widget(db: Session, widget_id: str, **kwargs) -> SpaceWidget:
+def update_widget(db: Session, space_id: str, widget_id: str, **kwargs) -> SpaceWidget:
     """Update a widget's properties. Supports size, config, and position."""
     widget = db.query(SpaceWidget).filter(SpaceWidget.id == widget_id).first()
-    if not widget:
+    if not widget or widget.space_id != space_id:
         raise HTTPException(status_code=404, detail="Widget not found")
 
     new_position = kwargs.pop("position", None)
@@ -138,10 +138,10 @@ def update_widget(db: Session, widget_id: str, **kwargs) -> SpaceWidget:
     return widget
 
 
-def remove_widget(db: Session, widget_id: str) -> None:
+def remove_widget(db: Session, space_id: str, widget_id: str) -> None:
     """Remove a widget and close the position gap."""
     widget = db.query(SpaceWidget).filter(SpaceWidget.id == widget_id).first()
-    if not widget:
+    if not widget or widget.space_id != space_id:
         raise HTTPException(status_code=404, detail="Widget not found")
 
     space_id = widget.space_id

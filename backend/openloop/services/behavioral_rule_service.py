@@ -110,6 +110,18 @@ def apply_rules(db: Session, *, agent_id: str, read_only: bool = False) -> list[
     return rules
 
 
+def update_rule(db: Session, rule_id: str, **kwargs) -> BehavioralRule:
+    """Update a behavioral rule. Uses exclude_unset pattern."""
+    entry = get_rule(db, rule_id)
+    updatable = {"rule", "is_active"}
+    for field, value in kwargs.items():
+        if field in updatable:
+            setattr(entry, field, value)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
 def deactivate_rule(db: Session, rule_id: str) -> BehavioralRule:
     """Deactivate a rule without deleting it."""
     entry = get_rule(db, rule_id)

@@ -375,3 +375,85 @@ def test_get_missed_runs_excludes_event_trigger_type(db_session: Session):
     )
     missed = automation_service.get_missed_runs(db_session)
     assert not any(m.id == auto.id for m in missed)
+
+
+# ---------------------------------------------------------------------------
+# create_automation — validation
+# ---------------------------------------------------------------------------
+
+
+def test_create_automation_invalid_trigger_type_raises_422(db_session: Session):
+    """Invalid trigger_type should raise 422."""
+    agent = _make_agent(db_session)
+    with pytest.raises(HTTPException) as exc_info:
+        automation_service.create_automation(
+            db_session,
+            name="Bad Trigger",
+            agent_id=agent.id,
+            instruction="Run something.",
+            trigger_type="invalid_trigger",
+        )
+    assert exc_info.value.status_code == 422
+    assert "invalid trigger_type" in exc_info.value.detail.lower()
+
+
+def test_create_automation_cron_without_expression_raises_422(db_session: Session):
+    """trigger_type='cron' with null cron_expression should raise 422."""
+    agent = _make_agent(db_session)
+    with pytest.raises(HTTPException) as exc_info:
+        automation_service.create_automation(
+            db_session,
+            name="Missing Cron",
+            agent_id=agent.id,
+            instruction="Run on schedule.",
+            trigger_type="cron",
+            cron_expression=None,
+        )
+    assert exc_info.value.status_code == 422
+    assert "cron_expression is required" in exc_info.value.detail.lower()
+
+
+def test_create_automation_invalid_cron_expression_raises_422(db_session: Session):
+    """Invalid cron expression should raise 422."""
+    agent = _make_agent(db_session)
+    with pytest.raises(HTTPException) as exc_info:
+        automation_service.create_automation(
+            db_session,
+            name="Bad Cron",
+            agent_id=agent.id,
+            instruction="Run on schedule.",
+            trigger_type="cron",
+            cron_expression="not a cron",
+        )
+    assert exc_info.value.status_code == 422
+    assert "invalid cron_expression" in exc_info.value.detail.lower()
+
+
+def test_create_automation_valid_cron_passes_validation(db_session: Session):
+    """Valid automation with cron should succeed."""
+    agent = _make_agent(db_session)
+    auto = automation_service.create_automation(
+        db_session,
+        name="Valid Cron",
+        agent_id=agent.id,
+        instruction="Run hourly.",
+        trigger_type="cron",
+        cron_expression="0 * * * *",
+    )
+    assert auto.trigger_type == "cron"
+    assert auto.cron_expression == "0 * * * *"
+    assert auto.id is not None
+
+
+def test_create_automation_valid_event_passes_validation(db_session: Session):
+    """Valid event automation should succeed without cron_expression."""
+    agent = _make_agent(db_session)
+    auto = automation_service.create_automation(
+        db_session,
+        name="Valid Event",
+        agent_id=agent.id,
+        instruction="Run on event.",
+        trigger_type="event",
+    )
+    assert auto.trigger_type == "event"
+    assert auto.cron_expression is None

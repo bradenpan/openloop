@@ -50,6 +50,9 @@ Thumbs.db
 .coverage
 htmlcov/
 .pytest_cache/
+frontend/test-results/
+test_screenshots/
+test_live_ui.py
 
 # Ruff
 .ruff_cache/

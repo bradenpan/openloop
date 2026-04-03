@@ -148,7 +148,7 @@ async def generate_meta_summary(db: Session, space_id: str) -> ConversationSumma
         s.consolidated_into = meta.id
 
     # Let the caller (route handler) manage the commit, or commit here
-    # for background callers (session_manager close_session)
+    # for background callers (agent_runner close_conversation)
     db.commit()
     db.refresh(meta)
     return meta
@@ -160,16 +160,20 @@ async def _call_consolidation_llm(prompt: str) -> dict:
     Returns parsed dict with summary, decisions, open_questions.
     Falls back to a simple concatenation on failure.
     """
+    from backend.openloop.services.llm_utils import _cleanup_session_file
+
     try:
         from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
 
         response_text = ""
+        session_id: str | None = None
         async for event in query(
             prompt=prompt,
             options=ClaudeAgentOptions(model=CONSOLIDATION_MODEL),
         ):
             if isinstance(event, ResultMessage):
                 response_text = event.result
+                session_id = event.session_id
                 break
 
         if not response_text:
@@ -181,6 +185,8 @@ async def _call_consolidation_llm(prompt: str) -> dict:
     except (Exception, ExceptionGroup):
         logger.warning("Consolidation LLM call failed, using fallback", exc_info=True)
         return _fallback_result()
+    finally:
+        _cleanup_session_file(session_id)
 
 
 def _parse_consolidation_json(text: str) -> dict:

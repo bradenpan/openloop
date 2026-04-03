@@ -83,7 +83,6 @@ function FactsList({ spaceId }: { spaceId: string }) {
   function handleArchive(entryId: string) {
     archiveMutation.mutate({
       params: { path: { entry_id: entryId } },
-      body: undefined as never,
     });
   }
 
@@ -391,7 +390,6 @@ export function MemoryTab({ spaceId }: MemoryTabProps) {
   function handleRunReview() {
     consolidateMutation.mutate({
       params: { path: { space_id: spaceId } },
-      body: undefined as never,
     });
   }
 

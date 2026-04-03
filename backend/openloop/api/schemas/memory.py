@@ -22,8 +22,6 @@ class MemoryCreate(BaseModel):
     value: str
     tags: list[str] | None = None
     source: str = "user"
-    importance: float = 0.5
-    category: str | None = None
 
 
 class MemoryUpdate(BaseModel):

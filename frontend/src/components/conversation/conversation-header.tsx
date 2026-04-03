@@ -95,6 +95,7 @@ export function ConversationHeader({ conversationId, onClose }: ConversationHead
         value={currentModel}
         onChange={(e) => handleModelChange(e.target.value)}
         disabled={isClosed}
+        aria-label="Model"
         className="bg-raised text-foreground text-xs border border-border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
       >
         {MODEL_OPTIONS.map((opt) => (
