@@ -365,20 +365,17 @@ def build_permission_hook(agent_id: str, conversation_id: str | None):
     Each invocation creates its own short-lived DB session via SessionLocal()
     so it is safe to call from async SDK context (not request-scoped).
     """
-    from claude_agent_sdk import (
-        HookMatcher,
-        PermissionResultAllow,
-        PermissionResultDeny,
-        PreToolUseHookInput,
-    )
+    from claude_agent_sdk import HookMatcher, PreToolUseHookInput
 
     from backend.openloop.database import SessionLocal
 
     async def hook(
         input: PreToolUseHookInput,
-    ) -> PermissionResultAllow | PermissionResultDeny:
-        tool_name = input.tool_name
-        tool_input = input.tool_input
+        session_name: str | None = None,
+        context=None,
+    ) -> dict:
+        tool_name = input["tool_name"]
+        tool_input = input.get("tool_input", {})
 
         db = SessionLocal()
         try:
@@ -393,12 +390,14 @@ def build_permission_hook(agent_id: str, conversation_id: str | None):
             db.close()
 
         if result == "allow":
-            return PermissionResultAllow()
+            # Empty dict = allow the tool call to proceed
+            return {}
         else:
             resource, operation = map_tool_to_resource(tool_name, tool_input)
-            return PermissionResultDeny(
-                reason=f"Permission denied: {operation} on {resource} for agent {agent_id}"
-            )
+            return {
+                "decision": "block",
+                "reason": f"Permission denied: {operation} on {resource} for agent {agent_id}",
+            }
 
     matcher = HookMatcher(matcher="*")
     return matcher, hook

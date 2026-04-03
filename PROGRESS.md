@@ -87,7 +87,7 @@ All 6 tasks done per IMPLEMENTATION-PLAN.md. Memory system upgraded from basic k
 
 **Task 3b.4:** Context assembler rewritten — attention-optimized ordering (beginning: identity+rules+tools; middle: summaries+facts; end: board/todos), scored retrieval replaces basic list_entries, procedural memory injection, meta-summary handling, memory management instructions in agent prompts.
 
-**Task 3b.5:** Session manager safety — `flush_memory()` (mandatory pre-compaction), proactive budget enforcement (checks before SDK call), observation masking (7 recent turns verbatim), `verify_compaction()` (post-compression gap detection).
+**Task 3b.5:** Agent runner safety — `flush_memory()` (mandatory pre-compaction), proactive budget enforcement (checks before SDK call), observation masking (7 recent turns verbatim), `verify_compaction()` (post-compression gap detection).
 
 **Task 3b.6:** 95 new tests + 3 real-LLM integration tests (`pytest -m llm`).
 
@@ -274,7 +274,7 @@ All 6 tasks done per IMPLEMENTATION-PLAN.md. Memory lifecycle management, summar
 
 **Task 7.1a (Memory Lifecycle Management):** `auto_archive_superseded()` — daily background job archives facts where `valid_until` set 90+ days ago. Lazy rule demotion in context assembler — rules with `confidence < 0.3` and `apply_count >= 10` auto-deactivated during context assembly. LLM-driven fact consolidation — monthly background job (or manual trigger) calls Haiku to review active facts, produces consolidation report with proposed merges, contradictions, and stale entries. User approves before any changes apply. `LifecycleScheduler` — asyncio background loop (60s interval, same pattern as automation scheduler), runs daily archival and monthly consolidation. Checkpoint pruning — closed-conversation checkpoints excluded from context assembly. 3 API endpoints: `GET /spaces/{id}/memory/health`, `POST /spaces/{id}/memory/consolidate`, `POST /spaces/{id}/memory/consolidate/apply`. 6 Pydantic schemas in new `memory.py`. Space Settings panel — tabbed slide-over (Layout, Memory, History) replacing the old layout editor. Memory tab with stats bar, facts/rules sub-tabs, archive/delete actions, consolidation report display with per-item accept/dismiss. `NotificationType.MEMORY_CONSOLIDATION` added.
 
-**Task 7.1b (Summary Consolidation):** `consolidation_service.py` — `get_unconsolidated_count()` and `generate_meta_summary()`. Threshold-triggered: when a space hits 20+ unconsolidated summaries, auto-generates a meta-summary via Haiku. Wired into `close_session()` (fire-and-forget, non-blocking). Successive consolidation — second round absorbs old meta-summary plus new individuals into a new meta. Manual trigger: `POST /spaces/{id}/consolidate` (returns 409 if <2 summaries). Context assembler updated: meta-summary loads first, then unconsolidated individuals (excluding checkpoints).
+**Task 7.1b (Summary Consolidation):** `consolidation_service.py` — `get_unconsolidated_count()` and `generate_meta_summary()`. Threshold-triggered: when a space hits 20+ unconsolidated summaries, auto-generates a meta-summary via Haiku. Wired into `close_conversation()` (fire-and-forget, non-blocking). Successive consolidation — second round absorbs old meta-summary plus new individuals into a new meta. Manual trigger: `POST /spaces/{id}/consolidate` (returns 409 if <2 summaries). Context assembler updated: meta-summary loads first, then unconsolidated individuals (excluding checkpoints).
 
 **Task 7.2 (Backup System):** `scripts/backup_local.py` — local SQLite backup via `.backup` command with `shutil.copy2` fallback, 10-backup retention, timestamped filenames. `make backup` and `make backup-gdrive` wired in Makefile. Backup status tracking via `data/.last_backup` timestamp file. `GET /api/v1/system/backup-status` endpoint returns `last_backup_at`, `hours_since_backup`, `needs_backup`. Home dashboard shows subtle muted reminder when no backup in 24 hours.
 
@@ -340,12 +340,147 @@ All 6 tasks done per IMPLEMENTATION-PLAN.md. Memory lifecycle management, summar
 - Space Settings panel (tabbed: Layout, Memory, History) was not in the original plan — added to house memory health UI and consolidation trigger alongside the existing layout editor.
 - E2E tests use full API mocking instead of requiring a running backend — faster, more reliable, with SDK-dependent tests in a separate slow/ directory.
 
+## Post-Build Code Review (Full System) — IN PROGRESS
+
+Full codebase review and fix process run by eng-manager agent team. 4 parallel review agents (Backend Services, API Routes, Agent System, Frontend) produced 90 findings (7 critical, 39 important, 44 minor). Fixes organized into 7 phases in `CODE-REVIEW-FIXES.md`.
+
+### Phase 1: Critical Fixes — COMPLETE
+
+7 critical fixes applied:
+
+1. **Automation double-fire** — `automation_service.py`: set `last_run_at` before async fire to prevent scheduler re-triggering during long-running tasks
+2. **Odin SSE token filtering** — `odin-bar.tsx`: filter SSE events by `conversationId` so Odin only shows its own tokens, not other conversations'
+3. **XSS in search results** — verified: backend `_safe_snippet()` uses null-byte delimiters + `html.escape` + safe `<mark>` restoration. Added documentation comments. No code fix needed.
+4. **Permission polling timeout** — `permission_enforcer.py`: 30-minute timeout with auto-deny, notification creation, and clean session cleanup (was infinite loop)
+5. **Migration: explicit `is_done` column** — new migration checks and adds `is_done` to items table if missing (was working by accident via Alembic batch mode)
+6. **Migration: FK cascades** — same migration recreates all FK constraints across 17 tables with correct `ondelete` clauses matching ORM models (production had no cascades)
+7. **Orphaned background task cleanup** — `session_manager.py`: `recover_from_crash` now marks RUNNING/QUEUED BackgroundTask records as FAILED on server restart
+
+### Phase 2: Security & Authorization — COMPLETE
+
+5 security fixes applied:
+
+1. **MCP tool space scoping** — `mcp_tools.py`: added `_validate_space_access` helper + validation in 18 tools that accept `space_id`. System agents (Odin) bypass check.
+2. **Test agent space restrictions** — `mcp_tools.py`: test agents inherit Agent Builder's space restrictions instead of getting unrestricted access
+3. **Widget ownership validation** — `layout_service.py` + `layout.py`: `update_widget`/`remove_widget` verify widget belongs to the URL's `space_id`
+4. **Google Drive scope narrowed** — `gdrive_client.py`: from full `drive` to `drive.readonly` + `drive.file` (principle of least privilege)
+5. **Windows path case sensitivity** — `permission_enforcer.py`: case-insensitive matching in `is_system_blocked` prevents bypasses like `OPENLOOP.DB`
+
+### Phase 3: Data Correctness — COMPLETE
+
+7 data correctness fixes applied:
+
+1. **Memory active filter** — `memory_service.py`: `_active_filter` + 4 inline copies now include `OR valid_until > now` so future-dated entries aren't treated as expired
+2. **MemoryCreate schema cleanup** — `schemas/memory.py`: removed unused `importance` and `category` fields that were silently dropped
+3. **Stage in update_item** — `item_service.py`: now raises 422 "Use move_item to change stage" instead of silent ignore
+4. **Automation validation** — `automation_service.py`: validates `trigger_type` enum, requires `cron_expression` when type is cron, validates with `croniter.is_valid()`
+5. **move_item guard** — `item_service.py`: added `if space and space.board_columns:` guard matching other methods
+6. **recall_facts read-only** — `mcp_tools.py`: removed access tracking from read path, pass `read_only=True` to scored retrieval
+7. **Timezone standardization** — `memory_service.py`: all DB writes use naive UTC via `.replace(tzinfo=None)` consistently
+
+### Review Round 2 Fixes — COMPLETE
+
+Code review of Phases 1-3 fixes found 5 additional issues, all fixed:
+
+1. **FTS5 search_memory bypassed active filter** — `search_service.py`: added `archived_at IS NULL` and `valid_until` filtering to FTS5 SQL query
+2. **ID-based MCP tools lacked space validation** — `mcp_tools.py`: added space access checks to 11 ID-based tools (`complete_task`, `update_item`, `move_item`, `get_item`, `read_document`, `archive_item`, `link_items`, `unlink_items`, `get_linked_items`, `update_widget`, `remove_widget`)
+3. **Odin first-message token race** — `odin-bar.tsx`: added `pendingSendRef` to accept tokens during the window between send and POST response
+4. **test_agent existing agent scope** — `mcp_tools.py`: existing test agents now have space linkage updated to match caller's scope
+5. **Minor consistency** — naive UTC in `permission_enforcer.py`, standardized enum comparison in `automation_service.py`
+
+16 new tests written covering all Phase 1-3 behaviors: space access validation (4 tests), permission timeout (2), orphaned task cleanup (1), automation validation (5), stage rejection (1), move_item guard (1), widget ownership (2).
+
+### Phase 4: Resource Leaks & Stability — COMPLETE
+
+8 stability fixes applied:
+
+1. **Conversation lock cleanup** — `session_manager.py`: locks removed from `_conversation_locks` when sessions close
+2. **DB sessions across async boundaries** — `session_manager.py`: `flush_memory`, `_create_checkpoint`, `_compress_conversation` now use short-lived `SessionLocal()` for post-await DB writes
+3. **Event bus queue bounds** — `event_bus.py`: queues capped at 1000 items, `put_nowait` with `QueueFull` drop + warning
+4. **Fire-and-forget task references** — `automation_service.py`, `odin.py`, `session_manager.py`: all `asyncio.create_task` calls now tracked in sets with done callbacks logging exceptions
+5. **Context size caching** — `session_manager.py`: cached system prompt token estimate eliminates redundant context assembly per message
+6. **Context assembly read_only guard** — `context_assembler.py`: `apply_count` increment and auto-demotion guarded by `if not read_only`, prevents counter inflation during estimation
+7. **Abandoned SDK session cleanup** — `llm_utils.py`, `consolidation_service.py`: JSONL session files deleted after utility LLM calls via `_cleanup_session_file()`, cleanup in `finally` block covers error paths
+8. **Stream end SSE event** — `session_manager.py` emits `stream_end` event after response completes; `odin-bar.tsx` listens for it with 10-second fallback timeout (replaces fragile 2-second silence detection)
+
+Code review of Phase 4 found 1 critical + 5 important + 6 minor issues, all addressed:
+- **Critical:** `delegate_background` create_task was not tracked — fixed with task set + done callback
+- **Important:** Scheduler/monitor tasks lacked done-callback logging — added; consolidation session file leaked on SDK errors — moved cleanup to `finally` block; stale context cache documented as approximate; short-lived session commit pattern documented
+- Odin bar timeout stale closure — fixed with functional updater pattern
+
+### Phase 5: Frontend Fixes — COMPLETE
+
+8 frontend fixes applied:
+
+1. **Agent dropdown fix** — `new-conversation-modal.tsx`: changed `agentsData?.data` to `agentsData` (API returns flat array, not wrapped)
+2. **Conversation streaming safety** — `conversation-panel.tsx`: added `stream_end` SSE handler + 10-second fallback timeout + existing message-count detection (three layers of defense)
+3. **Conversation sidebar accessibility** — `conversation-sidebar.tsx`: replaced custom overlay with `Panel` component (adds focus trap, Escape handling, aria attrs)
+4. **Document panel toast** — `document-panel.tsx`: replaced blocking `alert()` with toast notifications
+5. **Type safety cleanup** — `background-task-card.tsx`, `memory-tab.tsx`, `Automations.tsx`: removed all `as never` casts and manual error typing (endpoints were already in OpenAPI spec)
+6. **Table view column toggle** — `table-view.tsx`: local `configVersion` state replaces unnecessary query invalidation
+7. **Panel aria-labelledby** — `panel.tsx`: conditional `aria-labelledby` with heading ID, fallback `aria-label="Panel"`, added `noPadding` prop
+8. **Tag filtering fix** — `document_service.py`: numeric bind parameter indexes (`tag_0`, `tag_1`) replace user-derived names that crashed on special characters
+
+Code review found 0 critical, 0 important, 2 minor issues (unnecessary useCallback dep, potential double-scroll in Panel wrapper) — neither requiring action.
+
 ## Current State
 
-- **925 backend tests passing** (858 prior + 67 new Phase 7 tests), lint clean
+### Phase 6: API Surface & Conventions — COMPLETE
+
+11 API surface fixes applied:
+
+1. **Steer response_model** — `conversations.py`: `SteerResponse` schema + response_model on steer endpoint
+2. **Field-schema response_model** — `spaces.py`: `response_model=list` on field-schema endpoint
+3. **Running sessions response_model** — `running.py`: `RunningSessionResponse` schema + response_model
+4. **Messages pagination** — `conversations.py` + `conversation_service.py`: limit/offset on get_messages (default 50, max 500)
+5. **Behavioral rules API** — new `behavioral_rules.py` route file with 4 CRUD endpoints, agent ownership verification, `update_rule` service function added
+6. **DashboardResponse moved** — `home.py` schema moved to `schemas/home.py`, re-exported from `__init__.py`
+7. **Memory router prefix** — `memory.py`: dual routers with proper prefixes replacing inline paths
+8. **Public is_text_file** — `document_service.py`: renamed from `_is_text_file`, call site updated
+9. **LinkType enum** — `schemas/items.py`: `ItemLinkCreate.link_type` and `ItemLinkResponse.link_type` now use `LinkType` enum; `ItemResponse.item_type` uses `ItemType` enum
+10. **Stronger list typing** — `schemas/agents.py`, `conversations.py`, `spaces.py`: `list | None` → `list[str] | None` on 6 fields
+11. **Typed status param** — `conversations.py`: `status` query param uses `ConversationStatus` enum
+
+Code review found 2 important issues, both fixed:
+- Behavioral rules update/delete didn't verify agent ownership — added check
+- `BehavioralRuleCreate` had phantom `agent_id` field (path param is source of truth) — removed
+
+### Phase 7: Minor Cleanup — COMPLETE
+
+~35 fixes applied across 5 batches (17 items skipped as already done in earlier phases or acceptable as-is):
+
+**Migrations & Models (3):** `board_columns` model set to `nullable=False`, 4 query indexes added (notifications, messages, items, background_tasks), 4c1 migration FK pragma wrapped in try/finally.
+
+**Backend Services (9):** Removed dead `..` check and no-op tag filter in document_service, added status validation in conversation_service, 404 for invalid space_ids in agent_service, ordered background tasks by `created_at`, removed redundant `updated_at` set in memory_service, added notification type validation, added `noqa: S608` to FTS rebuild, fixed stage validation truthiness in item_service.
+
+**API Routes & Schemas (9):** Added `include_archived` param to memory list, pagination on summaries, `skill_path` on AgentResponse, document content response documentation, path traversal validation on DocumentCreate, search offset, removed `from_attributes` from Create/Update schemas, documented router ordering.
+
+**Agent System (6):** Cleared steering queues and background tasks in test helper, limited Odin attention items to 500, documented board_state limit, synced ODIN_MCP_TOOLS (added 17 missing tools), removed no-op update_background_task call, added asyncio.Lock to Odin singleton.
+
+**Frontend (7):** Odin messages use unique IDs instead of array index keys, localStorage palette/theme validated before casting, `refetchIntervalInBackground: false` on document title poll, PaletteMockup documented as dev utility, document-viewer effect dependency array fixed, backup status error handling added, aria-labels on 6 unlabeled select elements.
+
+**OpenAPI spec regenerated** from current routes.
+
+## Post-Build Code Review (Full System) — COMPLETE
+
+Full codebase review and fix process complete. 4 initial review agents produced 90 findings (7 critical, 39 important, 44 minor). All 7 phases of fixes applied with code review cycles after each phase. Total: ~80 fixes across ~50 files, 16 new tests, multiple review rounds catching additional issues.
+
+## Session Manager Refactor (agent_runner) — COMPLETE
+
+Replaced `session_manager.py` (1,728 lines) with `agent_runner.py` (~400 lines). Fixed broken first-message flow and broken close/reopen routes. Removed redundant in-memory state (`_active_sessions` dict, `_conversation_locks`, `_steering_queues`). DB is now single source of truth for `sdk_session_id`. Key API changes: `start_session()`/`send_message()` collapsed into `run_interactive()`, `close_session()` renamed to `close_conversation()`, `list_active()` replaced by `list_running(db)`.
+
+Code review of refactor found 1 critical + 5 important issues, all fixed:
+- **Critical:** `include_partial_messages` passed as top-level kwarg instead of inside `ClaudeAgentOptions` — moved to correct location (3 instances)
+- **Important:** Stale `sdk_session_id` in close_conversation after flush_memory — re-read from DB; `ExceptionGroup` not caught in conversation route — added; redundant orphaned task cleanup in main.py — removed; duplicate `stream_end` — verified not a real issue (only published once internally, not yielded)
+- Reopen context: summary-only approach accepted (simpler, sufficient)
+
+## Current State
+
+- **919 backend tests passing**, lint clean on new code
 - **63 Playwright E2E tests passing** (new comprehensive suite) + 39 prior component tests
-- Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup
-- Frontend: dashboard with skeleton loading + backup reminder, space view (widget-based layout), conversation panel, agent management, search modal, document panel + viewer, Space Settings (tabbed: layout editor + memory health + history), task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, toast notifications, keyboard shortcuts + help overlay, browser tab badge, page transitions, empty states, 3 palettes × 2 themes
+- **OpenAPI spec freshly regenerated** from current routes
+- Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes
+- Frontend: dashboard with skeleton loading + backup reminder, space view (widget-based layout), conversation panel with stream_end support, agent management, search modal, document panel + viewer, Space Settings (tabbed: layout editor + memory health + history), task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, toast notifications, keyboard shortcuts + help overlay, browser tab badge, page transitions, empty states, 3 palettes × 2 themes, Odin SSE filtering with race-condition handling, accessible sidebar/panel, agent dropdown fix, type-safe API calls, local column toggle, validated localStorage, aria-labels
 
 ---
 
@@ -358,7 +493,11 @@ All 6 tasks done per IMPLEMENTATION-PLAN.md. Memory lifecycle management, summar
 5. **SDK `resume` is the primary conversation continuity mechanism** — no TTL, sessions persist indefinitely.
 6. **Permission hooks use own DB sessions** — not tied to request-scoped sessions, safe for async SDK context.
 7. **MCP tool name matching uses dynamic prefix extraction** — handles `mcp__openloop_{agentName}__toolName` pattern.
-8. **Approval polling has no timeout** — agents wait indefinitely per spec (5-minute auto-deny removed in Phase 3b).
+8. **Approval polling timeout is 30 minutes** — auto-deny with notification after timeout (changed from infinite polling in Phase 3b).
 9. **All list endpoints paginated** — default limit=50, max 200. Internal callers (context assembler, crash recovery) pass limit=10000.
 10. **All spaces have board_columns** — Simple/Knowledge spaces get `["todo", "in_progress", "done"]`. Eliminates null-checking branches everywhere.
 11. **Todos are items** — no separate table. Tasks (item_type='task') have is_done with bidirectional stage sync. Records ignore sync.
+12. **MCP tools enforce space scoping** — every tool that accepts a `space_id` or operates on an entity validates the agent's space access. System agents (Odin) bypass the check.
+13. **Naive UTC for all SQLite datetimes** — `datetime.now(UTC).replace(tzinfo=None)` is the standard pattern. SQLite strips tzinfo anyway, but explicit naive UTC prevents comparison bugs.
+14. **Agent runner replaces session manager** — `agent_runner.py` (~400 lines) replaced `session_manager.py` (1,728 lines). No in-memory session state; DB is single source of truth for `sdk_session_id`. First message creates session automatically via `ClaudeAgentOptions.system_prompt`. The SDK was always stateless per-call — the old lifecycle model was unnecessary.
+15. **`system_prompt` via SDK options, not as prompt** — the assembled context (memory, rules, board state) is passed via `ClaudeAgentOptions.system_prompt`, not as the `prompt` parameter. This matches how Claude CLI works and avoids wasting an API call on session initialization.

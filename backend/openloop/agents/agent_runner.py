@@ -160,6 +160,45 @@ def _get_conversation_lock(conversation_id: str) -> asyncio.Lock:
     return _conversation_locks[conversation_id]
 
 
+def _convert_stream_event(stream_event, conversation_id: str) -> dict | None:
+    """Convert a raw SDK StreamEvent to a serializable SSE-compatible dict.
+
+    Returns None for events that should not be forwarded to the frontend
+    (thinking blocks, signatures, message_start/stop, etc.).
+    """
+    inner = stream_event.event  # The raw API event dict
+    event_type = inner.get("type", "")
+
+    if event_type == "content_block_delta":
+        delta = inner.get("delta", {})
+        delta_type = delta.get("type", "")
+        if delta_type == "text_delta":
+            return {
+                "type": "token",
+                "conversation_id": conversation_id,
+                "content": delta.get("text", ""),
+            }
+        if delta_type == "input_json_delta":
+            # Tool input streaming — skip for now
+            return None
+        # thinking_delta, signature_delta — skip
+        return None
+
+    if event_type == "content_block_start":
+        block = inner.get("content_block", {})
+        if block.get("type") == "tool_use":
+            return {
+                "type": "tool_call",
+                "conversation_id": conversation_id,
+                "tool_name": block.get("name", "unknown"),
+                "status": "started",
+            }
+        return None
+
+    # content_block_stop, message_start, message_delta, message_stop — skip
+    return None
+
+
 def _build_mcp_server(agent, agent_id: str):
     """Build the appropriate MCP tool server for an agent."""
     is_odin = agent.name.lower() == "odin"
@@ -443,7 +482,7 @@ async def _run_interactive_inner(
             "options": ClaudeAgentOptions(
                 system_prompt=system_prompt,
                 model=model,
-                mcp_servers=[mcp_server],
+                mcp_servers={mcp_server["name"]: mcp_server},
                 hooks=hooks,
                 include_partial_messages=True,
             ),
@@ -454,7 +493,7 @@ async def _run_interactive_inner(
             "options": ClaudeAgentOptions(
                 resume=sdk_session_id,
                 model=model,
-                mcp_servers=[mcp_server],
+                mcp_servers={mcp_server["name"]: mcp_server},
                 hooks=hooks,
                 include_partial_messages=True,
             ),
@@ -472,7 +511,9 @@ async def _run_interactive_inner(
             space_id=conversation.space_id,
         ):
             if isinstance(event, StreamEvent):
-                yield {"type": "stream", "event": event}
+                sse_event = _convert_stream_event(event, conversation_id)
+                if sse_event is not None:
+                    yield sse_event
             elif isinstance(event, ResultMessage):
                 result_message = event
                 if event.result:
@@ -509,7 +550,7 @@ async def _run_interactive_inner(
                 "options": ClaudeAgentOptions(
                     system_prompt=system_prompt,
                     model=model,
-                    mcp_servers=[mcp_server],
+                    mcp_servers={mcp_server["name"]: mcp_server},
                     hooks=hooks,
                     include_partial_messages=True,
                 ),
@@ -522,7 +563,9 @@ async def _run_interactive_inner(
                     space_id=conversation.space_id,
                 ):
                     if isinstance(event, StreamEvent):
-                        yield {"type": "stream", "event": event}
+                        sse_event = _convert_stream_event(event, conversation_id)
+                        if sse_event is not None:
+                            yield sse_event
                     elif isinstance(event, ResultMessage):
                         result_message = event
                         if event.result:
@@ -624,7 +667,7 @@ async def close_conversation(
                 options=ClaudeAgentOptions(
                     resume=sdk_session_id,
                     model=model,
-                    mcp_servers=[mcp_server],
+                    mcp_servers={mcp_server["name"]: mcp_server},
                     hooks=hooks,
                 ),
             ):
@@ -707,7 +750,7 @@ async def flush_memory(db: Session, *, conversation_id: str) -> None:
             options=ClaudeAgentOptions(
                 resume=sdk_session_id,
                 model=model,
-                mcp_servers=[mcp_server],
+                mcp_servers={mcp_server["name"]: mcp_server},
                 hooks=hooks,
             ),
         ):
@@ -910,7 +953,7 @@ async def _run_background_task(
                     "options": ClaudeAgentOptions(
                         system_prompt=system_prompt,
                         model=model,
-                        mcp_servers=[mcp_server],
+                        mcp_servers={mcp_server["name"]: mcp_server},
                         hooks=hooks,
                     ),
                 }
@@ -920,7 +963,7 @@ async def _run_background_task(
                     "options": ClaudeAgentOptions(
                         resume=sdk_session_id,
                         model=model,
-                        mcp_servers=[mcp_server],
+                        mcp_servers={mcp_server["name"]: mcp_server},
                         hooks=hooks,
                     ),
                 }
@@ -1237,7 +1280,7 @@ async def _create_checkpoint(
             options=ClaudeAgentOptions(
                 resume=sdk_session_id,
                 model=model,
-                mcp_servers=[mcp_server],
+                mcp_servers={mcp_server["name"]: mcp_server},
                 hooks=hooks,
             ),
         ):
@@ -1354,7 +1397,7 @@ async def _compress_conversation(db: Session, *, conversation_id: str) -> None:
             options=ClaudeAgentOptions(
                 resume=sdk_session_id,
                 model=model,
-                mcp_servers=[mcp_server],
+                mcp_servers={mcp_server["name"]: mcp_server},
                 hooks=hooks,
             ),
         ):

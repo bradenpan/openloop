@@ -1,8 +1,33 @@
 # OpenLoop User Guide
 
+*Last updated: 2026-04-03*
+
 OpenLoop is a personal AI command center. You manage all your work — tasks, CRM pipelines, knowledge bases, and AI agent conversations — from one interface. Agents work for you: they track your projects, manage your data, handle research, and run on schedules while you focus on what matters.
 
 This guide has two parts. **Part 1** gets you working in the system in 10 minutes. **Part 2** explains how everything works under the hood.
+
+## What works out of the box vs. what needs setup
+
+**Works immediately after `make dev`:**
+- Home dashboard, spaces, items, conversations, Odin
+- Agent conversations with streaming
+- Background delegation with steering
+- Search (Ctrl+K)
+- Memory (four tiers, write-time dedup, scored retrieval)
+- Keyboard shortcuts, toasts, loading states, empty states
+
+**Needs one-time setup:**
+- `make migrate` — initialize the database
+- Google Drive credentials — for Drive backup and integration (see [Google Drive Setup](#google-drive-setup))
+- Agent creation — create agents for your domains (via the Agent Builder)
+- Automation templates — `make register-automations` then enable in the dashboard
+
+**Runs automatically after setup:**
+- Memory lifecycle (daily archival, monthly consolidation)
+- Summary consolidation (at 20+ summaries per space)
+- Task monitoring (stale/stuck detection)
+- Enabled automations (on their cron schedules)
+- Context assembly, dedup, scoring, compression — all transparent
 
 ---
 
@@ -83,9 +108,21 @@ Checking a task "done" in list view automatically moves it to the Done stage on 
 
 Items can be linked to each other. A task can be linked to a contact record ("Call Sarah" linked to Sarah's record). Links are many-to-many and separate from parent-child hierarchy.
 
+## Documents
+
+Each space can hold documents — files you upload, scan from a local directory, or sync from Google Drive.
+
+**Uploading:** Drag-and-drop files into the document panel inside a space, or use the upload button. Text content is automatically extracted from 16 file types (.txt, .md, .csv, .json, .py, .js, .ts, .html, .css, .xml, .yaml, .yml, .toml, .cfg, .ini, .log, .sql) and indexed for full-text search.
+
+**Directory scanning:** Point a space at a local folder and it scans for documents automatically.
+
+**Google Drive:** Link a Drive folder to a space as a data source. Documents sync in, with add/update/remove detection on refresh. See [Google Drive Setup](#google-drive-setup) for one-time auth.
+
+Documents can be linked to items (a spec document attached to a task, a resume attached to a candidate record). Agents can read, list, and create documents through their tools.
+
 ## Agents and Conversations
 
-An agent is a configured AI with a specific role. Examples: a Recruiting Agent that manages your pipeline, a Code Agent that works on your codebase, a Research Agent that searches the web.
+An agent is a configured AI with a specific role. Think of agents as specialized assistants — one knows how to manage your hiring pipeline, another knows how to research companies, another knows how to review your codebase. Each agent has its own prompt, tools, permissions, and memory.
 
 ### Starting a conversation
 
@@ -114,6 +151,19 @@ Use Odin for:
 - Navigation: "Open the recruiting agent"
 - Agent creation: "I need an agent that can manage my health data" (Odin delegates to the Agent Builder)
 
+## Putting it together: a walkthrough
+
+Here's what using OpenLoop looks like for managing a job search:
+
+1. **Create a space.** Pick the CRM template — it gives you a table view with custom fields, perfect for tracking companies and contacts.
+2. **Set up custom fields.** In Space Settings, define fields like "Role," "Status," "Salary Range," "Next Follow-up."
+3. **Create an agent.** Tell Odin: "I need an agent that can manage my job search." Odin routes you to the Agent Builder, which interviews you about what you need and creates a Recruiting Agent with the right prompt, tools, and permissions.
+4. **Start working.** Open a conversation with your Recruiting Agent in the job search space. Tell it about roles you're interested in. It creates records for each company, sets follow-up dates, and tracks where you are in each pipeline.
+5. **Set up an automation.** Create a daily automation: "Check all records with past-due follow-ups and create a task for each one." Now you get a morning briefing every day.
+6. **Keep going.** As you have interviews, update the agent in conversation. It moves records through stages, saves important facts to memory (salary discussed, interviewer names, key dates), and carries context across conversations.
+
+The agent remembers everything across conversations because of the memory system. When you close a conversation, it generates a summary. When you start a new one, the agent gets those summaries plus all saved facts in its context.
+
 ## Keyboard Shortcuts
 
 | Key | Action |
@@ -130,14 +180,15 @@ Press `Ctrl+K` to open global search. It searches across conversations, document
 
 ## Automations
 
-Automations run agents on a schedule. Navigate to Automations from the sidebar.
+Automations run agents on a schedule or in response to events. Navigate to Automations from the sidebar.
 
 To create one:
 1. Click "New Automation"
-2. Pick a schedule (Daily, Weekly, Monthly, or custom cron)
-3. Pick an agent and space
-4. Write the instruction the agent should follow
-5. Enable it
+2. Pick a trigger type — **Cron** (scheduled) or **Event** (reactive)
+3. For cron: pick a schedule (Daily, Weekly, Monthly, or custom cron expression)
+4. Pick an agent and space
+5. Write the instruction the agent should follow
+6. Enable it
 
 The system comes with three pre-built templates (disabled by default):
 - **Daily Task Review** — scans for overdue and stuck tasks every morning
@@ -153,6 +204,8 @@ Agents operate under a permission system. Each agent has per-resource, per-opera
 - **Always allowed** — agent acts without asking
 - **Requires approval** — agent pauses and asks. You'll see it in Attention Items on Home.
 - **Never allowed** — blocked entirely
+
+For example, you might set your Research Agent to always be allowed to read documents and search the web, require your approval before creating or editing items, and never allow it to delete anything. A Recruiting Agent might have full always-allowed access to its own CRM space but require approval for cross-space operations.
 
 Permissions are set during agent creation and editable in the Agents page. There's no timeout on approvals — the agent waits until you respond.
 
@@ -249,6 +302,22 @@ The `agents` table: `name`, `system_prompt` (inline text or loaded from a skill 
 
 `automation_runs` tracks each execution: `status`, `started_at`, `completed_at`, `result`.
 
+### Documents
+
+The `documents` table stores uploaded files, scanned local files, and synced Drive files. Key fields: `title`, `source` (local/drive/external), `local_path`, `drive_file_id`, `file_size`, `mime_type`, `content_text` (extracted text for search indexing), `tags`, `indexed_at`. Documents belong to a space and can be linked to items via a `document_items` join table (many-to-many).
+
+### Data Sources
+
+The `data_sources` table stores external data connections (e.g., a Google Drive folder linked to a space). Key fields: `name`, `source_type`, `config` (JSON — connection details), `refresh_schedule`, `status`, `space_id`.
+
+### Background Tasks
+
+The `background_tasks` table tracks async agent work. Key fields: `conversation_id`, `automation_id`, `agent_id`, `space_id`, `instruction`, `status` (queued/running/completed/failed/cancelled), `current_step`, `total_steps`, `step_results` (JSON array), `parent_task_id` (for task chaining — a delegating agent can spawn child tasks).
+
+### Item Events
+
+The `item_events` table provides an audit trail for item changes. Key fields: `item_id`, `event_type`, `old_value`, `new_value`, `triggered_by`. Created automatically when items are moved, updated, or archived.
+
 ### Notifications
 
 `notifications` table: `type` (enum), `title`, `body`, `read`, `space_id`, `conversation_id`, `automation_id`. Used for approval requests, automation failures, memory consolidation results, and system messages.
@@ -299,7 +368,7 @@ During context assembly, facts are scored by importance, recency, and access fre
 
 ### Namespace caps
 
-Each space can have at most 50 active facts. Each agent can have 20 active facts and 30 active behavioral rules. When a cap is hit, the lowest-scored entry is archived (soft-deleted — still searchable, but excluded from context).
+Memory entries have per-namespace caps: global and Odin namespaces hold 50 entries each, each space holds 50, and each agent holds 20. When a cap is hit, the lowest-scored entry is archived (soft-deleted — still searchable, but excluded from context). Behavioral rules are managed separately and don't have a hard cap — low-performing rules are demoted via the confidence mechanism instead.
 
 ### Auto-archival
 
@@ -336,6 +405,8 @@ The agent runner bridges OpenLoop conversations with Claude SDK sessions. It rep
 **Background delegation:** Uses a managed turn loop instead of fire-and-forget. The agent works in discrete turns (max 20). Between turns, the agent runner checks a steering queue for user corrections. If a correction exists, it's injected as the next message. Otherwise, the agent auto-continues. The agent signals completion with `TASK_COMPLETE`.
 
 **Rate limit handling:** If the SDK returns a 429, the system retries with exponential backoff (30s, 60s, 120s, max 3 retries), creates a notification, and publishes an SSE event so the UI can show status.
+
+**Concurrency limits:** The system enforces a maximum of 5 simultaneous interactive sessions and 2 simultaneous automation sessions. These limits prevent overloading the Claude API. The automation scheduler also defers when active user conversations exist — user work always takes priority.
 
 **Crash recovery:** On startup, the system marks any conversations with status "active" that don't have a running process as "interrupted" and creates notifications.
 
@@ -478,25 +549,8 @@ For Drive backup and integration:
 5. Run `make backup-gdrive` — first run opens a browser for OAuth consent
 6. Token is saved to `data/.gdrive-token.json` for future runs
 
-## What's Automated vs. What Needs Setup
+## See Also
 
-**Works out of the box:**
-- Home dashboard, spaces, items, conversations, Odin
-- Agent conversations with streaming
-- Background delegation with steering
-- Search (Ctrl+K)
-- Memory (four tiers, write-time dedup, scored retrieval)
-- Keyboard shortcuts, toasts, loading states, empty states
-
-**Needs one-time setup:**
-- `make migrate` — initialize the database
-- Google Drive credentials — for Drive backup and integration
-- Agent creation — create agents for your domains (via UI or Agent Builder)
-- Automation templates — `make register-automations` then enable in the dashboard
-
-**Runs automatically after setup:**
-- Memory lifecycle (daily archival, monthly consolidation)
-- Summary consolidation (at 20+ summaries per space)
-- Task monitoring (stale/stuck detection)
-- Enabled automations (on their cron schedules)
-- Context assembly, dedup, scoring, compression — all transparent
+- **[README.md](README.md)** — project overview, status, design documents, and tech stack
+- **[PROGRESS.md](PROGRESS.md)** — detailed build status by phase
+- **[IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)** — full task breakdown

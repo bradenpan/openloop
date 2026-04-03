@@ -2085,60 +2085,59 @@ _ODIN_TOOLS = {
 
 
 def _make_decorated_tools(tool_map: dict, agent_name: str, agent_id: str = "") -> list:
-    """Wrap raw async functions with @tool() and inject _agent_name/_agent_id via closures."""
+    """Wrap raw async functions with @tool() and inject _agent_name/_agent_id via closures.
+
+    Adapts the existing kwargs-based tool functions to the current SDK API which
+    requires tool(name, description, input_schema) and a handler that receives a
+    single ``args`` dict and returns ``{"content": [...]}`` dicts.
+    """
+    import inspect
+
     from claude_agent_sdk import tool
 
     decorated = []
     for name, fn in tool_map.items():
-        # Build a closure that binds agent_name/agent_id for tools that support them
-        import inspect
-
         sig = inspect.signature(fn)
         has_agent_name = "_agent_name" in sig.parameters
         has_agent_id = "_agent_id" in sig.parameters
 
-        if has_agent_name or has_agent_id:
-            # Create closure binding agent_name and/or agent_id
-            def _make_wrapper(original_fn, bound_name, bound_id, inject_name, inject_id):
-                async def wrapper(**kwargs):
-                    if inject_name:
-                        kwargs["_agent_name"] = bound_name
-                    if inject_id:
-                        kwargs["_agent_id"] = bound_id
-                    return await original_fn(**kwargs)
+        # Build input_schema from annotations, excluding internal/private params
+        input_schema: dict = {}
+        for param_name, param in sig.parameters.items():
+            if param_name.startswith("_") or param_name == "return":
+                continue
+            ann = param.annotation
+            if ann is inspect.Parameter.empty:
+                ann = str  # default to str for unannotated params
+            input_schema[param_name] = ann
 
-                # Copy metadata for the SDK
-                wrapper.__name__ = original_fn.__name__
-                wrapper.__doc__ = original_fn.__doc__
-                # Copy annotations, excluding internal params
-                wrapper.__annotations__ = {
-                    k: v
-                    for k, v in original_fn.__annotations__.items()
-                    if not k.startswith("_") and k != "return"
-                }
-                wrapper.__annotations__["return"] = str
-                return wrapper
+        # Extract description from docstring (first line only)
+        description = (fn.__doc__ or f"Tool: {name}").strip().split("\n")[0]
 
-            wrapped = _make_wrapper(fn, agent_name, agent_id, has_agent_name, has_agent_id)
-        else:
-            # No agent_name needed, but still strip internal params from annotations
-            def _make_clean_wrapper(original_fn):
-                async def wrapper(**kwargs):
-                    return await original_fn(**kwargs)
+        # Build handler: adapts args dict -> **kwargs and wraps string result
+        def _make_handler(original_fn, bound_name, bound_id, inject_name, inject_id):
+            async def handler(args):
+                kwargs = dict(args)
+                if inject_name:
+                    kwargs["_agent_name"] = bound_name
+                if inject_id:
+                    kwargs["_agent_id"] = bound_id
+                result_str = await original_fn(**kwargs)
+                # Existing tools return JSON strings; wrap in SDK content format
+                try:
+                    parsed = json.loads(result_str)
+                    is_error = parsed.get("is_error", False)
+                    content = [{"type": "text", "text": result_str}]
+                    if is_error:
+                        return {"content": content, "is_error": True}
+                    return {"content": content}
+                except (json.JSONDecodeError, TypeError):
+                    return {"content": [{"type": "text", "text": str(result_str)}]}
 
-                wrapper.__name__ = original_fn.__name__
-                wrapper.__doc__ = original_fn.__doc__
-                wrapper.__annotations__ = {
-                    k: v
-                    for k, v in original_fn.__annotations__.items()
-                    if not k.startswith("_") and k != "return"
-                }
-                wrapper.__annotations__["return"] = str
-                return wrapper
+            return handler
 
-            wrapped = _make_clean_wrapper(fn)
-
-        decorated.append(tool()(wrapped))
+        handler = _make_handler(fn, agent_name, agent_id, has_agent_name, has_agent_id)
+        decorated.append(tool(name, description, input_schema)(handler))
     return decorated
 
 
