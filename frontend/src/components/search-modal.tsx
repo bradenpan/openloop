@@ -16,6 +16,7 @@ const TYPE_LABELS: Record<string, string> = {
   summaries: 'Summaries',
   memory: 'Memory',
   documents: 'Documents',
+  items: 'Items',
 };
 
 const TYPE_ICONS: Record<string, string> = {
@@ -23,6 +24,7 @@ const TYPE_ICONS: Record<string, string> = {
   summaries: '\u{1F4CB}',
   memory: '\u{1F9E0}',
   documents: '\u{1F4C4}',
+  items: '\u2611',
 };
 
 function highlightExcerpt(html: string): string {
@@ -112,6 +114,10 @@ export function SearchModal() {
       if (item.space_id) {
         navigate(`/space/${item.space_id}`);
       }
+    } else if (item.type === 'item') {
+      if (item.space_id) {
+        navigate(`/space/${item.space_id}`);
+      }
     }
     // Memory entries don't have a natural navigation target
   };
@@ -164,7 +170,7 @@ export function SearchModal() {
             type="text"
             value={query}
             onChange={(e) => onInput(e.target.value)}
-            placeholder="Search conversations, memory, documents..."
+            placeholder="Search conversations, memory, documents, items..."
             className="flex-1 bg-transparent text-foreground text-sm placeholder:text-muted outline-none"
           />
           <kbd className="hidden sm:inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-mono bg-raised text-muted border border-border">

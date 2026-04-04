@@ -17,6 +17,7 @@ from backend.openloop.db.models import (
     ConversationMessage,
     ConversationSummary,
     Document,
+    Item,
     MemoryEntry,
     Space,
 )
@@ -154,6 +155,38 @@ _FTS_SETUP_SQL = [
         VALUES (new.rowid, new.title);
     END;
     """,
+    # Virtual table — items
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS fts_items
+    USING fts5(title, description, content='items', content_rowid='rowid');
+    """,
+    # Triggers — items
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_items_ai
+    AFTER INSERT ON items
+    BEGIN
+        INSERT INTO fts_items(rowid, title, description)
+        VALUES (new.rowid, new.title, COALESCE(new.description, ''));
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_items_bd
+    BEFORE DELETE ON items
+    BEGIN
+        INSERT INTO fts_items(fts_items, rowid, title, description)
+        VALUES ('delete', old.rowid, old.title, COALESCE(old.description, ''));
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_items_au
+    AFTER UPDATE ON items
+    BEGIN
+        INSERT INTO fts_items(fts_items, rowid, title, description)
+        VALUES ('delete', old.rowid, old.title, COALESCE(old.description, ''));
+        INSERT INTO fts_items(rowid, title, description)
+        VALUES (new.rowid, new.title, COALESCE(new.description, ''));
+    END;
+    """,
 ]
 
 _FTS_TEARDOWN_TRIGGERS = [
@@ -169,6 +202,9 @@ _FTS_TEARDOWN_TRIGGERS = [
     "fts_documents_ai",
     "fts_documents_bd",
     "fts_documents_au",
+    "fts_items_ai",
+    "fts_items_bd",
+    "fts_items_au",
 ]
 
 _FTS_TEARDOWN_TABLES = [
@@ -176,6 +212,7 @@ _FTS_TEARDOWN_TABLES = [
     "fts_conversation_summaries",
     "fts_memory_entries",
     "fts_documents",
+    "fts_items",
 ]
 
 
@@ -294,6 +331,38 @@ def sample_data(fts_db: Session) -> dict:
     fts_db.add(doc)
     fts_db.flush()
 
+    item1 = Item(
+        id=_uid(),
+        space_id=space.id,
+        item_type="task",
+        title="Implement authentication module",
+        description="Build OAuth2 authentication flow with FastAPI integration",
+    )
+    item2 = Item(
+        id=_uid(),
+        space_id=space.id,
+        item_type="record",
+        title="Sarah Chen",
+        description="Senior engineer, leads the backend team",
+    )
+    item3 = Item(
+        id=_uid(),
+        space_id=space2.id,
+        item_type="task",
+        title="Database migration plan",
+        description="Plan the migration from PostgreSQL to SQLite",
+    )
+    item_archived = Item(
+        id=_uid(),
+        space_id=space.id,
+        item_type="task",
+        title="Old authentication review",
+        description="Review legacy auth module",
+        archived=True,
+    )
+    fts_db.add_all([item1, item2, item3, item_archived])
+    fts_db.flush()
+
     fts_db.commit()
 
     return {
@@ -309,6 +378,10 @@ def sample_data(fts_db: Session) -> dict:
         "mem1": mem1,
         "mem2": mem2,
         "doc": doc,
+        "item1": item1,
+        "item2": item2,
+        "item3": item3,
+        "item_archived": item_archived,
     }
 
 
@@ -413,6 +486,46 @@ class TestSearchDocuments:
         assert results_other == []
 
 
+class TestSearchItems:
+    def test_basic_search(self, sample_data: dict, fts_db: Session) -> None:
+        results = search_service.search_items(fts_db, "authentication")
+        assert len(results) >= 1
+        assert all(r["type"] == "item" for r in results)
+
+    def test_description_search(self, sample_data: dict, fts_db: Session) -> None:
+        results = search_service.search_items(fts_db, "OAuth2")
+        assert len(results) >= 1
+
+    def test_space_filter(self, sample_data: dict, fts_db: Session) -> None:
+        results = search_service.search_items(
+            fts_db, "authentication", space_id=sample_data["space"].id
+        )
+        assert len(results) >= 1
+        assert all(r["space_id"] == sample_data["space"].id for r in results)
+
+    def test_item_type_filter(self, sample_data: dict, fts_db: Session) -> None:
+        results = search_service.search_items(
+            fts_db, "authentication", item_type="task"
+        )
+        assert len(results) >= 1
+
+    def test_archived_excluded_by_default(self, sample_data: dict, fts_db: Session) -> None:
+        results = search_service.search_items(fts_db, "legacy auth")
+        matching = [r for r in results if r["id"] == sample_data["item_archived"].id]
+        assert matching == []
+
+    def test_archived_included_when_requested(self, sample_data: dict, fts_db: Session) -> None:
+        results = search_service.search_items(
+            fts_db, "legacy auth", include_archived=True
+        )
+        matching = [r for r in results if r["id"] == sample_data["item_archived"].id]
+        assert len(matching) == 1
+
+    def test_no_results(self, sample_data: dict, fts_db: Session) -> None:
+        results = search_service.search_items(fts_db, "zyxwvutsrqponm")
+        assert results == []
+
+
 class TestSearchAll:
     def test_returns_grouped_results(self, sample_data: dict, fts_db: Session) -> None:
         results = search_service.search_all(fts_db, "authentication")
@@ -420,6 +533,7 @@ class TestSearchAll:
         assert "summaries" in results
         assert "memory" in results
         assert "documents" in results
+        assert "items" in results
         # Should find something in messages, summaries, memory, and documents
         total = sum(len(v) for v in results.values())
         assert total > 0
@@ -446,6 +560,7 @@ class TestEmptyQuery:
         assert search_service.search_summaries(fts_db, "") == []
         assert search_service.search_memory(fts_db, "") == []
         assert search_service.search_documents(fts_db, "") == []
+        assert search_service.search_items(fts_db, "") == []
 
     def test_only_special_chars(self, fts_db: Session) -> None:
         assert search_service.search_messages(fts_db, '***"()') == []

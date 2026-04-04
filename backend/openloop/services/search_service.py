@@ -302,6 +302,79 @@ def search_documents(
     ]
 
 
+def search_items(
+    db: Session,
+    query: str,
+    *,
+    space_id: str | None = None,
+    space_ids: list[str] | None = None,
+    item_type: str | None = None,
+    include_archived: bool = False,
+    limit: int = 20,
+) -> list[dict]:
+    """Search items (tasks and records) via FTS5.
+
+    space_id filters to a single space. space_ids filters to a list of
+    allowed spaces (for permission scoping). If both are provided,
+    space_id takes precedence.
+    """
+    safe_q = _sanitize_query(query)
+    if not safe_q:
+        return []
+
+    sql = """
+        SELECT
+            i.id,
+            i.title,
+            i.item_type,
+            i.is_done,
+            i.space_id,
+            i.created_at,
+            snippet(fts_items, -1, :snip_open, :snip_close, '...', 48) AS excerpt,
+            bm25(fts_items) AS rank,
+            s.name AS space_name
+        FROM fts_items fts
+        JOIN items i ON i.rowid = fts.rowid
+        LEFT JOIN spaces s ON s.id = i.space_id
+        WHERE fts_items MATCH :query
+    """
+    params: dict = {"query": safe_q, "limit": limit, "snip_open": _SNIPPET_OPEN, "snip_close": _SNIPPET_CLOSE}
+
+    if not include_archived:
+        sql += " AND i.archived = 0"
+
+    if space_id:
+        sql += " AND i.space_id = :space_id"
+        params["space_id"] = space_id
+    elif space_ids is not None:
+        placeholders = ", ".join(f":sid_{i}" for i in range(len(space_ids)))
+        sql += f" AND i.space_id IN ({placeholders})"
+        for i, sid in enumerate(space_ids):
+            params[f"sid_{i}"] = sid
+
+    if item_type:
+        sql += " AND i.item_type = :item_type"
+        params["item_type"] = item_type
+
+    sql += " ORDER BY rank LIMIT :limit"
+
+    rows = db.execute(text(sql), params).fetchall()
+    return [
+        {
+            "id": r.id,
+            "type": "item",
+            "title": r.title,
+            "excerpt": _safe_snippet(r.excerpt or ""),
+            "space_id": r.space_id,
+            "space_name": r.space_name,
+            "relevance_score": abs(r.rank),
+            "created_at": r.created_at,
+            "source_id": r.id,
+        }
+        for r in rows
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Unified search
 # ---------------------------------------------------------------------------
@@ -315,13 +388,14 @@ def search_all(
     limit: int = 50,
 ) -> dict[str, list[dict]]:
     """Search all FTS tables and group results by type."""
-    per_type = max(limit // 4, 5)
+    per_type = max(limit // 5, 5)
 
     return {
         "messages": search_messages(db, query, space_id=space_id, limit=per_type),
         "summaries": search_summaries(db, query, space_id=space_id, limit=per_type),
         "memory": search_memory(db, query, limit=per_type),
         "documents": search_documents(db, query, space_id=space_id, limit=per_type),
+        "items": search_items(db, query, space_id=space_id, limit=per_type),
     }
 
 
@@ -341,6 +415,7 @@ def rebuild_fts_indexes(db: Session) -> None:
         "fts_conversation_summaries",
         "fts_memory_entries",
         "fts_documents",
+        "fts_items",
     ]:
         db.execute(text(f"INSERT INTO {table}({table}) VALUES('rebuild');"))  # noqa: S608
     db.commit()
@@ -361,6 +436,7 @@ def check_and_rebuild_if_needed(db: Session) -> bool:
         ("fts_conversation_summaries", "conversation_summaries"),
         ("fts_memory_entries", "memory_entries"),
         ("fts_documents", "documents"),
+        ("fts_items", "items"),
     ]
 
     for fts_table, source_table in fts_tables:

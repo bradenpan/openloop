@@ -108,6 +108,18 @@ _MEMORY_INSTRUCTIONS = """
 - Use override_rule() when the user contradicts an existing rule
 """.strip()
 
+_SEARCH_INSTRUCTIONS = """
+## Search Instructions
+- Use the `search` tool for broad discovery across all content types (messages, summaries, memory, documents, items)
+- If initial search returns few or no results, reformulate your query:
+  - Try synonyms (e.g. "auth" -> "authentication", "login", "OAuth")
+  - Try broader terms first, then narrow down
+  - Try individual keywords instead of multi-word phrases
+  - Search for related concepts that might appear near your target
+- For targeted follow-up, use specific tools: search_items, search_conversations, search_summaries, recall_facts
+- 2-3 search attempts with different terms is normal and expected — iterate rather than accepting empty results
+""".strip()
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -386,6 +398,7 @@ def _build_agent_identity(agent: Agent) -> str:
 
     lines.append("")
     lines.append(_wrap_system_instruction(_MEMORY_INSTRUCTIONS))
+    lines.append(_wrap_system_instruction(_SEARCH_INSTRUCTIONS))
     return "\n".join(lines)
 
 

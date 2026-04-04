@@ -14,7 +14,9 @@ from sqlalchemy.orm import Session
 from backend.openloop.agents.mcp_tools import (
     _get_agent_space_ids,
     recall_facts,
+    search_all_content,
     search_conversations,
+    search_items,
     search_summaries,
 )
 from backend.openloop.db.models import (
@@ -22,6 +24,7 @@ from backend.openloop.db.models import (
     Conversation,
     ConversationMessage,
     ConversationSummary,
+    Item,
     MemoryEntry,
     Space,
 )
@@ -157,6 +160,38 @@ _FTS_SETUP_SQL = [
         VALUES (new.rowid, new.title);
     END;
     """,
+    # Virtual table — items
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS fts_items
+    USING fts5(title, description, content='items', content_rowid='rowid');
+    """,
+    # Triggers — items
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_items_ai
+    AFTER INSERT ON items
+    BEGIN
+        INSERT INTO fts_items(rowid, title, description)
+        VALUES (new.rowid, new.title, COALESCE(new.description, ''));
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_items_bd
+    BEFORE DELETE ON items
+    BEGIN
+        INSERT INTO fts_items(fts_items, rowid, title, description)
+        VALUES ('delete', old.rowid, old.title, COALESCE(old.description, ''));
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_items_au
+    AFTER UPDATE ON items
+    BEGIN
+        INSERT INTO fts_items(fts_items, rowid, title, description)
+        VALUES ('delete', old.rowid, old.title, COALESCE(old.description, ''));
+        INSERT INTO fts_items(rowid, title, description)
+        VALUES (new.rowid, new.title, COALESCE(new.description, ''));
+    END;
+    """,
 ]
 
 _FTS_TEARDOWN_TRIGGERS = [
@@ -172,6 +207,9 @@ _FTS_TEARDOWN_TRIGGERS = [
     "fts_documents_ai",
     "fts_documents_bd",
     "fts_documents_au",
+    "fts_items_ai",
+    "fts_items_bd",
+    "fts_items_au",
 ]
 
 _FTS_TEARDOWN_TABLES = [
@@ -179,6 +217,7 @@ _FTS_TEARDOWN_TABLES = [
     "fts_conversation_summaries",
     "fts_memory_entries",
     "fts_documents",
+    "fts_items",
 ]
 
 
@@ -307,6 +346,24 @@ def search_data(fts_db: Session) -> dict:
     fts_db.add_all([mem1, mem2])
     fts_db.flush()
 
+    # Items in both spaces
+    item_a = Item(
+        id=_uid(),
+        space_id=space_a.id,
+        item_type="task",
+        title="Implement authentication module",
+        description="Build OAuth2 authentication flow with FastAPI integration",
+    )
+    item_b = Item(
+        id=_uid(),
+        space_id=space_b.id,
+        item_type="task",
+        title="Marketing authentication strategy",
+        description="Design auth flow for marketing platform",
+    )
+    fts_db.add_all([item_a, item_b])
+    fts_db.flush()
+
     fts_db.commit()
 
     return {
@@ -323,6 +380,8 @@ def search_data(fts_db: Session) -> dict:
         "summary_b": summary_b,
         "mem1": mem1,
         "mem2": mem2,
+        "item_a": item_a,
+        "item_b": item_b,
     }
 
 
@@ -591,3 +650,107 @@ class TestRecallFacts:
 
         fts_db.refresh(mem)
         assert mem.access_count == original_count
+
+
+# ---------------------------------------------------------------------------
+# Tests: search_items (new tool)
+# ---------------------------------------------------------------------------
+
+
+class TestSearchItems:
+    @pytest.mark.asyncio
+    async def test_basic_fts_search(self, search_data: dict, fts_db: Session) -> None:
+        raw = await search_items(
+            query="authentication",
+            space_id=search_data["space_a"].id,
+            _db=fts_db,
+            _agent_id=search_data["scoped_agent"].id,
+        )
+        results = _result(raw)
+        assert len(results) >= 1
+        assert all("relevance_score" in r for r in results)
+        assert all("item_id" in r for r in results)
+
+    @pytest.mark.asyncio
+    async def test_cross_space_scoped_agent(self, search_data: dict, fts_db: Session) -> None:
+        raw = await search_items(
+            query="authentication",
+            _db=fts_db,
+            _agent_id=search_data["scoped_agent"].id,
+        )
+        results = _result(raw)
+        assert len(results) >= 1
+        for r in results:
+            assert r["space_id"] == search_data["space_a"].id
+
+    @pytest.mark.asyncio
+    async def test_cross_space_odin_sees_all(self, search_data: dict, fts_db: Session) -> None:
+        raw = await search_items(
+            query="authentication",
+            _db=fts_db,
+            _agent_id=search_data["odin"].id,
+        )
+        results = _result(raw)
+        space_ids = {r["space_id"] for r in results}
+        assert search_data["space_a"].id in space_ids
+        assert search_data["space_b"].id in space_ids
+
+    @pytest.mark.asyncio
+    async def test_empty_query(self, search_data: dict, fts_db: Session) -> None:
+        raw = await search_items(
+            query="",
+            _db=fts_db,
+            _agent_id=search_data["scoped_agent"].id,
+        )
+        results = _result(raw)
+        assert results == []
+
+
+# ---------------------------------------------------------------------------
+# Tests: search_all_content (unified search)
+# ---------------------------------------------------------------------------
+
+
+class TestSearchAllContent:
+    @pytest.mark.asyncio
+    async def test_returns_all_types(self, search_data: dict, fts_db: Session) -> None:
+        raw = await search_all_content(
+            query="authentication",
+            _db=fts_db,
+            _agent_id=search_data["odin"].id,
+        )
+        results = _result(raw)
+        assert "messages" in results
+        assert "summaries" in results
+        assert "memory" in results
+        assert "items" in results
+        total = sum(len(v) for v in results.values())
+        assert total > 0
+
+    @pytest.mark.asyncio
+    async def test_space_filter(self, search_data: dict, fts_db: Session) -> None:
+        raw = await search_all_content(
+            query="authentication",
+            space_id=search_data["space_a"].id,
+            _db=fts_db,
+            _agent_id=search_data["scoped_agent"].id,
+        )
+        results = _result(raw)
+        # All space-scoped results should be from space_a
+        for type_key, items in results.items():
+            for item in items:
+                if item.get("space_id"):
+                    assert item["space_id"] == search_data["space_a"].id
+
+    @pytest.mark.asyncio
+    async def test_no_html_in_excerpts(self, search_data: dict, fts_db: Session) -> None:
+        raw = await search_all_content(
+            query="authentication",
+            _db=fts_db,
+            _agent_id=search_data["odin"].id,
+        )
+        results = _result(raw)
+        for type_key, items in results.items():
+            for item in items:
+                assert "<mark>" not in item.get("excerpt", "")
+                assert "</mark>" not in item.get("excerpt", "")

@@ -10,6 +10,7 @@ always coerce before use. All tools return JSON strings.
 from __future__ import annotations
 
 import json
+import re
 from datetime import UTC, datetime
 
 from fastapi import HTTPException
@@ -1156,6 +1157,128 @@ async def search_summaries(
                 for r in results
             ]
         )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 17c. search_items
+async def search_items(
+    query: str,
+    space_id: str = "",
+    item_type: str = "",
+    limit: str = "20",
+    *,
+    _db=None,
+    _agent_id: str = "",
+) -> str:
+    """Search items (tasks and records) using full-text search (FTS5).
+
+    query: the search terms (required).
+    space_id: filter to a specific space. If omitted, searches across all
+        spaces this agent has access to.
+    item_type: filter by item type (e.g. "task", "record").
+    limit: max results (default 20).
+    """
+    db = _get_db(_db)
+    try:
+        if not query or not query.strip():
+            return _ok([])
+
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
+
+        limit_int = _parse_int(limit, 20)
+        sid = space_id or None
+        itype = item_type or None
+
+        # Determine space scoping for cross-space search
+        space_ids = None
+        if not sid:
+            space_ids = _get_agent_space_ids(db, _agent_id)
+
+        results = search_service.search_items(
+            db,
+            query,
+            space_id=sid,
+            space_ids=space_ids,
+            item_type=itype,
+            limit=limit_int,
+        )
+        return _ok(
+            [
+                {
+                    "item_id": r["id"],
+                    "title": r["title"],
+                    "excerpt": r["excerpt"],
+                    "space_id": r["space_id"],
+                    "space_name": r["space_name"],
+                    "relevance_score": r["relevance_score"],
+                    "created_at": r["created_at"],
+                }
+                for r in results
+            ]
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 17d. search_all (unified search)
+async def search_all_content(
+    query: str,
+    space_id: str = "",
+    limit: str = "50",
+    *,
+    _db=None,
+    _agent_id: str = "",
+) -> str:
+    """Search across ALL content types: messages, summaries, memory, documents, and items.
+
+    Returns grouped results by type. Use this as a first-pass discovery tool,
+    then drill into specific search tools (search_conversations, search_summaries,
+    search_items, recall_facts) for more targeted queries.
+
+    query: the search terms (required).
+    space_id: filter to a specific space. If omitted, searches all accessible spaces.
+    limit: total result limit across all types (default 50).
+    """
+    db = _get_db(_db)
+    try:
+        if not query or not query.strip():
+            return _ok({})
+
+        if space_id:
+            denied = _validate_space_access(db, _agent_id, space_id)
+            if denied:
+                return denied
+
+        limit_int = _parse_int(limit, 50)
+        sid = space_id or None
+
+        grouped = search_service.search_all(db, query, space_id=sid, limit=limit_int)
+
+        # Strip HTML <mark> tags from excerpts — agents don't need highlighting
+        _mark_re = re.compile(r"</?mark>")
+        cleaned: dict[str, list] = {}
+        for type_key, items in grouped.items():
+            cleaned[type_key] = [
+                {
+                    **{k: v for k, v in item.items() if k != "excerpt"},
+                    "excerpt": _mark_re.sub("", item.get("excerpt", "")),
+                }
+                for item in items
+            ]
+
+        return _ok(cleaned)
     except Exception as e:
         db.rollback()
         return _err(str(e))
@@ -2368,6 +2491,8 @@ _STANDARD_TOOLS = {
     "get_conversation_summaries": get_conversation_summaries,
     "search_conversations": search_conversations,
     "search_summaries": search_summaries,
+    "search_items": search_items,
+    "search": search_all_content,
     "get_conversation_messages": get_conversation_messages,
     "delegate_task": delegate_task,
     "update_task_progress": update_task_progress,

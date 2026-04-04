@@ -171,6 +171,38 @@ _FTS_SETUP_SQL = [
         VALUES (new.rowid, new.title);
     END;
     """,
+    # Virtual table -- items
+    """
+    CREATE VIRTUAL TABLE IF NOT EXISTS fts_items
+    USING fts5(title, description, content='items', content_rowid='rowid');
+    """,
+    # Triggers -- items
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_items_ai
+    AFTER INSERT ON items
+    BEGIN
+        INSERT INTO fts_items(rowid, title, description)
+        VALUES (new.rowid, new.title, COALESCE(new.description, ''));
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_items_bd
+    BEFORE DELETE ON items
+    BEGIN
+        INSERT INTO fts_items(fts_items, rowid, title, description)
+        VALUES ('delete', old.rowid, old.title, COALESCE(old.description, ''));
+    END;
+    """,
+    """
+    CREATE TRIGGER IF NOT EXISTS fts_items_au
+    AFTER UPDATE ON items
+    BEGIN
+        INSERT INTO fts_items(fts_items, rowid, title, description)
+        VALUES ('delete', old.rowid, old.title, COALESCE(old.description, ''));
+        INSERT INTO fts_items(rowid, title, description)
+        VALUES (new.rowid, new.title, COALESCE(new.description, ''));
+    END;
+    """,
 ]
 
 _FTS_TEARDOWN_TRIGGERS = [
@@ -186,6 +218,9 @@ _FTS_TEARDOWN_TRIGGERS = [
     "fts_documents_ai",
     "fts_documents_bd",
     "fts_documents_au",
+    "fts_items_ai",
+    "fts_items_bd",
+    "fts_items_au",
 ]
 
 _FTS_TEARDOWN_TABLES = [
@@ -193,6 +228,7 @@ _FTS_TEARDOWN_TABLES = [
     "fts_conversation_summaries",
     "fts_memory_entries",
     "fts_documents",
+    "fts_items",
 ]
 
 
@@ -645,7 +681,7 @@ class TestSearchIntegration:
         from backend.openloop.services import search_service
 
         results = search_service.search_all(fts_db, "Kubernetes")
-        assert set(results.keys()) == {"messages", "summaries", "memory", "documents"}
+        assert set(results.keys()) == {"messages", "summaries", "memory", "documents", "items"}
         total = sum(len(v) for v in results.values())
         assert total > 0
 
@@ -660,6 +696,8 @@ class TestSearchIntegration:
         for r in results.get("summaries", []):
             assert r["space_id"] == sid
         for r in results.get("documents", []):
+            assert r["space_id"] == sid
+        for r in results.get("items", []):
             assert r["space_id"] == sid
 
     def test_archived_memory_excluded_from_search(
@@ -707,6 +745,7 @@ class TestSearchIntegration:
             "summaries": [],
             "memory": [],
             "documents": [],
+            "items": [],
         }
 
     def test_search_documents_space_filter(self, multi_space_data: dict, fts_db: Session):

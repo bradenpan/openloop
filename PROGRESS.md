@@ -575,9 +575,41 @@ All 4 tasks done (3 parallel + 1 sequential). ~51 new backend tests, 1 new front
 - Consistency: `resume_autonomous_tasks` string literals → enum constants; `batch_resolve` missing pending guard → added skip for non-pending
 - Won't fix (7): N+1 queries in expiry/brief (low volume), redundant task re-query in route (correct behavior), missing ConfigDict on dict-only schemas, redundant updated_at, test helper falsy check, missing edge case test
 
+## Search Improvements: Agentic Search + Items FTS5 — COMPLETE
+
+Spike found that vector search adds unnecessary complexity for a small personal dataset. Instead, adopted the "agentic search" pattern used by Claude Code: FTS5 keyword search + LLM-driven query reformulation. The model itself acts as the semantic layer, iterating on search terms when initial results are sparse.
+
+**Migration:** New `fts_items` FTS5 virtual table indexing `items.title` + `items.description` with 3 sync triggers (insert/delete/update). COALESCE for nullable description. All items indexed including archived (filtered at query time).
+
+**Service layer:**
+- New `search_items()` in search_service.py — space filtering, space_ids permission scoping, item_type filtering, archived exclusion toggle. Follows exact pattern of search_documents().
+- `search_all()` updated from 4-type to 5-type (includes items), budget split changed from `//4` to `//5`.
+- `rebuild_fts_indexes()` and `check_and_rebuild_if_needed()` updated to include fts_items.
+
+**MCP tools (2 new):**
+- `search_items` — FTS5 search on items with space permission scoping, item_type filter. Registered in _STANDARD_TOOLS.
+- `search` (unified) — calls search_all(), returns grouped results across all 5 content types. Strips HTML `<mark>` tags from excerpts (agents don't need highlighting). Designed as a first-pass discovery tool.
+
+**Agentic search guidance:** New `_SEARCH_INSTRUCTIONS` constant in context_assembler.py, injected into agent identity section alongside memory instructions. Teaches agents to: use `search` for broad discovery, reformulate queries with synonyms/broader terms on sparse results, iterate 2-3 times, drill into specific tools for targeted follow-up.
+
+**API route:** `GET /api/v1/search` now accepts `type=items`. Docstrings updated.
+
+**Frontend:** Search modal (Ctrl+K) updated — items appear in results with checkbox icon, click navigates to item's space. Placeholder text updated.
+
+**Tests:** 18 new tests across 3 files:
+- test_search_service.py: 7 tests (TestSearchItems: basic, description, space filter, type filter, archived exclusion, archived inclusion, no results)
+- test_mcp_search_tools.py: 7 tests (TestSearchItems: 4 tests + TestSearchAllContent: 3 tests including HTML stripping verification)
+- test_phase4_integration.py: Updated 3 existing tests to include items key in assertions, added fts_items FTS5 setup SQL
+
+**E2E testing (Playwright):** 9/9 pass — modal open/close, placeholder text, search returns results, space badges, excerpt highlights, no-results state, click-to-navigate. Confirmed items appear in search results with correct space assignment.
+
+**Files changed:** 9 modified, 2 new
+- New: `backend/alembic/versions/10_2_fts_items.py`, `backend/tests/test_e2e/test_search_e2e.py`
+- Modified: search_service.py, mcp_tools.py, context_assembler.py, routes/search.py, search-modal.tsx, test_search_service.py, test_mcp_search_tools.py, test_phase4_integration.py
+
 ## Current State
 
-- **~1264 backend tests passing**, lint clean on new code
+- **~1300 backend tests passing**, lint clean on new code
 - **63 Playwright E2E tests passing** (new comprehensive suite) + 39 prior component tests
 - **OpenAPI spec freshly regenerated** from current routes
 - Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes, permission inheritance with no-escalation enforcement, parallel sub-agent delegation with per-run caps, cascade termination/pause/resume, delegation monitoring MCP tools, audit-logged sub-agent completions, autonomous crash recovery with task list resumption, approval queue lifecycle with per-agent expiry and steering re-injection, structured run summaries with morning brief dashboard

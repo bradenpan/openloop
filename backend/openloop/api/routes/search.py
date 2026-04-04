@@ -21,13 +21,13 @@ def search(
     ),
     type: str | None = Query(
         None,
-        description="Filter by type: messages, summaries, memory, documents",
+        description="Filter by type: messages, summaries, memory, documents, items",
     ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> SearchResponse:
-    """Full-text search across conversations, summaries, memory, and documents."""
+    """Full-text search across conversations, summaries, memory, documents, and items."""
     # Fetch extra rows to satisfy offset, then slice
     fetch_limit = limit + offset
     if type:
@@ -45,6 +45,10 @@ def search(
             results["memory"] = search_service.search_memory(db, q, limit=fetch_limit)
         elif type == "documents":
             results["documents"] = search_service.search_documents(
+                db, q, space_id=space_id, limit=fetch_limit
+            )
+        elif type == "items":
+            results["items"] = search_service.search_items(
                 db, q, space_id=space_id, limit=fetch_limit
             )
         else:
