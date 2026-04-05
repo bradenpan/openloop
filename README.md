@@ -4,9 +4,9 @@ Personal AI command center. Manage work across multiple spaces, interact with AI
 
 ## Status
 
-**Phases 0–7 complete.** Core backend, agent system, frontend, memory architecture, records/documents/search, space layouts, unified item model, agent builder, sub-agent delegation, steering, automations, polish, backup, and E2E tests all built and reviewed. **Phase 8+ (Autonomous Agent Operations) in planning** — see [AUTONOMOUS-AGENTS.md](AUTONOMOUS-AGENTS.md).
+**Phases 0–11 complete.** Core backend, agent system, frontend, memory architecture, records/documents/search, space layouts, unified item model, agent builder, sub-agent delegation, steering, automations, autonomous agent operations (kill switch, compaction, approval queues, fan-out, crash recovery), polish, backup, and E2E tests all built and reviewed. **Phase 12–14 (Integrations: Google Calendar, Gmail, Integration Builder) next** — see [INTEGRATION-CAPABILITIES.md](INTEGRATION-CAPABILITIES.md) and [IMPLEMENTATION-PLAN-PHASE12.md](IMPLEMENTATION-PLAN-PHASE12.md).
 
-See [PROGRESS.md](PROGRESS.md) for detailed build status and [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md) for the full task breakdown. See [guide.md](guide.md) for usage documentation.
+See [PROGRESS.md](PROGRESS.md) for detailed build status. See [guide.md](guide.md) for usage documentation.
 
 ## Design Documents
 
@@ -14,15 +14,18 @@ See [PROGRESS.md](PROGRESS.md) for detailed build status and [IMPLEMENTATION-PLA
 - **[CAPABILITIES.md](CAPABILITIES.md)** — what the system does (v5, updated with agent intelligence upgrade)
 - **[ARCHITECTURE-PROPOSAL.md](ARCHITECTURE-PROPOSAL.md)** — how it's built (v4, updated with four-tier memory, context safety, and new flows)
 - **[CAPABILITIES-ADDENDUM.md](CAPABILITIES-ADDENDUM.md)** — product-level research report on the agent intelligence capabilities (rationale, user experience descriptions, competitive context, sources)
-- **[IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)** — phase-by-phase build plan (59 tasks across 9 phases)
-- **[AUTONOMOUS-AGENTS.md](AUTONOMOUS-AGENTS.md)** — autonomous agent operations design (Phase 8+, draft)
-- **[IMPLEMENTATION-PLAN-PHASE8.md](IMPLEMENTATION-PLAN-PHASE8.md)** — Phase 8 implementation plan
+- **[IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)** — phase-by-phase build plan, Phases 0–7
+- **[IMPLEMENTATION-PLAN-PHASE8.md](IMPLEMENTATION-PLAN-PHASE8.md)** — Phases 8–11 (autonomous agent operations)
+- **[AUTONOMOUS-AGENTS.md](AUTONOMOUS-AGENTS.md)** — autonomous agent operations design
+- **[INTEGRATION-CAPABILITIES.md](INTEGRATION-CAPABILITIES.md)** — Google Calendar, Gmail, and Integration Builder capability spec
+- **[IMPLEMENTATION-PLAN-PHASE12.md](IMPLEMENTATION-PLAN-PHASE12.md)** — Phases 12–14 (integrations)
+- **[FUTURE-CAPABILITIES.md](FUTURE-CAPABILITIES.md)** — long-term roadmap (external task sources, model adapters)
 
 ## Key Concepts
 
 - **Spaces** — containers for related work. Can be a project, knowledge base, CRM, or simple task list.
 - **Items** — all tracked work. Tasks (things to do, with done/not-done) and records (entities to track, like contacts or leads). Viewable as list, kanban, or table.
-- **Odin** — always-visible AI front door (Haiku). Routes you to the right agent and handles simple actions.
+- **Odin** — always-visible AI front door (Haiku). Routes you to the right agent (selecting the appropriate model based on task complexity) and handles simple actions.
 - **Agents** — configured AIs with specific roles, tools, and permissions scoped to spaces. Each agent is a domain specialist (Recruiting Agent, Code Agent, Research Agent, etc.). Created through the Agent Builder.
 - **Conversations** — persistent chat threads with agents. Context survives across sessions via four-tier memory and conversation summaries.
 - **Documents** — uploaded files, scanned directories, or synced Google Drive folders. Text extracted and indexed for search.

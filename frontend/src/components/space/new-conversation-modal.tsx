@@ -16,6 +16,16 @@ const MODEL_OPTIONS = [
   { value: 'haiku', label: 'Haiku' },
 ];
 
+const MODEL_DESCRIPTIONS: Record<string, string> = {
+  '': "Uses the agent's configured model (usually Sonnet). Right for most work.",
+  sonnet:
+    "Best for most work \u2014 domain conversations, task management, research, content. Handles 80% of what you'll ask. Not ideal when getting it wrong on the first try is costly.",
+  opus:
+    "Best for complex work \u2014 planning across multiple spaces, deep research, architecture decisions, autonomous goals. Thinks deeper, gets complex things right the first time. Slower, ~1.7\u00d7 Sonnet's usage cost.",
+  haiku:
+    "Best for quick questions \u2014 'what's on my plate today?', status checks, simple lookups. Fast, light on usage. Not for anything requiring judgment or multi-step reasoning.",
+};
+
 export function NewConversationModal({ open, onClose, spaceId }: NewConversationModalProps) {
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
@@ -99,6 +109,9 @@ export function NewConversationModal({ open, onClose, spaceId }: NewConversation
               </option>
             ))}
           </select>
+          {MODEL_DESCRIPTIONS[modelOverride] && (
+            <p className="text-xs text-muted mt-1">{MODEL_DESCRIPTIONS[modelOverride]}</p>
+          )}
         </div>
 
         <div className="flex justify-end gap-2 pt-2">

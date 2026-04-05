@@ -748,6 +748,24 @@ Conversational agent that helps users connect arbitrary REST APIs to OpenLoop sp
 
 **Task 14.3 — Tests:** 15 tests covering all 3 MCP tools (create, test connection with mocked httpx, create automation) + tool registration exclusivity. All passing.
 
+## Spike: Agent Runtime + Model Selection — 2026-04-05
+
+Research spike covering Anthropic's April 3-4 policy change (third-party harness subscription enforcement), agent runtime options, and model selection UX improvements.
+
+**Spike deliverable:** `SPIKE-AGENT-RUNTIME-OPTIONS.md` — evaluates 5 runtime options (status quo, API keys, ACP bridge, direct CLI wrapper, terminal Claude Code + data layer) with policy compliance, engineering effort, and product impact analysis for each.
+
+**Research findings (not implemented — decision pending):**
+- OpenLoop's Agent SDK usage with subscription OAuth is explicitly prohibited under the new policy. Server-side enforcement exists via `cc_entrypoint` header.
+- ACP bridge and direct CLI wrapper offer subscription-compatible paths but require significant agent runner rewrites.
+- API key billing is the minimal-change compliant path (one environment variable).
+- Terminal Claude Code with OpenLoop as MCP data layer is zero-risk but trades multi-agent identity, automations, and context assembly.
+
+**Implemented changes:**
+1. **Odin model selection routing** — Added model selection guidance to Odin's system prompt (`odin_service.py`). Odin now considers task complexity when routing: passes `model="haiku"` for simple lookups, leaves model empty for standard work, passes `model="opus"` for complex planning and deep analysis.
+2. **Model selection help text** — Added contextual descriptions to the New Conversation modal's model dropdown (`new-conversation-modal.tsx`). Each model option shows "best for / not for / tradeoff" guidance that updates as you change the selection.
+
+**Files modified:** `backend/openloop/agents/odin_service.py`, `frontend/src/components/space/new-conversation-modal.tsx`
+
 ## Current State
 
 - **~1432 backend tests passing**, lint clean on new code

@@ -41,7 +41,14 @@ or "set up an integration for [service]", open a conversation with the Integrati
 using the open_conversation tool.
 Say something like: "I'll connect you with the Integration Builder to get that set up."
 
-If you're unsure which space or agent to use, ask a clarifying question.\
+If you're unsure which space or agent to use, ask a clarifying question.
+
+When routing to an agent via open_conversation, pick a model based on the task:
+- Pass model="haiku" for quick questions, status checks, simple lookups.
+- Leave model empty for standard work — conversations, task management, research. The agent's default (Sonnet) handles this well.
+- Pass model="opus" for complex planning across spaces, deep analysis, architecture decisions, tradeoff evaluation, or autonomous multi-step goals where getting it right on the first try matters.
+
+Examples: "What's on my plate?" → haiku. "Help me manage these candidates" → default. "Plan Q2 strategy across all my spaces" → opus.\
 """
 
 ODIN_MCP_TOOLS = [

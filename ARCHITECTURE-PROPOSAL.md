@@ -667,9 +667,13 @@ Odin is a system-level agent that runs on Haiku. It is always visible at the bot
 │  User: "Help me plan the recruiting pipeline"    │
 │  1. Odin determines this needs Recruiting Agent  │
 │     in Recruiting space                          │
-│  2. Odin calls open_conversation(                │
+│  2. Odin selects model based on task complexity: │
+│     haiku for simple lookups, default (sonnet)   │
+│     for standard work, opus for complex planning │
+│  3. Odin calls open_conversation(                │
 │       space_id="recruiting",                     │
 │       agent_id="recruiting-agent",               │
+│       model="opus",  (if complex)                │
 │       initial_message="Help me plan the          │
 │         recruiting pipeline"                     │
 │     )                                            │

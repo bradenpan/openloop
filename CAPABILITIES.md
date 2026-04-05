@@ -133,7 +133,9 @@ You type whatever you want in natural language:
 
 Odin runs on **Haiku** by default for fast responses (~1-2 seconds). It handles simple actions directly (creating tasks, answering board state questions, routing to conversations) and delegates complex work to space-scoped agents.
 
-When you want to interact directly with a more capable model, you either:
+When Odin routes you to an agent, it considers task complexity and selects the appropriate model: Haiku for simple lookups, the agent's default (usually Sonnet) for standard work, or Opus for complex planning and deep analysis. You can also request a specific model explicitly.
+
+You can also bypass Odin and interact with agents directly:
 1. **Open a conversation** in a space (click New Conversation, pick agent, pick model) — one click, no Odin needed
 2. **Click an existing conversation** in the sidebar — instant, already in the model you chose
 3. **Tell Odin** "open a conversation with Opus in OpenLoop" — Odin routes you there
@@ -159,7 +161,7 @@ A conversation is a persistent, named chat thread with an agent, scoped to a spa
 - Can create/update items (tasks, records) as a side effect of the conversation
 - Multiple conversations can be active simultaneously within a space
 
-**Model selection:** Each agent has a default model (typically Sonnet). You can override the model per conversation (e.g., use Opus for a complex planning session). Odin may suggest upgrading when a task would benefit from a more capable model, but you always decide.
+**Model selection:** Each agent has a default model (typically Sonnet). You can override the model per conversation (e.g., use Opus for a complex planning session). Odin selects the model when routing based on task complexity, and the New Conversation modal provides guidance on when to use each model.
 
 The key insight: **conversations are where most work happens**. Items (list view, board, table) track the state of work. Conversations are where work gets planned, discussed, and driven forward.
 

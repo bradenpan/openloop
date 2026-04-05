@@ -1,9 +1,13 @@
 {
   "permissions": {
     "allow": [
+      "Read",
+      "Grep",
+      "Glob",
       "Edit",
       "Write",
       "Bash(cd *)",
+      "Bash(ls *)",
       "Bash(make *)",
       "Bash(python *)",
       "Bash(pip *)",
