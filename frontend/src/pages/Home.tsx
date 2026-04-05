@@ -14,6 +14,7 @@ import { WelcomeCard } from '../components/home/welcome-card';
 import { CreateSpaceModal } from '../components/home/create-space-modal';
 import { TokenSparkline } from '../components/home/token-sparkline';
 import { CalendarWidget } from '../components/home/calendar-widget';
+import { EmailWidget } from '../components/home/email-widget';
 
 function HomeSkeleton() {
   return (
@@ -136,6 +137,11 @@ export default function Home() {
       {/* Calendar — only renders when connected */}
       <section>
         <CalendarWidget />
+      </section>
+
+      {/* Email — only renders when connected */}
+      <section>
+        <EmailWidget />
       </section>
 
       {/* Activity Feed */}

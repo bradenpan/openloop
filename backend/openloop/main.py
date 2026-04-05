@@ -145,6 +145,7 @@ from backend.openloop.api.routes.audit import router as audit_router  # noqa: E4
 from backend.openloop.api.routes.automations import router as automations_router  # noqa: E402
 from backend.openloop.api.routes.behavioral_rules import router as behavioral_rules_router  # noqa: E402
 from backend.openloop.api.routes.calendar import router as calendar_router  # noqa: E402
+from backend.openloop.api.routes.email import router as email_router  # noqa: E402
 from backend.openloop.api.routes.conversations import router as conversations_router  # noqa: E402
 from backend.openloop.api.routes.data_sources import router as data_sources_router  # noqa: E402
 from backend.openloop.api.routes.documents import router as documents_router  # noqa: E402
@@ -175,6 +176,7 @@ app.include_router(audit_router)
 app.include_router(automations_router)
 app.include_router(behavioral_rules_router)
 app.include_router(calendar_router)
+app.include_router(email_router)
 app.include_router(conversations_router)
 app.include_router(data_sources_router)
 app.include_router(events_router)

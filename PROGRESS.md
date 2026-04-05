@@ -677,13 +677,84 @@ Full Google Calendar integration: agents read/write events, calendar data in con
 **Files created:** 12 new files (google_auth.py, gcalendar_client.py, calendar_integration_service.py, integrations routes/schemas, calendar routes/schemas, Alembic migration, 3 frontend components, 2 test files)
 **Files modified:** ~20 files (models.py, enums.py, data_source_service.py, automation_service.py, mcp_tools.py, permission_enforcer.py, context_assembler.py, agent_runner.py, automation_scheduler.py, main.py, sidebar.tsx, App.tsx, widget-registry.tsx, register_automation_templates.py, 3 doc files)
 
+## Phase 13: Gmail Integration — COMPLETE
+
+Full Gmail integration: agents read/triage email, draft replies, surface inbox status. Users see email dashboard on Home and dedicated page.
+
+**Task 13.1 — Gmail API client:**
+- `gmail_client.py` — 14 public functions, MIME parsing (text/plain preference, HTML fallback with tag stripping), base64url decode, draft/reply composition
+- Scope: `gmail.modify` (read + label + archive + draft + send)
+- Same patterns as gcalendar_client: `_retry_api_call`, shared OAuth, module-level functions
+
+**Task 13.2 — Email cache + triage labels:**
+- `email_integration_service.py` — setup, sync, cache queries, label/archive/read operations, draft/send passthrough
+- 5 triage labels: `OL/Needs Response`, `OL/FYI`, `OL/Follow Up`, `OL/Waiting`, `OL/Agent Processed`
+- Sync failure tracking with 3-strike notification threshold (same as calendar)
+- Stale cache reconciliation: messages no longer in inbox have INBOX label removed
+- Email sync added to `automation_scheduler.py` alongside calendar sync
+
+**Task 13.3 — Email MCP tools + context assembly:**
+- 10 MCP tools: list_emails, get_email (live body fetch), get_email_headers, label_email, archive_email, mark_email_read, draft_email, send_email, send_reply, get_inbox_stats
+- Permission mappings: read=always, edit=always (low-risk), create=always (drafts), execute=requires approval (send)
+- `_build_email_section()` in context assembler — inbox summary, 300-token budget
+- Conditional tool loading in all 4 builder functions
+
+**Task 13.4 — Email API routes:**
+- 13 endpoints under `/api/v1/email/`: auth-status, messages CRUD, label/archive/read, reply, drafts, sync, stats, setup, setup-labels
+- Pydantic schemas with ORM compat
+
+**Task 13.5 — Email frontend:**
+- Home dashboard email widget (grouped by triage label, conditional on auth)
+- `/email` page with search, sync button, grouped messages, quick actions (archive, mark read)
+- Space email widget (compact, 5 messages)
+- Sidebar "Email" nav item (conditional on connection)
+- `EMAIL_FEED` widget type in registry and enum
+
+**Task 13.6 — Tests:** 81 new tests across 4 files (email service 19, API 15, MCP 19, gmail client MIME parsing 13, integration builder 15). Total: 1432 passing.
+
+**Task 13.7 — Templates + docs:**
+- Email Triage automation template (every 2h business hours, disabled by default)
+- Daily Task Review updated to reference email
+- ARCHITECTURE-PROPOSAL.md, CAPABILITIES.md (#28 → [BUILT]), INTEGRATION-CAPABILITIES.md updated
+
+**Review findings fixed (1 round):**
+- C1: Frontend archive/markRead passed UUID instead of gmail_message_id — fixed
+- C2: `_parse_date` missing 'Z' suffix handling — added `.replace("Z", "+00:00")`
+- C3: Integration Builder tools missing from permission enforcer `_MCP_TOOL_MAP` — added
+- C4: SSRF in `test_api_connection` — added private IP/localhost/metadata blocking
+- I1: `get_inbox_stats` in gmail_client made N+1 API calls — simplified to INBOX label only
+- I2: Hardcoded "cron" string — replaced with `AutomationTriggerType.CRON`
+- I3: Stale cache messages not reconciled — added INBOX label removal for missing messages
+- I4: SKILL.md referenced nonexistent web search tool — clarified instructions
+- M1: Stats label key mismatch in frontend widget — fixed to use `OL/` prefix
+
+**Files created:** 11 new files (gmail_client.py, email_integration_service.py, email routes/schemas, 3 frontend components, SKILL.md, 4 test files)
+**Files modified:** ~15 files (mcp_tools.py, permission_enforcer.py, context_assembler.py, agent_runner.py, automation_scheduler.py, main.py, odin_service.py, sidebar.tsx, App.tsx, widget-registry.tsx, Home.tsx, enums.py, register_automation_templates.py, register_skills.py, 3 doc files)
+
+## Phase 14: Integration Builder Agent — COMPLETE
+
+Conversational agent that helps users connect arbitrary REST APIs to OpenLoop spaces using existing primitives.
+
+**Task 14.1 — Integration Builder MCP tools:**
+- 3 exclusive tools: `create_api_data_source`, `test_api_connection`, `create_sync_automation`
+- SSRF protection on test_api_connection (blocks private IPs, localhost, metadata endpoints)
+- Tool builder dispatch added to both `_build_mcp_server` and `_build_mcp_server_by_name`
+- Permission enforcer mappings for all 3 tools
+
+**Task 14.2 — Integration Builder skill:**
+- `agents/skills/integration-builder/SKILL.md` — 9-step integration workflow, security rules, limitations
+- Auto-discovered by `register_skills.py` (scans agents/skills/ directories)
+- Odin routing added for integration requests
+
+**Task 14.3 — Tests:** 15 tests covering all 3 MCP tools (create, test connection with mocked httpx, create automation) + tool registration exclusivity. All passing.
+
 ## Current State
 
-- **~1315 backend tests passing**, lint clean on new code
+- **~1432 backend tests passing**, lint clean on new code
 - **63 Playwright E2E tests passing** (new comprehensive suite) + 39 prior component tests
 - **OpenAPI spec freshly regenerated** from current routes
-- Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes, permission inheritance with no-escalation enforcement, parallel sub-agent delegation with per-run caps, cascade termination/pause/resume, delegation monitoring MCP tools, audit-logged sub-agent completions, autonomous crash recovery with task list resumption, approval queue lifecycle with per-agent expiry and steering re-injection, structured run summaries with morning brief dashboard, **Google Calendar integration** (shared OAuth, 7 MCP tools, 15-min sync, cross-space data sources, per-space exclusion, calendar context in working memory, meeting prep automation template)
-- Frontend: dashboard with skeleton loading + backup reminder + morning brief, space view (widget-based layout), conversation panel with stream_end support, agent management with max_spawn_depth + approval_timeout_hours, search modal, document panel + viewer, Space Settings (tabbed: layout editor + memory health + history), task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, toast notifications, keyboard shortcuts + help overlay, browser tab badge, page transitions, empty states, 3 palettes × 2 themes, Odin SSE filtering with race-condition handling, accessible sidebar/panel, agent dropdown fix, type-safe API calls, local column toggle, validated localStorage, aria-labels, delegation tree sidebar, nested sub-agents in Active Agents panel, **Calendar** (home widget, /calendar page with sync + expandable events, space widget, conditional sidebar nav)
+- Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes, permission inheritance with no-escalation enforcement, parallel sub-agent delegation with per-run caps, cascade termination/pause/resume, delegation monitoring MCP tools, audit-logged sub-agent completions, autonomous crash recovery with task list resumption, approval queue lifecycle with per-agent expiry and steering re-injection, structured run summaries with morning brief dashboard, **Google Calendar integration** (shared OAuth, 7 MCP tools, 15-min sync, cross-space data sources, per-space exclusion, calendar context in working memory, meeting prep automation template), **Gmail integration** (10 MCP tools, 15-min sync, triage labels, email context in working memory, email triage automation template), **Integration Builder agent** (3 exclusive MCP tools, SKILL.md, Odin routing, SSRF protection)
+- Frontend: dashboard with skeleton loading + backup reminder + morning brief, space view (widget-based layout), conversation panel with stream_end support, agent management with max_spawn_depth + approval_timeout_hours, search modal, document panel + viewer, Space Settings (tabbed: layout editor + memory health + history), task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, toast notifications, keyboard shortcuts + help overlay, browser tab badge, page transitions, empty states, 3 palettes × 2 themes, Odin SSE filtering with race-condition handling, accessible sidebar/panel, agent dropdown fix, type-safe API calls, local column toggle, validated localStorage, aria-labels, delegation tree sidebar, nested sub-agents in Active Agents panel, **Calendar** (home widget, /calendar page with sync + expandable events, space widget, conditional sidebar nav), **Email** (home widget with triage grouping, /email page with search + quick actions, space widget, conditional sidebar nav)
 
 ---
 
@@ -712,6 +783,9 @@ Full Google Calendar integration: agents read/write events, calendar data in con
 21. **Heartbeat cron expression controls working hours** — no separate working-hours feature needed. `*/30 9-17 * * 1-5` = business hours only.
 22. **Permission inheritance, not narrowing** — sub-agents inherit the parent's full permissions by default. No depth-based stripping. The only hard rule: child can never exceed parent scope (no-escalation invariant). Delegation walks up to the root coordinator to anchor permissions, preventing escalation when a sub-agent has broader DB permissions than what it inherited. `max_spawn_depth` limits recursion depth, not permissions.
 23. **Cross-space data sources use nullable space_id** — system-level DataSources (Calendar, Email) have `space_id=null`. The Space relationship cascade changed from `delete-orphan` to `delete` + `passive_deletes=True` so system sources survive space deletions. Per-space opt-out via `space_data_source_exclusions` table.
-24. **Shared OAuth with incremental authorization** — `google_auth.py` manages a scope registry. Each integration registers scopes on import. `include_granted_scopes=true` preserves existing grants when adding new scopes. Single token file covers Drive + Calendar (+ Gmail later).
+24. **Shared OAuth with incremental authorization** — `google_auth.py` manages a scope registry. Each integration registers scopes on import. `include_granted_scopes=true` preserves existing grants when adding new scopes. Single token file covers Drive + Calendar + Gmail.
 25. **Integration sync is not agent work** — Calendar/email sync runs as a direct function call in the automation scheduler loop (every 15 minutes), not via `delegate_background`. No LLM reasoning needed for API-to-DB sync. Failure counter with 3-strike notification threshold.
-26. **Context budget increased for integrations** — Total context 8,000→8,800 tokens (500 calendar + 300 email placeholder). Odin 4,000→4,800. Calendar and email are separate END sections, not carved from existing board/todo budget.
+26. **Context budget increased for integrations** — Total context 8,000→8,800 tokens (500 calendar + 300 email). Odin 4,000→4,800. Calendar and email are separate END sections, not carved from existing board/todo budget.
+27. **Email bodies not cached** — Only headers + snippet cached in `email_cache` table. Full email bodies fetched live from Gmail API via `get_email()` MCP tool. Avoids storing sensitive email content in SQLite.
+28. **Email send requires approval** — `send_email` and `send_reply` mapped to `("gmail", "execute")` permission. Default: requires approval. Users can upgrade to "always allowed" per-agent as trust builds. Drafts don't require approval.
+29. **Integration Builder uses existing primitives** — No dynamic code execution, no runtime plugin loading. Configures DataSource + Automation + WebFetch + Items/Memory. SSRF protection blocks private IPs, localhost, and metadata endpoints in `test_api_connection`.

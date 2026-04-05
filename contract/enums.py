@@ -155,6 +155,7 @@ class WidgetType(StrEnum):
     DATA_TABLE = "data_table"
     CONVERSATIONS = "conversations"
     CALENDAR_EVENTS = "calendar_events"
+    EMAIL_FEED = "email_feed"
     CHART = "chart"
     STAT_CARD = "stat_card"
     MARKDOWN = "markdown"

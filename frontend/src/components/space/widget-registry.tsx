@@ -6,6 +6,7 @@ import { TableView } from './table-view';
 import { ConversationSidebar } from './conversation-sidebar';
 import { DocumentPanel } from './document-panel';
 import { CalendarEventsWidget } from './calendar-events-widget';
+import { EmailFeedWidget } from './email-feed-widget';
 
 // Standard widget props that every widget receives
 export interface WidgetProps {
@@ -128,6 +129,7 @@ const registry: Record<string, ComponentType<WidgetProps>> = {
   conversations: ConversationsSidebarWidget,
   document_panel: DocumentPanelWidget,
   calendar_events: CalendarEventsWidget,
+  email_feed: EmailFeedWidget,
   // Extended types render placeholders
   chart: PlaceholderWidget,
   stat_card: PlaceholderWidget,

@@ -1,6 +1,6 @@
 # OpenLoop: Integration Capabilities (v1)
 
-**Status:** Approved — Phase 12 (Calendar) built. Phase 13 (Gmail) and Phase 14 (Integration Builder) pending. Implementation plan in [IMPLEMENTATION-PLAN-PHASE12.md](IMPLEMENTATION-PLAN-PHASE12.md).
+**Status:** Approved — Phase 12 (Calendar), Phase 13 (Gmail), and Phase 14 (Integration Builder) all built. Implementation plan in [IMPLEMENTATION-PLAN-PHASE12.md](IMPLEMENTATION-PLAN-PHASE12.md).
 **Companion documents:** CAPABILITIES.md (core capabilities), ARCHITECTURE-PROPOSAL.md (system architecture), FUTURE-CAPABILITIES.md (long-term roadmap)
 
 ---
@@ -619,6 +619,27 @@ Resolved during implementation — deviations from the original spec:
 5. **FTS5 index for items:** `items_fts` virtual table added alongside `calendar_events_fts` during Phase 12 to enable unified search across items, calendar events, conversations, and memory.
 6. **Sync implementation:** Uses Google Calendar's incremental sync (syncToken) rather than full re-fetch. Initial sync fetches the configured window; subsequent syncs use the stored syncToken for efficient delta updates.
 7. **Gmail deferred to Phase 13.** `email_cache` table schema defined but not created. Gmail MCP tools, sync service, and frontend deferred.
+
+## Implementation Notes (Phase 13 Build)
+
+Resolved during implementation — deviations from the original spec:
+
+1. **Gmail API client** (`gmail_client.py`) built with full MIME parsing (plain text + HTML extraction), draft creation with proper MIME encoding, label management (add/remove/create), and send/reply operations. Uses shared `google_auth.py` for OAuth with `gmail.modify` scope.
+2. **Email cache with headers-only storage.** `email_cache` table stores message metadata, headers, snippet, and labels. Full email bodies are fetched live via `get_email` MCP tool — never stored in the database. This avoids storing sensitive email content in SQLite.
+3. **10 MCP tools with permission mappings.** `list_emails`, `get_email`, `get_email_headers`, `label_email`, `archive_email`, `mark_email_read`, `draft_email` are always-allowed. `send_email` and `send_reply` require approval. `get_inbox_stats` is always-allowed. Permission enforcer updated with email resource mappings.
+4. **Email triage label system.** OL/ prefix labels (`OL/Needs Response`, `OL/FYI`, `OL/Follow Up`, `OL/Waiting`, `OL/Agent Processed`) created in Gmail via `POST /api/v1/email/setup-labels`. Agents apply labels during triage. Email widget groups by these labels.
+5. **Email context in working memory.** ~300 token budget in the working memory tier (end section, high attention). Shows unread count, needs-response count, and recent emails requiring attention. Included when gmail data source is active and not excluded for the space.
+6. **Frontend surfaces:** Home dashboard email widget (grouped by OL/ triage labels), dedicated `/email` page with full inbox triage dashboard, space email feed widget (`email_feed` widget type). All click-through to Gmail for reading/replying.
+7. **Email Triage automation template.** Cron: `0 8-18/2 * * 1-5` (every 2 hours during business hours, weekdays). Disabled by default. Processes unread emails, categorizes, applies OL/ labels, creates tasks for urgent items.
+8. **Daily Task Review updated** to include email inbox summary alongside calendar and task data.
+
+## Implementation Notes (Phase 14 Build)
+
+Resolved during implementation:
+
+1. **Integration Builder agent** built as a skill via Agent Builder. Registered at `agents/skills/integration-builder/SKILL.md`. Uses Sonnet model. System prompt covers API research, auth guidance, data source creation, testing, and documentation.
+2. **3 exclusive MCP tools:** `create_api_data_source` (registers API data source with connection config), `test_api_connection` (fetches from API and returns sample response), `create_sync_automation` (creates cron automation for periodic data sync). These are convenience wrappers over existing primitives.
+3. **Odin routing.** Odin recognizes API connection requests and routes to the Integration Builder agent in the relevant space. No new Odin MCP tools needed — uses existing `open_conversation` with the Integration Builder agent.
 
 ---
 

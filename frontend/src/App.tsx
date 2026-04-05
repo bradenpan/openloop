@@ -6,6 +6,7 @@ import Settings from './pages/Settings';
 import Agents from './pages/Agents';
 import Automations from './pages/Automations';
 import Calendar from './pages/Calendar';
+import Email from './pages/Email';
 
 export default function App() {
   return (
@@ -14,6 +15,7 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route index element={<Home />} />
           <Route path="/calendar" element={<Calendar />} />
+          <Route path="/email" element={<Email />} />
           <Route path="/space/:spaceId" element={<Space />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="/agents" element={<Agents />} />

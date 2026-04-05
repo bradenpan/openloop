@@ -35,6 +35,12 @@ If the user asks to create an agent, set up a new agent, or says "I need an agen
 open a conversation with the Agent Builder agent using the open_conversation tool.
 Say something like: "I'll connect you with the Agent Builder to set that up."
 
+If the user asks to connect an API, set up an integration, pull data from an external service,
+or says things like "connect my [X] data", "integrate [service]", "I want to pull data from [API]",
+or "set up an integration for [service]", open a conversation with the Integration Builder agent
+using the open_conversation tool.
+Say something like: "I'll connect you with the Integration Builder to get that set up."
+
 If you're unsure which space or agent to use, ask a clarifying question.\
 """
 

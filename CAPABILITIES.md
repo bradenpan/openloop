@@ -1,6 +1,6 @@
 # OpenLoop: Capability Specification (DRAFT v6)
 
-**Status:** Active — P0, P1, P0-Autonomy, P1-Autonomy, and P2-Autonomy fully implemented. P2 partially complete (Google Calendar integration built in Phase 12). See build status markers on each capability.
+**Status:** Active — P0, P1, P0-Autonomy, P1-Autonomy, and P2-Autonomy fully implemented. P2 substantially complete: Google Calendar (Phase 12), Gmail integration (Phase 13), and Integration Builder agent (Phase 14) all built. See build status markers on each capability.
 
 ---
 
@@ -391,13 +391,13 @@ Accessible from Home or Settings. Shows:
 ### P2 — Valuable, build when core is solid
 
 27. **Calendar integration** [BUILT] — Phase 12: agents read/write events via 7 MCP tools (list, get, create, update, delete, find_free_time, list_calendars). Event cache syncs every 15 min via cron. Calendar widget on Home dashboard + dedicated Calendar page with day/week navigation. Cross-space data source (space_id=null) with per-space exclusion. Shared OAuth with incremental scope authorization. See INTEGRATION-CAPABILITIES.md.
-28. **Email integration** [NOT BUILT] — read/triage inbox, draft replies, sort with agent-managed labels. Dashboard-style widget grouped by triage labels, click-through to Gmail. Dedicated Email page. See INTEGRATION-CAPABILITIES.md.
+28. **Email integration** [BUILT] — Phase 13: agents read/triage/draft via 10 MCP tools (list, get, get_headers, label, archive, mark_read, draft, send, send_reply, get_inbox_stats). Send requires approval. Email header cache syncs every 15 min via cron. Triage label system (OL/ prefix: Needs Response, FYI, Follow Up, Waiting, Agent Processed). Email widget on Home dashboard + dedicated Email page. Space email feed widget. Cross-space data source (space_id=null). Email Triage automation template (disabled by default). See INTEGRATION-CAPABILITIES.md.
 29. **Event-based automations** [NOT BUILT] — triggered by calendar events, new emails, data source updates. Requires event bus. Deferred — 15-min cron sync is the v1 approach for calendar. Event-driven triggers planned separately.
-30. **Morning briefing** [PARTIAL] — automation template exists (disabled by default). Morning brief API and UI component built (Phase 11). Calendar data now available for briefings via Phase 12 MCP tools. Full briefing with email summary depends on Gmail integration (Phase 13). Meeting Prep automation template added in Phase 12.
+30. **Morning briefing** [PARTIAL] — automation template exists (disabled by default). Morning brief API and UI component built (Phase 11). Calendar data available for briefings via Phase 12 MCP tools. Email inbox stats and triage summary now available via Phase 13 email MCP tools. Daily Task Review template updated to include email summary. Meeting Prep automation template added in Phase 12.
 31. **Meeting prep automation** [PARTIAL] — cron-based Meeting Prep template added in Phase 12.4b. Runs on a schedule to detect upcoming meetings without briefs and dispatch prep agents. Event-triggered version (auto-fire when new meeting appears) deferred to event-based automations (#29).
 32. **Follow-up tracking** [PARTIAL] — automation template exists (disabled by default).
 33. **Stale work detection** [PARTIAL] — automation template exists (disabled by default).
-34. **API data source integrations** [NOT BUILT] — connect Garmin, bank feeds, and other APIs to spaces. To be handled by the Integration Builder agent. See INTEGRATION-CAPABILITIES.md.
+34. **API data source integrations** [PARTIAL] — connect Garmin, bank feeds, and other APIs to spaces. Integration Builder agent (Phase 14) provides the conversational setup flow. Extended widget library (#41) needed for full data visualization. See INTEGRATION-CAPABILITIES.md.
 35. **Configurable autonomy** [BUILT] — three tiers (interactive/supervised/autonomous) with per-agent settings for max_spawn_depth, approval_timeout_hours, heartbeat configuration.
 36. **Subspaces** [NOT BUILT] — nested spaces with context inheritance. `parent_space_id` in schema for future use.
 37. **Memory lifecycle management** [BUILT] — hard caps per namespace with lowest-scored eviction. Auto-archival of superseded facts after 90 days. Periodic LLM-driven consolidation: merges related facts, flags contradictions, suggests archival — surfaces to user for approval.
@@ -405,7 +405,7 @@ Accessible from Home or Settings. Shows:
 39. **Retrieval scoring** [BUILT] — context assembly scores facts by importance, recency, and access frequency (Ebbinghaus-inspired decay). Frequently-used, high-importance facts stay prominent regardless of age.
 40. **Multi-step workflow tracking** [BUILT] — background tasks track current step, total steps, and step results. Parent-child task hierarchies for sub-agent delegation. Failed tasks show exactly where they stopped, enabling resume from failure point.
 41. **Extended widget library** [NOT BUILT] — chart/graph widgets (connected to data sources), stat cards, markdown/notes panels, data feed widgets. Depends on API data source integrations. Enables agent-designed spaces like a health dashboard with Garmin charts and bloodwork tracking.
-42. **Integration Builder agent** [NOT BUILT] — conversational agent that helps users connect arbitrary REST APIs (API key auth) to spaces. Researches APIs, walks through setup, creates data sources + automations + widgets. See INTEGRATION-CAPABILITIES.md.
+42. **Integration Builder agent** [BUILT] — Phase 14: conversational agent (built via Agent Builder, registered as skill) that helps users connect arbitrary REST APIs (API key auth) to spaces. 3 exclusive MCP tools (create_api_data_source, test_api_connection, create_sync_automation). Researches APIs, walks through setup, creates data sources + automations + widgets. Odin routes to Integration Builder for API connection requests. See INTEGRATION-CAPABILITIES.md.
 
 ### P3 — Future
 

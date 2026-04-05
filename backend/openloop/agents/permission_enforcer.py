@@ -253,6 +253,21 @@ _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
     "create_calendar_event": ("google_calendar", Operation.CREATE),
     "update_calendar_event": ("google_calendar", Operation.EDIT),
     "delete_calendar_event": ("google_calendar", Operation.DELETE),
+    # Email tools
+    "list_emails": ("gmail", Operation.READ),
+    "get_email": ("gmail", Operation.READ),
+    "get_email_headers": ("gmail", Operation.READ),
+    "get_inbox_stats": ("gmail", Operation.READ),
+    "label_email": ("gmail", Operation.EDIT),
+    "archive_email": ("gmail", Operation.EDIT),
+    "mark_email_read": ("gmail", Operation.EDIT),
+    "draft_email": ("gmail", Operation.CREATE),
+    "send_email": ("gmail", Operation.EXECUTE),
+    "send_reply": ("gmail", Operation.EXECUTE),
+    # Integration Builder tools (Phase 14)
+    "create_api_data_source": ("openloop-integrations", Operation.CREATE),
+    "test_api_connection": ("openloop-integrations", Operation.EXECUTE),
+    "create_sync_automation": ("openloop-integrations", Operation.CREATE),
 }
 
 

@@ -1,6 +1,6 @@
 # OpenLoop: Architecture Proposal (DRAFT v5)
 
-**Status:** Active — architecture implemented through Phase 12. All layers operational. Phase 12 added Google Calendar integration (cross-space data source, MCP tools, sync service, frontend).
+**Status:** Active — architecture implemented through Phase 14. All layers operational. Phase 12 added Google Calendar integration. Phase 13 added Gmail integration (email triage, 10 MCP tools, header cache, frontend). Phase 14 added Integration Builder agent (3 exclusive MCP tools, skill-based).
 **Companion documents:** CAPABILITIES.md (what the system does), INTEGRATION-CAPABILITIES.md (calendar, email, and Integration Builder)
 
 ---
@@ -85,7 +85,7 @@ This means every OpenLoop agent is, at the infrastructure level, a Claude Code s
 
 **What OpenLoop adds on top:**
 - **Multi-agent identity** — Claude Code is one agent in one terminal. OpenLoop runs multiple agents simultaneously, each with a distinct system prompt, tool set, and permission boundary, organized by domain (recruiting, code, health, etc.).
-- **Structured context injection** — Claude Code gets CLAUDE.md files and whatever it reads during a conversation. OpenLoop assembles ~8,800 tokens of curated context before every first message: behavioral rules, conversation summaries, scored facts, live board state, and working memory (calendar events, future email stats) — ranked by importance and ordered for maximum model attention.
+- **Structured context injection** — Claude Code gets CLAUDE.md files and whatever it reads during a conversation. OpenLoop assembles ~8,800 tokens of curated context before every first message: behavioral rules, conversation summaries, scored facts, live board state, and working memory (calendar events, email inbox summary) — ranked by importance and ordered for maximum model attention.
 - **Persistent memory across conversations** — Claude Code's memory is per-project markdown files. OpenLoop has four-tier memory (semantic facts, episodic summaries, procedural rules, working state) with write-time dedup, temporal tracking, scored retrieval, and lifecycle management. An agent on conversation #30 knows decisions from conversation #2.
 - **Work tracking** — items (tasks, records), boards, spaces, CRM pipelines. Agents read and write structured data, not just files.
 - **Permission enforcement** — every tool call goes through a permission layer with per-agent, per-resource, per-operation grants. Claude Code has its own permission model, but OpenLoop adds domain-specific controls (e.g., "this agent can read Drive files but needs approval to edit them").
@@ -226,6 +226,21 @@ POST   /api/v1/calendar/sync              Trigger manual sync
 GET    /api/v1/calendar/free-time          Find available slots (query params: start, end, duration)
 GET    /api/v1/calendar/calendars          List available calendars
 
+# Email (Phase 13) [BUILT]
+GET    /api/v1/email/auth-status           Email auth status
+GET    /api/v1/email/messages              List messages (query params: label, query, unread_only)
+GET    /api/v1/email/messages/{id}         Message detail (headers + body)
+POST   /api/v1/email/messages/{id}/label   Add/remove labels
+POST   /api/v1/email/messages/{id}/archive Archive message
+POST   /api/v1/email/messages/{id}/read    Mark as read
+POST   /api/v1/email/drafts                Create draft
+POST   /api/v1/email/drafts/{id}/send      Send draft
+POST   /api/v1/email/sync                  Trigger manual sync
+GET    /api/v1/email/stats                 Inbox stats (unread counts by label)
+POST   /api/v1/email/setup-labels          Create OL/ triage labels in Gmail
+GET    /api/v1/email/setup                 Setup status + next steps
+GET    /api/v1/email/labels                List Gmail labels
+
 # Integrations auth (Phase 12) [BUILT]
 GET    /api/v1/integrations/auth-status    OAuth status for all integrations (calendar, drive, etc.)
 GET    /api/v1/integrations/auth-url       Get OAuth authorization URL with requested scopes
@@ -271,6 +286,8 @@ Business logic. Stateless functions that operate on the database and coordinate 
 - **CalendarIntegrationService** [BUILT] — sync logic (incremental via syncToken, 15-min cron cycle), event CRUD (maps to Google Calendar API), free time calculation. Creates/manages the system-level `google_calendar` DataSource record (`space_id=null`).
 - **GoogleAuth** [BUILT] — shared OAuth module (`google_auth.py`). Manages `credentials.json`/`token.json` with incremental scope authorization — adding calendar scopes does not invalidate existing Drive tokens. Used by both `gcalendar_client` and `gdrive_client`.
 - **GCalendarClient** [BUILT] — Google Calendar API client. Handles event list/get/create/update/delete, calendar listing, and sync token management. Uses `GoogleAuth` for credentials.
+- **GmailClient** [BUILT] — Gmail API client (`gmail_client.py`). MIME parsing, draft creation, label management, send/reply. Uses `GoogleAuth` for credentials with `gmail.modify` scope.
+- **EmailIntegrationService** [BUILT] — email sync (header-only cache, bodies fetched live), triage label setup (OL/ prefix), draft management, inbox stats. Creates/manages the system-level `gmail` DataSource record (`space_id=null`).
 - **AutomationService** — CRUD for automation definitions. Runs the cron scheduler (checks every minute for matching automations). Fires matching automations as background tasks. Tracks run history. Event listener for event-based automations (P2).
 - **AutomationScheduler** — background loop within the FastAPI process. Every 60 seconds, checks all enabled cron-based automations against the current time. When matched, creates a background task with the automation's agent + instruction. Lightweight — no external dependencies (no Celery, no Redis). On startup, checks for missed runs during downtime and surfaces notifications. Max concurrent automation sessions configurable (default 3). Automations run in their own concurrency lane, independent of interactive sessions (see Lane-Isolated Concurrency).
 
@@ -568,6 +585,23 @@ delete_calendar_event(event_id)                          # cancel/delete event (
 find_free_time(start, end, duration_minutes)             # find available slots in date range
 list_calendars()                                         # list all calendars the user has access to
 
+# Email operations (Phase 13) [BUILT] — available when gmail data source is active
+list_emails(query?, label?, max_results?)                # search inbox (Gmail search syntax)
+get_email(message_id)                                    # read full email thread
+get_email_headers(message_id)                            # read headers only (faster, for triage)
+label_email(message_id, add_labels?, remove_labels?)     # add/remove labels (for sorting)
+archive_email(message_id)                                # archive (remove from inbox)
+mark_email_read(message_id)                              # mark as read
+draft_email(to, subject, body, reply_to?, cc?, bcc?)     # create draft (does NOT send)
+send_email(draft_id)                                     # send an existing draft (requires approval)
+send_reply(message_id, body)                             # reply to a thread (requires approval)
+get_inbox_stats()                                        # unread count, label counts, oldest unread
+
+# Integration Builder operations (Phase 14) [BUILT] — exclusive to Integration Builder agent
+create_api_data_source(space_id, name, config)           # register an API data source with connection config
+test_api_connection(data_source_id)                      # fetch from API and return sample response
+create_sync_automation(data_source_id, cron, instruction)  # create automation that syncs data from API
+
 # Agent operations (for sub-agent delegation, P1)
 delegate_task(agent_name, instruction, space_id)
 ```
@@ -795,7 +829,7 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │  │                                           ││
 │  │  7. Working memory (live system state)      ││
 │  │     Calendar: next 48h events (~500 tok)   ││
-│  │     Email: inbox summary (Phase 13)        ││
+│  │     Email: inbox summary (~300 tok)        ││
 │  │     Included when system data source is    ││
 │  │     active and not excluded for this space. ││
 │  │     Budget: up to 800 tokens               ││
@@ -829,13 +863,15 @@ Builds the system prompt context injected into new sessions. Manages token budge
 
 **SQLite database** — structured data (items, spaces, conversations, agents, memory, permissions).
 
-**SQLite FTS5 virtual tables** [BUILT] — full-text search indexes shadowing conversation_messages, conversation_summaries, memory_entries, documents, and calendar_events tables. Kept in sync via SQLite triggers. Enables the `search_conversations` MCP tool and global search. Phase 13 will add `email_cache_fts`.
+**SQLite FTS5 virtual tables** [BUILT] — full-text search indexes shadowing conversation_messages, conversation_summaries, memory_entries, documents, calendar_events, and email_cache tables. Kept in sync via SQLite triggers. Enables the `search_conversations` MCP tool and global search.
 
 **Local filesystem** — agent-generated artifacts, verbose logs.
 
 **Google Drive** [BUILT] — primary document storage. Accessed via Google Drive API. Indexed in SQLite for search.
 
-**Google Calendar** [BUILT] — event cache synced every 15 minutes. Agents read/write events via MCP tools. Shared OAuth infrastructure with Drive (incremental scope authorization via `google_auth.py`). Phase 13 adds Gmail via the same pattern.
+**Google Calendar** [BUILT] — event cache synced every 15 minutes. Agents read/write events via MCP tools. Shared OAuth infrastructure with Drive (incremental scope authorization via `google_auth.py`).
+
+**Gmail** [BUILT] — email header cache synced every 15 minutes. Agents read/triage/draft via 10 MCP tools (send requires approval). Triage label system (OL/ prefix). Bodies fetched live, only headers cached. Same shared OAuth infrastructure as Calendar and Drive.
 
 ---
 
@@ -1158,8 +1194,23 @@ calendar_events (cached Google Calendar events, synced every 15 min) [BUILT — 
 ├── created_at
 └── updated_at
 
-email_cache (reserved for Phase 13 — Gmail header cache)
-  — Not yet built. See INTEGRATION-CAPABILITIES.md for planned schema.
+email_cache (Gmail header cache, synced every 15 min) [BUILT — Phase 13]
+├── id (UUID, PK)
+├── gmail_message_id (string, unique — Gmail's message ID)
+├── gmail_thread_id (string — Gmail's thread ID)
+├── subject (string)
+├── from_address (string)
+├── from_name (string)
+├── to_addresses (JSON — [{email, name}])
+├── cc_addresses (JSON)
+├── snippet (string — Gmail's preview snippet)
+├── labels (JSON — ["INBOX", "UNREAD", "OL/Needs Response"])
+├── is_unread (boolean, default true)
+├── received_at (datetime)
+├── gmail_link (string — click-through URL to Gmail)
+├── synced_at (datetime)
+├── created_at (datetime)
+└── updated_at (datetime)
 
 space_data_source_exclusions (per-space opt-out for system-level data sources) [BUILT — Phase 12]
 ├── space_id (FK → spaces, PK component)
@@ -1179,7 +1230,7 @@ summaries_fts         — shadows conversation_summaries.summary
 documents_fts         — shadows documents.title + content_text
 calendar_events_fts   — shadows calendar_events.title + description [BUILT — Phase 12]
 items_fts             — shadows items.title + description [BUILT — Phase 12]
-email_cache_fts       — shadows email_cache.subject + from_name + snippet (Phase 13)
+email_cache_fts       — shadows email_cache.subject + from_name + snippet [BUILT — Phase 13]
 ```
 
 ### Relationships
@@ -1839,7 +1890,7 @@ MIDDLE (lower model attention):
   Global facts:                      ~500 tokens (scored: importance × decay × access)
 
 END (high model attention):
-  Working memory (live state):       ~800 tokens (calendar: next 48h events; email: inbox summary when built)
+  Working memory (live state):       ~800 tokens (calendar: ~500 tokens, next 48h events; email: ~300 tokens, inbox summary)
   Item state:                       ~1500 tokens (fresh, pruned by recency)
 ```
 

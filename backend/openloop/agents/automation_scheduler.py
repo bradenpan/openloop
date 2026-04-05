@@ -12,7 +12,7 @@ import asyncio
 import logging
 from datetime import UTC, datetime, timedelta
 
-from contract.enums import AutomationTriggerType, BackgroundTaskRunType, BackgroundTaskStatus, NotificationType, SOURCE_TYPE_GOOGLE_CALENDAR
+from contract.enums import AutomationTriggerType, BackgroundTaskRunType, BackgroundTaskStatus, NotificationType, SOURCE_TYPE_GMAIL, SOURCE_TYPE_GOOGLE_CALENDAR
 from croniter import croniter
 
 from backend.openloop.agents import concurrency_manager
@@ -202,6 +202,21 @@ async def _run_integration_syncs(db) -> None:
             )
     except Exception as exc:
         logger.error("Calendar integration sync failed: %s", exc, exc_info=True)
+
+    # Email sync
+    try:
+        from backend.openloop.services import email_integration_service
+
+        email_ds = (
+            db.query(DataSource)
+            .filter(DataSource.source_type == SOURCE_TYPE_GMAIL, DataSource.space_id.is_(None))
+            .first()
+        )
+        if email_ds:
+            result = email_integration_service.sync_inbox(db, email_ds.id)
+            logger.info("Email sync: +%d ~%d", result["added"], result["updated"])
+    except Exception as exc:
+        logger.error("Email integration sync failed: %s", exc, exc_info=True)
 
 
 async def _evaluate_heartbeats(db, now_naive: datetime) -> None:

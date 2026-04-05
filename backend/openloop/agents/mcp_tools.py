@@ -20,12 +20,15 @@ from sqlalchemy.orm import Session
 from backend.openloop.database import SessionLocal
 from backend.openloop.services import (
     agent_service,
+    automation_service,
     background_task_service,
     behavioral_rule_service,
     calendar_integration_service,
     conversation_service,
     data_source_service,
     document_service,
+    email_integration_service,
+    gmail_client,
     item_link_service,
     item_service,
     layout_service,
@@ -33,7 +36,7 @@ from backend.openloop.services import (
     search_service,
     space_service,
 )
-from contract.enums import SOURCE_TYPE_GOOGLE_CALENDAR
+from contract.enums import SOURCE_TYPE_API, SOURCE_TYPE_GMAIL, SOURCE_TYPE_GOOGLE_CALENDAR, AutomationTriggerType
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,10 +63,10 @@ def _parse_int(value: str, default: int | None = None) -> int | None:
 
 
 def _parse_date(value: str) -> datetime | None:
-    """Parse an ISO date string. Empty string -> None."""
+    """Parse an ISO date string. Empty string -> None. Handles Google's 'Z' suffix."""
     if not value:
         return None
-    return datetime.fromisoformat(value)
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def _ok(result) -> str:
@@ -1713,6 +1716,203 @@ async def test_agent(
 
 
 # ---------------------------------------------------------------------------
+# Integration Builder-only tools
+# ---------------------------------------------------------------------------
+
+
+async def create_api_data_source(
+    space_id: str, name: str, config: str, source_type: str = "", *, _db=None
+) -> str:
+    """Create an API data source with connection config.
+
+    Args:
+        space_id: Space to attach the data source to.
+        name: Human-readable name for the data source.
+        config: JSON string with keys: base_url, auth_header_name,
+                auth_header_value, endpoints (list of endpoint paths).
+        source_type: Source type (defaults to 'api').
+    """
+    db = _get_db(_db)
+    try:
+        # Parse config from string
+        try:
+            parsed_config = json.loads(config) if isinstance(config, str) else config
+        except (json.JSONDecodeError, TypeError):
+            return _err("config must be a valid JSON string")
+
+        if not isinstance(parsed_config, dict):
+            return _err("config must be a JSON object")
+
+        # Validate required config fields
+        if "base_url" not in parsed_config:
+            return _err("config must include 'base_url'")
+
+        effective_source_type = source_type.strip() if source_type else SOURCE_TYPE_API
+
+        ds = data_source_service.create_data_source(
+            db,
+            space_id=space_id or None,
+            name=name,
+            source_type=effective_source_type,
+            config=parsed_config,
+        )
+        return _ok({
+            "data_source_id": ds.id,
+            "name": ds.name,
+            "source_type": ds.source_type,
+            "status": "created",
+        })
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def test_api_connection(data_source_id: str, *, _db=None) -> str:
+    """Test connectivity to an API data source.
+
+    Makes a GET request to base_url + first endpoint path from config.
+    Returns status code, headers (truncated), and body preview (first 2000 chars).
+
+    Args:
+        data_source_id: ID of the DataSource to test.
+    """
+    import ipaddress
+    from urllib.parse import urlparse
+
+    import httpx
+
+    from backend.openloop.db.models import DataSource
+
+    db = _get_db(_db)
+    try:
+        ds = db.query(DataSource).filter(DataSource.id == data_source_id).first()
+        if not ds:
+            return _err(f"DataSource {data_source_id} not found")
+
+        cfg = ds.config or {}
+        base_url = cfg.get("base_url", "")
+        if not base_url:
+            return _err("DataSource config missing 'base_url'")
+
+        # Build test URL from base_url + first endpoint
+        endpoints = cfg.get("endpoints", [])
+        test_path = endpoints[0] if endpoints else ""
+        test_url = base_url.rstrip("/")
+        if test_path:
+            test_url = f"{test_url}/{test_path.lstrip('/')}"
+
+        # SSRF protection: block private/reserved IP ranges and localhost
+        parsed = urlparse(test_url)
+        hostname = parsed.hostname or ""
+        if hostname.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal"):
+            return _err("Blocked: cannot connect to localhost or metadata endpoints")
+        try:
+            ip = ipaddress.ip_address(hostname)
+            if ip.is_private or ip.is_reserved or ip.is_loopback or ip.is_link_local:
+                return _err("Blocked: cannot connect to private/reserved IP addresses")
+        except ValueError:
+            pass  # hostname is a domain name, not an IP — allow (DNS resolution happens at connect time)
+        if not parsed.scheme or parsed.scheme not in ("http", "https"):
+            return _err("Blocked: only http and https URLs are allowed")
+
+        # Build headers
+        headers = {}
+        auth_name = cfg.get("auth_header_name", "")
+        auth_value = cfg.get("auth_header_value", "")
+        if auth_name and auth_value:
+            headers[auth_name] = auth_value
+
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(test_url, headers=headers)
+
+        # Truncate response body for safety
+        body_preview = resp.text[:2000]
+        # Truncate headers to avoid leaking too much
+        resp_headers = {k: v for k, v in list(resp.headers.items())[:15]}
+
+        return _ok({
+            "status_code": resp.status_code,
+            "headers": resp_headers,
+            "body_preview": body_preview,
+            "url_tested": test_url,
+        })
+    except httpx.RequestError as e:
+        return _err(f"Connection failed: {e}")
+    except Exception as e:
+        return _err(f"Test failed: {e}")
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def create_sync_automation(
+    data_source_id: str,
+    cron_expression: str,
+    agent_name: str,
+    instruction: str,
+    name: str = "",
+    *, _db=None,
+) -> str:
+    """Create a cron automation to sync data from an API data source.
+
+    Args:
+        data_source_id: ID of the DataSource to sync from.
+        cron_expression: Cron schedule (e.g. '0 */6 * * *' for every 6 hours).
+        agent_name: Name of the agent that will execute the sync.
+        instruction: What the agent should fetch and where to store results.
+        name: Human-readable automation name (auto-generated if empty).
+    """
+    db = _get_db(_db)
+    try:
+        # Validate data source exists
+        from backend.openloop.db.models import DataSource
+
+        ds = db.query(DataSource).filter(DataSource.id == data_source_id).first()
+        if not ds:
+            return _err(f"DataSource {data_source_id} not found")
+
+        # Look up the agent by name
+        agent = db.query(agent_service.Agent).filter(
+            agent_service.Agent.name == agent_name
+        ).first()
+        if not agent:
+            return _err(f"Agent '{agent_name}' not found")
+
+        auto_name = name.strip() if name else f"Sync: {ds.name}"
+
+        automation = automation_service.create_automation(
+            db,
+            name=auto_name,
+            agent_id=agent.id,
+            instruction=instruction,
+            trigger_type=AutomationTriggerType.CRON,
+            cron_expression=cron_expression,
+            space_id=ds.space_id,
+        )
+        return _ok({
+            "automation_id": automation.id,
+            "name": automation.name,
+            "cron_expression": cron_expression,
+            "agent": agent_name,
+            "data_source_id": data_source_id,
+            "status": "created",
+        })
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# ---------------------------------------------------------------------------
 # Odin-only tools (20–25)
 # ---------------------------------------------------------------------------
 
@@ -2785,6 +2985,338 @@ def _has_calendar_data_source(space_id: str | None = None) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Email MCP tools (conditionally registered)
+# ---------------------------------------------------------------------------
+
+
+async def list_emails(
+    query: str = "", label: str = "", max_results: str = "20",
+    *, _db=None,
+) -> str:
+    """Search inbox messages from cache. Supports filtering by query text and label name. Returns cached results, triggering a sync if cache is stale."""
+    db = _get_db(_db)
+    try:
+        limit = int(max_results)
+
+        # If most recent synced_at is >30 min old, trigger a sync first
+        from backend.openloop.db.models import DataSource, EmailCache
+
+        latest = (
+            db.query(EmailCache.synced_at)
+            .order_by(EmailCache.synced_at.desc())
+            .first()
+        )
+        stale = True
+        if latest and latest[0]:
+            age = datetime.now(UTC).replace(tzinfo=None) - latest[0]
+            stale = age.total_seconds() > 1800  # 30 minutes
+
+        if stale:
+            email_ds = (
+                db.query(DataSource)
+                .filter(
+                    DataSource.source_type == SOURCE_TYPE_GMAIL,
+                    DataSource.space_id.is_(None),
+                )
+                .first()
+            )
+            if email_ds:
+                try:
+                    email_integration_service.sync_inbox(db, email_ds.id)
+                except Exception:
+                    pass  # sync failure is non-fatal; use cached data
+
+        messages = email_integration_service.get_cached_messages(
+            db,
+            label=label or None,
+            query=query or None,
+            limit=limit,
+        )
+        return _ok(
+            [
+                {
+                    "id": m.gmail_message_id,
+                    "thread_id": m.gmail_thread_id,
+                    "subject": m.subject,
+                    "from_name": m.from_name,
+                    "from_address": m.from_address,
+                    "snippet": m.snippet,
+                    "labels": m.labels,
+                    "is_unread": m.is_unread,
+                    "received_at": m.received_at.isoformat() if m.received_at else None,
+                    "gmail_link": m.gmail_link,
+                }
+                for m in messages
+            ]
+        )
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def get_email(
+    message_id: str, *, _db=None,
+) -> str:
+    """Read full email content including body. Fetches live from Gmail API (not cache). Returns headers, body text, and attachment metadata."""
+    try:
+        msg = gmail_client.get_message(message_id)
+        return _ok(msg)
+    except Exception as e:
+        return _err(str(e))
+
+
+async def get_email_headers(
+    message_id: str, *, _db=None,
+) -> str:
+    """Read email headers from cache (fast). Returns subject, from, to, snippet, labels, and received_at."""
+    db = _get_db(_db)
+    try:
+        from backend.openloop.db.models import EmailCache
+
+        cached = (
+            db.query(EmailCache)
+            .filter(EmailCache.gmail_message_id == message_id)
+            .first()
+        )
+        if not cached:
+            return _err(f"Email {message_id} not found in cache")
+
+        return _ok({
+            "id": cached.gmail_message_id,
+            "thread_id": cached.gmail_thread_id,
+            "subject": cached.subject,
+            "from_name": cached.from_name,
+            "from_address": cached.from_address,
+            "to_addresses": cached.to_addresses,
+            "cc_addresses": cached.cc_addresses,
+            "snippet": cached.snippet,
+            "labels": cached.labels,
+            "is_unread": cached.is_unread,
+            "received_at": cached.received_at.isoformat() if cached.received_at else None,
+            "gmail_link": cached.gmail_link,
+        })
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def label_email(
+    message_id: str, add_labels: str = "", remove_labels: str = "",
+    *, _db=None,
+) -> str:
+    """Add or remove labels on an email. Labels are comma-separated (e.g. 'OL/Needs Response,IMPORTANT'). At least one of add_labels or remove_labels is required."""
+    db = _get_db(_db)
+    try:
+        add_list = [lbl.strip() for lbl in add_labels.split(",") if lbl.strip()] if add_labels else None
+        remove_list = [lbl.strip() for lbl in remove_labels.split(",") if lbl.strip()] if remove_labels else None
+
+        if not add_list and not remove_list:
+            return _err("At least one of add_labels or remove_labels is required")
+
+        cached = email_integration_service.label_message(
+            db, message_id, add_labels=add_list, remove_labels=remove_list,
+        )
+        return _ok({
+            "id": cached.gmail_message_id,
+            "labels": cached.labels,
+        })
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def archive_email(
+    message_id: str, *, _db=None,
+) -> str:
+    """Archive an email (removes it from inbox). The email remains accessible in All Mail."""
+    db = _get_db(_db)
+    try:
+        cached = email_integration_service.archive_message(db, message_id)
+        return _ok({
+            "id": cached.gmail_message_id,
+            "archived": True,
+            "labels": cached.labels,
+        })
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def mark_email_read(
+    message_id: str, *, _db=None,
+) -> str:
+    """Mark an email as read."""
+    db = _get_db(_db)
+    try:
+        cached = email_integration_service.mark_read(db, message_id)
+        return _ok({
+            "id": cached.gmail_message_id,
+            "is_unread": cached.is_unread,
+        })
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def draft_email(
+    to: str, subject: str, body: str,
+    reply_to: str = "", cc: str = "", bcc: str = "",
+    *, _db=None,
+) -> str:
+    """Create an email draft (does NOT send). Use send_email to send it later."""
+    db = _get_db(_db)
+    try:
+        result = email_integration_service.create_draft(
+            db,
+            to=to,
+            subject=subject,
+            body=body,
+            reply_to=reply_to or None,
+            cc=cc or None,
+            bcc=bcc or None,
+        )
+        return _ok({
+            "draft_id": result.get("id"),
+            "message": result.get("message", {}),
+            "status": "draft_created",
+        })
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def send_email(
+    draft_id: str, *, _db=None,
+) -> str:
+    """Send an existing email draft. This WILL deliver the email to the recipient."""
+    db = _get_db(_db)
+    try:
+        result = email_integration_service.send_draft(db, draft_id)
+        return _ok({
+            "id": result.get("id"),
+            "thread_id": result.get("threadId"),
+            "status": "sent",
+        })
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def send_reply(
+    message_id: str, body: str, *, _db=None,
+) -> str:
+    """Reply to an email thread. This WILL deliver the reply to the sender."""
+    db = _get_db(_db)
+    try:
+        result = email_integration_service.send_reply(db, message_id, body)
+        return _ok({
+            "id": result.get("id"),
+            "thread_id": result.get("threadId"),
+            "status": "sent",
+        })
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def get_inbox_stats(*, _db=None) -> str:
+    """Get inbox summary statistics: unread count, triage label counts, and oldest unread message."""
+    db = _get_db(_db)
+    try:
+        stats = email_integration_service.get_inbox_stats(db)
+        return _ok({
+            "unread_count": stats["unread_count"],
+            "by_label": stats["by_label"],
+            "oldest_unread": (
+                stats["oldest_unread"].isoformat()
+                if stats.get("oldest_unread")
+                else None
+            ),
+        })
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# Email tool registry
+_EMAIL_TOOLS = {
+    "list_emails": list_emails,
+    "get_email": get_email,
+    "get_email_headers": get_email_headers,
+    "label_email": label_email,
+    "archive_email": archive_email,
+    "mark_email_read": mark_email_read,
+    "draft_email": draft_email,
+    "send_email": send_email,
+    "send_reply": send_reply,
+    "get_inbox_stats": get_inbox_stats,
+}
+
+
+def _has_email_data_source(space_id: str | None = None) -> bool:
+    """Check if a Gmail system DataSource exists and is not excluded for the space.
+
+    Returns True if email tools should be included.
+    """
+    db = SessionLocal()
+    try:
+        from backend.openloop.db.models import DataSource
+
+        email_ds = (
+            db.query(DataSource)
+            .filter(
+                DataSource.source_type == SOURCE_TYPE_GMAIL,
+                DataSource.space_id.is_(None),
+            )
+            .first()
+        )
+        if not email_ds:
+            return False
+
+        # If space_id provided, check exclusion
+        if space_id:
+            if data_source_service.is_excluded(db, space_id, email_ds.id):
+                return False
+
+        return True
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
 # Builder functions
 # ---------------------------------------------------------------------------
 
@@ -2931,6 +3463,8 @@ def build_agent_tools(
     tool_map = dict(_STANDARD_TOOLS)
     if _has_calendar_data_source(space_id):
         tool_map.update(_CALENDAR_TOOLS)
+    if _has_email_data_source(space_id):
+        tool_map.update(_EMAIL_TOOLS)
     tools = _make_decorated_tools(tool_map, agent_name, agent_id, background_task_id)
     return create_sdk_mcp_server(f"openloop_{agent_name}", tools=tools)
 
@@ -2940,13 +3474,16 @@ def build_odin_tools(agent_id: str = "", background_task_id: str = ""):
 
     Returns a server from create_sdk_mcp_server with standard tools (1-33)
     plus Odin-only tools (20-25). Includes calendar tools if a Google Calendar
-    DataSource exists (no space exclusion check for Odin).
+    DataSource exists (no space exclusion check for Odin). Includes email tools
+    if a Gmail DataSource exists.
     """
     from claude_agent_sdk import create_sdk_mcp_server
 
     all_tools = {**_STANDARD_TOOLS, **_ODIN_TOOLS}
     if _has_calendar_data_source():
         all_tools.update(_CALENDAR_TOOLS)
+    if _has_email_data_source():
+        all_tools.update(_EMAIL_TOOLS)
     tools = _make_decorated_tools(all_tools, "odin", agent_id, background_task_id)
     return create_sdk_mcp_server("openloop_odin", tools=tools)
 
@@ -2972,5 +3509,36 @@ def build_agent_builder_tools(
     all_tools = {**_STANDARD_TOOLS, **_AGENT_BUILDER_TOOLS}
     if _has_calendar_data_source(space_id):
         all_tools.update(_CALENDAR_TOOLS)
+    if _has_email_data_source(space_id):
+        all_tools.update(_EMAIL_TOOLS)
+    tools = _make_decorated_tools(all_tools, agent_name, agent_id, background_task_id)
+    return create_sdk_mcp_server(f"openloop_{agent_name}", tools=tools)
+
+
+# Integration Builder-only tool registry
+_INTEGRATION_BUILDER_TOOLS = {
+    "create_api_data_source": create_api_data_source,
+    "test_api_connection": test_api_connection,
+    "create_sync_automation": create_sync_automation,
+}
+
+
+def build_integration_builder_tools(
+    agent_name: str, agent_id: str = "", background_task_id: str = "",
+    space_id: str | None = None,
+):
+    """Build MCP tools for the Integration Builder agent.
+
+    Standard tools + create_api_data_source + test_api_connection +
+    create_sync_automation (exclusive to Integration Builder).
+    Conditionally includes calendar tools if available.
+    """
+    from claude_agent_sdk import create_sdk_mcp_server
+
+    all_tools = {**_STANDARD_TOOLS, **_INTEGRATION_BUILDER_TOOLS}
+    if _has_calendar_data_source(space_id):
+        all_tools.update(_CALENDAR_TOOLS)
+    if _has_email_data_source(space_id):
+        all_tools.update(_EMAIL_TOOLS)
     tools = _make_decorated_tools(all_tools, agent_name, agent_id, background_task_id)
     return create_sdk_mcp_server(f"openloop_{agent_name}", tools=tools)

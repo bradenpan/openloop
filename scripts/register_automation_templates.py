@@ -1,9 +1,11 @@
 """Register pre-built automation templates into the database.
 
-Creates an "Automation Agent" and three automation records:
+Creates an "Automation Agent" and five automation records:
   1. Daily Task Review     — every day at 8am, scans for overdue/stuck tasks
   2. Stale Work Check      — every Monday at 9am, finds items not updated in 7+ days
   3. Follow-up Reminder    — every day at 8am, finds CRM records with past-due follow-ups
+  4. Meeting Prep          — every day at 7am, prepares briefing materials for upcoming meetings
+  5. Email Triage          — every 2 hours during business hours (weekdays), triages inbox
 
 Idempotent: checks by name before creating. Running twice is safe.
 
@@ -124,6 +126,9 @@ Call write_memory with:
 This is your final output. Do not take any action on the items themselves.
 
 Also check today's calendar events and flag any that need preparation. Include a schedule summary at the top of the review.
+
+Also summarize today's unread emails requiring attention. Include count by category \
+and highlight any urgent items from get_inbox_stats.
 """,
     },
     {
@@ -262,6 +267,72 @@ prepared brief: look up attendees in CRM/items, check recent conversation \
 summaries for context, draft a brief with attendee info, agenda, and context. \
 Save the brief as a document linked to the space. Flag meetings with no context \
 as 'needs manual prep' via notification.
+""",
+    },
+    {
+        "name": "Email Triage",
+        "description": (
+            "Periodically triages inbox emails — categorizes, labels, and creates "
+            "tasks for items needing response. Runs every 2 hours during business hours."
+        ),
+        "trigger_type": "cron",
+        "cron_expression": "0 8-18/2 * * 1-5",
+        "enabled": False,
+        "space_id": None,
+        "instruction": """\
+Check inbox for unprocessed emails (without OL/ labels). For each: read the \
+content using get_email, categorize as Needs Response / FYI / Follow Up / \
+Waiting based on content and sender importance. Apply the appropriate OL/ label \
+using label_email. For 'Needs Response' emails, create a task in the relevant \
+space if one can be identified using create_task. Mark processed emails with \
+OL/Agent Processed label. Summarize what you triaged.
+
+STEP 1 — GET INBOX STATUS
+Call get_inbox_stats to understand current inbox state (unread count, label counts).
+
+STEP 2 — LIST UNPROCESSED EMAILS
+Call list_emails with no label filter and max_results="50". From the results, \
+filter to emails that do NOT have any OL/ label — these are unprocessed.
+
+STEP 3 — TRIAGE EACH EMAIL
+For each unprocessed email:
+  a. Call get_email(message_id) to read the full content.
+  b. Categorize based on content and sender:
+     - "Needs Response" — direct question, action request, time-sensitive
+     - "FYI" — informational, no action needed
+     - "Follow Up" — requires future action but not immediate
+     - "Waiting" — waiting on someone else, track for response
+  c. Call label_email(message_id, add_labels=["OL/<category>", "OL/Agent Processed"])
+
+STEP 4 — CREATE TASKS FOR URGENT ITEMS
+For emails categorized as "Needs Response":
+  - Identify the most relevant space based on the email content and subject
+  - If a space can be identified, call create_task with the email subject as title \
+    and a brief description referencing the email
+  - If no space is obvious, skip task creation (the label is sufficient)
+
+STEP 5 — COMPOSE SUMMARY
+Write a plain-text summary:
+
+  === Email Triage — [TIMESTAMP] ===
+
+  Processed: [count] emails
+  - Needs Response: [count] (tasks created: [count])
+  - FYI: [count]
+  - Follow Up: [count]
+  - Waiting: [count]
+
+  Highlights:
+  - [sender]: "[subject]" — [category] [reason]
+  - ...
+
+  Inbox status: [unread count] unread, [needs_response count] awaiting response
+
+STEP 6 — WRITE TO MEMORY
+Call write_memory with:
+  namespace = "global"
+  key       = "email_triage_last_run"
+  value     = [the full summary text from step 5]
 """,
     },
 ]

@@ -34,11 +34,12 @@ from backend.openloop.services import (
     behavioral_rule_service,
     calendar_integration_service,
     data_source_service,
+    email_integration_service,
     item_service,
     memory_service,
     space_service,
 )
-from contract.enums import SOURCE_TYPE_GOOGLE_CALENDAR
+from contract.enums import SOURCE_TYPE_GMAIL, SOURCE_TYPE_GOOGLE_CALENDAR
 
 # ---------------------------------------------------------------------------
 # Token budgets (approximate, using 1 token ≈ 4 chars heuristic)
@@ -230,6 +231,11 @@ def _assemble_space_context(
     if calendar:
         sections.append(_truncate_to_budget(calendar, BUDGET_CALENDAR))
 
+    # 9. Email inbox summary
+    email = _build_email_section(db, space_id=space_id)
+    if email:
+        sections.append(_truncate_to_budget(email, BUDGET_EMAIL))
+
     return "\n\n".join(sections)
 
 
@@ -332,6 +338,14 @@ def _assemble_odin_context(db: Session, agent: Agent, read_only: bool = False) -
         calendar = _build_calendar_section(db)
         if calendar:
             truncated = _truncate_to_budget(calendar, min(remaining, BUDGET_CALENDAR))
+            sections.append(truncated)
+            remaining -= estimate_tokens(truncated)
+
+    # Email inbox summary (no space exclusion for Odin)
+    if remaining > 0:
+        email = _build_email_section(db)
+        if email:
+            truncated = _truncate_to_budget(email, min(remaining, BUDGET_EMAIL))
             sections.append(truncated)
             remaining -= estimate_tokens(truncated)
 
@@ -793,6 +807,103 @@ def _build_calendar_section(db: Session, space_id: str | None = None) -> str:
         inner = inner[:1997] + "..."
 
     return _wrap_user_data(inner, "calendar")
+
+
+# ---------------------------------------------------------------------------
+# Email section builder
+# ---------------------------------------------------------------------------
+
+
+def _build_email_section(db: Session, space_id: str | None = None) -> str:
+    """Build email inbox summary section for context.
+
+    Checks if a gmail DataSource exists. If space_id is given,
+    checks it's not excluded for that space. For Odin (space_id=None),
+    always includes if the DataSource exists.
+
+    Shows unread/triage counts and top items needing attention.
+    Truncates to ~1200 chars.
+    """
+    # Check if Gmail DataSource exists
+    email_ds = (
+        db.query(DataSource)
+        .filter(
+            DataSource.source_type == SOURCE_TYPE_GMAIL,
+            DataSource.space_id.is_(None),
+        )
+        .first()
+    )
+    if not email_ds:
+        return ""
+
+    # If space_id given, check exclusion
+    if space_id:
+        if data_source_service.is_excluded(db, space_id, email_ds.id):
+            return ""
+
+    # Get inbox stats
+    try:
+        stats = email_integration_service.get_inbox_stats(db)
+    except Exception:
+        return ""
+
+    unread_count = stats.get("unread_count", 0)
+    by_label = stats.get("by_label", {})
+
+    needs_response = by_label.get("OL/Needs Response", 0)
+    follow_up = by_label.get("OL/Follow Up", 0)
+
+    lines = ["## Email (inbox summary)"]
+    lines.append(
+        f"Unread: {unread_count} | Needs Response: {needs_response} | Follow Up: {follow_up}"
+    )
+
+    # Get top items needing attention
+    try:
+        attention_msgs = email_integration_service.get_cached_messages(
+            db, label="OL/Needs Response", limit=5,
+        )
+    except Exception:
+        attention_msgs = []
+
+    if attention_msgs:
+        now = datetime.now(UTC).replace(tzinfo=None)
+        lines.append("Recent requiring attention:")
+        for msg in attention_msgs:
+            # Calculate time ago
+            if msg.received_at:
+                delta = now - msg.received_at
+                total_mins = int(delta.total_seconds() / 60)
+                if total_mins < 60:
+                    time_ago = f"{total_mins}m ago"
+                elif total_mins < 1440:
+                    time_ago = f"{total_mins // 60}h ago"
+                else:
+                    time_ago = f"{total_mins // 1440}d ago"
+            else:
+                time_ago = "unknown"
+
+            sender = msg.from_name or msg.from_address or "Unknown"
+            subject = msg.subject or "(no subject)"
+            if len(subject) > 50:
+                subject = subject[:47] + "..."
+
+            # Find a triage label to show
+            triage_label = ""
+            if msg.labels:
+                for lbl in msg.labels:
+                    if lbl.startswith("OL/"):
+                        triage_label = f" [{lbl}]"
+                        break
+
+            lines.append(f"  - {sender} ({time_ago}): \"{subject}\"{triage_label}")
+
+    inner = "\n".join(lines)
+    # Truncate to ~1200 chars
+    if len(inner) > 1200:
+        inner = inner[:1197] + "..."
+
+    return _wrap_user_data(inner, "email")
 
 
 # ---------------------------------------------------------------------------

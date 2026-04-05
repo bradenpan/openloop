@@ -3,6 +3,25 @@ import { useUIStore } from '../../stores/ui-store';
 import { $api } from '../../api/hooks';
 import { SearchButton } from '../search-modal';
 
+function EmailIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <rect x="2" y="4" width="20" height="16" rx="2" ry="2" />
+      <polyline points="22,6 12,13 2,6" />
+    </svg>
+  );
+}
+
 function CalendarIcon() {
   return (
     <svg
@@ -30,6 +49,8 @@ export function Sidebar() {
   const { data } = $api.useQuery('get', '/api/v1/spaces', { params: { query: { limit: 50 } } });
   const calendarAuth = $api.useQuery('get', '/api/v1/calendar/auth-status');
   const calendarConnected = calendarAuth.data?.authenticated === true;
+  const emailAuth = $api.useQuery('get', '/api/v1/email/auth-status');
+  const emailConnected = emailAuth.data?.authenticated === true;
 
   if (collapsed) {
     return (
@@ -83,6 +104,18 @@ export function Sidebar() {
           >
             <CalendarIcon />
             Calendar
+          </NavLink>
+        )}
+
+        {emailConnected && (
+          <NavLink
+            to="/email"
+            className={({ isActive }) =>
+              `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-foreground hover:bg-raised'}`
+            }
+          >
+            <EmailIcon />
+            Email
           </NavLink>
         )}
 

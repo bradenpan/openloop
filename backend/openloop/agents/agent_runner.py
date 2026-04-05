@@ -216,12 +216,17 @@ def _build_mcp_server(agent, agent_id: str, space_id: str | None = None):
     """Build the appropriate MCP tool server for an agent."""
     is_odin = agent.name.lower() == "odin"
     is_agent_builder = agent.name.lower() in ("agent-builder", "agent builder")
+    is_integration_builder = agent.name.lower() in ("integration-builder", "integration builder")
     if is_odin:
         return build_odin_tools(agent_id)
     elif is_agent_builder:
         from backend.openloop.agents.mcp_tools import build_agent_builder_tools
 
         return build_agent_builder_tools(agent.name, agent_id, space_id=space_id)
+    elif is_integration_builder:
+        from backend.openloop.agents.mcp_tools import build_integration_builder_tools
+
+        return build_integration_builder_tools(agent.name, agent_id, space_id=space_id)
     else:
         return build_agent_tools(agent.name, agent_id, space_id=space_id)
 
@@ -2495,12 +2500,17 @@ def _build_mcp_server_by_name(agent_name: str, agent_id: str, space_id: str | No
     don't have the full agent ORM object)."""
     is_odin = agent_name.lower() == "odin"
     is_agent_builder = agent_name.lower() in ("agent-builder", "agent builder")
+    is_integration_builder = agent_name.lower() in ("integration-builder", "integration builder")
     if is_odin:
         return build_odin_tools(agent_id)
     elif is_agent_builder:
         from backend.openloop.agents.mcp_tools import build_agent_builder_tools
 
         return build_agent_builder_tools(agent_name, agent_id, space_id=space_id)
+    elif is_integration_builder:
+        from backend.openloop.agents.mcp_tools import build_integration_builder_tools
+
+        return build_integration_builder_tools(agent_name, agent_id, space_id=space_id)
     else:
         return build_agent_tools(agent_name, agent_id, space_id=space_id)
 
