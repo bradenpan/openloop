@@ -209,7 +209,7 @@ def upload_document(
         file_size=file_size,
         mime_type=mime,
         content_text=content_text,
-        indexed_at=datetime.now(UTC),
+        indexed_at=datetime.now(UTC).replace(tzinfo=None),
     )
     db.add(doc)
     db.commit()
@@ -261,7 +261,7 @@ def scan_directory(db: Session, space_id: str) -> int:
             file_size=file_size,
             mime_type=mime,
             content_text=content_text,
-            indexed_at=datetime.now(UTC),
+            indexed_at=datetime.now(UTC).replace(tzinfo=None),
         )
         db.add(doc)
         new_count += 1

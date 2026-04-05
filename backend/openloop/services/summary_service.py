@@ -223,5 +223,5 @@ def update_last_seen(db: Session) -> None:
         db.add(row)
     else:
         row.value = now_iso
-        row.updated_at = datetime.now(UTC)
+        row.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.commit()

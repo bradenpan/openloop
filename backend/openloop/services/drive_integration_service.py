@@ -122,7 +122,7 @@ def index_drive_folder(db: Session, *, data_source_id: str) -> int:
             file_size=file_size,
             mime_type=f.get("mimeType"),
             content_text=content_text,
-            indexed_at=datetime.now(UTC),
+            indexed_at=datetime.now(UTC).replace(tzinfo=None),
         )
         db.add(doc)
         new_count += 1
@@ -188,7 +188,7 @@ def refresh_drive_index(db: Session, *, data_source_id: str) -> dict:
                 file_size=file_size,
                 mime_type=f.get("mimeType"),
                 content_text=content_text,
-                indexed_at=datetime.now(UTC),
+                indexed_at=datetime.now(UTC).replace(tzinfo=None),
             )
             db.add(doc)
             added += 1
@@ -215,7 +215,7 @@ def refresh_drive_index(db: Session, *, data_source_id: str) -> dict:
                 except Exception:
                     pass
 
-                doc.indexed_at = datetime.now(UTC)
+                doc.indexed_at = datetime.now(UTC).replace(tzinfo=None)
                 updated += 1
 
     # Remove deleted files

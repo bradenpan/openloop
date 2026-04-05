@@ -259,7 +259,10 @@ def _is_heartbeat_due(db, agent: Agent, now_naive: datetime) -> bool:
     """Return True if the agent's heartbeat cron is due.
 
     Uses the most recent BackgroundTask with run_type=heartbeat for that agent
-    as the last-run reference.
+    as the last-run reference. Computes the cron interval (via two consecutive
+    get_next calls from the last run) and checks whether at least one full
+    interval has elapsed, preventing double-fire when heartbeats run between
+    cron boundaries.
     """
     last_heartbeat = (
         db.query(BackgroundTask)
@@ -272,13 +275,18 @@ def _is_heartbeat_due(db, agent: Agent, now_naive: datetime) -> bool:
     )
 
     if last_heartbeat is None:
-        ref = datetime(2000, 1, 1)
-    else:
-        ref = last_heartbeat.created_at.replace(tzinfo=None)
+        return True  # Never run before — always due
 
-    cron = croniter(agent.heartbeat_cron, ref)
-    next_run = cron.get_next(datetime)
-    return next_run <= now_naive
+    ref = last_heartbeat.created_at.replace(tzinfo=None)
+
+    # Compute the cron interval from the last run reference point
+    cron_iter = croniter(agent.heartbeat_cron, ref)
+    next1 = cron_iter.get_next(datetime)
+    next2 = cron_iter.get_next(datetime)
+    interval = (next2 - next1).total_seconds()
+
+    # Due if at least one full cron interval has elapsed since the last run
+    return (now_naive - ref).total_seconds() >= interval
 
 
 async def _fire_heartbeat(db, agent: Agent) -> None:

@@ -94,6 +94,12 @@ ODIN_MCP_TOOLS = [
     "update_widget",
     "remove_widget",
     "set_space_layout",
+    "cancel_delegated_task",
+    "check_delegated_tasks",
+    "queue_approval",
+    "search",
+    "search_items",
+    "update_task_list",
     # Odin-only tools
     "list_spaces",
     "list_agents",

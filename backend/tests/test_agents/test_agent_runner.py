@@ -90,8 +90,11 @@ class FakeResultMessage:
 class FakeStreamEvent:
     """Mimics claude_agent_sdk.StreamEvent."""
 
-    def __init__(self, data=None):
-        self.data = data or {"type": "content_block_delta"}
+    def __init__(self, event=None, session_id="fake-session-123"):
+        self.event = event or {"type": "content_block_delta"}
+        self.session_id = session_id
+        self.uuid = "fake-uuid"
+        self.parent_tool_use_id = None
 
 
 async def _fake_query_generator(*args, **kwargs):
@@ -101,8 +104,8 @@ async def _fake_query_generator(*args, **kwargs):
 
 async def _fake_query_generator_with_stream(*args, **kwargs):
     """Async generator that yields stream events then a result."""
-    yield FakeStreamEvent({"type": "content_block_delta", "text": "Hello"})
-    yield FakeStreamEvent({"type": "content_block_delta", "text": " world"})
+    yield FakeStreamEvent(event={"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}})
+    yield FakeStreamEvent(event={"type": "content_block_delta", "delta": {"type": "text_delta", "text": " world"}})
     yield FakeResultMessage(result="Hello world")
 
 
@@ -175,8 +178,8 @@ class TestRunInteractive:
             ):
                 events.append(evt)
 
-        # Should have stream events + no error
-        stream_events = [e for e in events if e.get("type") == "stream"]
+        # Should have token events + no error
+        stream_events = [e for e in events if e.get("type") == "token"]
         error_events = [e for e in events if e.get("type") == "error"]
         assert len(stream_events) == 2
         assert len(error_events) == 0

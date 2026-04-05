@@ -268,6 +268,19 @@ _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
     "create_api_data_source": ("openloop-integrations", Operation.CREATE),
     "test_api_connection": ("openloop-integrations", Operation.EXECUTE),
     "create_sync_automation": ("openloop-integrations", Operation.CREATE),
+    # Drive tools
+    "read_drive_file": ("google_drive", Operation.READ),
+    "list_drive_files": ("google_drive", Operation.READ),
+    "create_drive_file": ("google_drive", Operation.CREATE),
+    # Layout tools
+    "get_space_layout": ("openloop-spaces", Operation.READ),
+    "add_widget": ("openloop-spaces", Operation.CREATE),
+    "update_widget": ("openloop-spaces", Operation.EDIT),
+    "remove_widget": ("openloop-spaces", Operation.DELETE),
+    "set_space_layout": ("openloop-spaces", Operation.EDIT),
+    # Search tools
+    "search": ("openloop-content", Operation.READ),
+    "search_items": ("openloop-board", Operation.READ),
 }
 
 

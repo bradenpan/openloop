@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from contract.enums import PermissionRequestStatus
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
@@ -210,16 +211,16 @@ def resolve_permission_request(
     if not req:
         raise HTTPException(status_code=404, detail="Permission request not found")
 
-    allowed = ("approved", "denied")
+    allowed = {s.value for s in PermissionRequestStatus if s != PermissionRequestStatus.PENDING}
     if status not in allowed:
         raise HTTPException(
             status_code=422,
-            detail=f"status must be one of {allowed}",
+            detail=f"status must be one of {sorted(allowed)}",
         )
 
     req.status = status
     req.resolved_by = "user"
-    req.resolved_at = datetime.now(UTC)
+    req.resolved_at = datetime.now(UTC).replace(tzinfo=None)
     db.commit()
     db.refresh(req)
     return req

@@ -65,7 +65,7 @@ def emergency_stop(db: Session) -> dict:
         db.add(row)
     else:
         row.value = True
-        row.updated_at = datetime.now(UTC)
+        row.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.flush()
 
     # Interrupt all running background tasks
@@ -74,7 +74,7 @@ def emergency_stop(db: Session) -> dict:
         .filter(BackgroundTask.status == BackgroundTaskStatus.RUNNING)
         .all()
     )
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
     stopped_ids = []
     for task in running_tasks:
         task.status = BackgroundTaskStatus.INTERRUPTED
@@ -117,7 +117,7 @@ def resume(db: Session) -> dict:
         return {"paused": False}
 
     row.value = False
-    row.updated_at = datetime.now(UTC)
+    row.updated_at = datetime.now(UTC).replace(tzinfo=None)
     db.commit()
 
     notification_service.create_notification(

@@ -35,7 +35,7 @@ def create_conversation(
         space_id=space_id,
         agent_id=agent_id,
         name=name,
-        status="active",
+        status=ConversationStatus.ACTIVE,
         model_override=model_override,
     )
     db.add(conversation)
@@ -76,8 +76,8 @@ def close_conversation(db: Session, conversation_id: str) -> Conversation:
         raise HTTPException(
             status_code=409, detail=f"Cannot close conversation with status '{conv.status}'"
         )
-    conv.status = "closed"
-    conv.closed_at = datetime.now(UTC)
+    conv.status = ConversationStatus.CLOSED
+    conv.closed_at = datetime.now(UTC).replace(tzinfo=None)
     db.commit()
     db.refresh(conv)
     return conv
@@ -88,7 +88,7 @@ def reopen_conversation(db: Session, conversation_id: str) -> Conversation:
     conv = get_conversation(db, conversation_id)
     if conv.status == "active":
         raise HTTPException(status_code=409, detail="Conversation is already active")
-    conv.status = "active"
+    conv.status = ConversationStatus.ACTIVE
     conv.closed_at = None
     db.commit()
     db.refresh(conv)

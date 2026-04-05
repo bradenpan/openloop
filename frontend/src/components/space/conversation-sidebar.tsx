@@ -151,6 +151,7 @@ export function ConversationSidebar({ spaceId, collapsed, onToggle }: Conversati
       >
         {activeConversationId && (
           <ConversationPanel
+            key={activeConversationId}
             conversationId={activeConversationId}
             taskId={isActiveAutonomous ? activeSession?.background_task_id : null}
             autonomousGoal={isActiveAutonomous ? activeSession?.instruction : null}

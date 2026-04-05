@@ -75,8 +75,9 @@ export function NewConversationModal({ open, onClose, spaceId }: NewConversation
         />
 
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-foreground">Agent</label>
+          <label htmlFor="conv-agent-select" className="text-sm font-medium text-foreground">Agent</label>
           <select
+            id="conv-agent-select"
             value={agentId}
             onChange={(e) => setAgentId(e.target.value)}
             required
@@ -97,8 +98,9 @@ export function NewConversationModal({ open, onClose, spaceId }: NewConversation
         </div>
 
         <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-foreground">Model</label>
+          <label htmlFor="conv-model-select" className="text-sm font-medium text-foreground">Model</label>
           <select
+            id="conv-model-select"
             value={modelOverride}
             onChange={(e) => setModelOverride(e.target.value)}
             className="bg-raised text-foreground border border-border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"

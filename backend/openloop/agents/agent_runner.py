@@ -1339,7 +1339,7 @@ async def _run_background_task(
                 task_id,
                 status="interrupted",
                 error="System paused (emergency stop)",
-                completed_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC).replace(tzinfo=None),
             )
             return
 
@@ -1366,9 +1366,12 @@ async def _run_background_task(
             "Say TASK_COMPLETE or GOAL_COMPLETE when the entire task is finished."
         )
 
+        from contract.enums import BackgroundTaskRunType
+
         hooks = _build_hooks_dict(
             agent_id, conversation_id,
             background_task_id=task_id,
+            autonomous_mode=(run_type == BackgroundTaskRunType.AUTONOMOUS),
             narrowed_permissions=narrowed_permissions,
         )
 
@@ -1508,7 +1511,7 @@ async def _run_background_task(
                     task_id,
                     status="interrupted",
                     error="System paused (emergency stop) at turn boundary",
-                    completed_at=datetime.now(UTC),
+                    completed_at=datetime.now(UTC).replace(tzinfo=None),
                 )
                 return
 
@@ -1622,7 +1625,7 @@ async def _run_background_task(
             task_id,
             status="completed",
             result_summary=(result_text[:2000] if result_text else None),
-            completed_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC).replace(tzinfo=None),
         )
 
         # Heartbeat-specific completion handling
@@ -1693,7 +1696,7 @@ async def _run_background_task(
             task_id,
             status="failed",
             error=str(exc)[:2000],
-            completed_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC).replace(tzinfo=None),
         )
 
         # Cascade-cancel all child tasks (Phase 10.1)
@@ -1933,7 +1936,7 @@ async def _run_autonomous_task(
                 db, task_id,
                 status="interrupted",
                 error="System paused (emergency stop)",
-                completed_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC).replace(tzinfo=None),
             )
             return
 
@@ -1995,7 +1998,7 @@ async def _run_autonomous_task(
                             db, task_id,
                             status="interrupted",
                             error="System paused during autonomous pause",
-                            completed_at=datetime.now(UTC),
+                            completed_at=datetime.now(UTC).replace(tzinfo=None),
                         )
                         return
                 # Resumed — set status back to running
@@ -2158,7 +2161,7 @@ async def _run_autonomous_task(
                     db, task_id,
                     status="interrupted",
                     error="System paused (emergency stop) at turn boundary",
-                    completed_at=datetime.now(UTC),
+                    completed_at=datetime.now(UTC).replace(tzinfo=None),
                 )
                 return
 
@@ -2248,7 +2251,7 @@ async def _run_autonomous_task(
             db, task_id,
             status="completed",
             result_summary=result_text[:2000] if result_text else None,
-            completed_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC).replace(tzinfo=None),
         )
 
         # Generate structured run summary (creates notification too)
@@ -2291,7 +2294,7 @@ async def _run_autonomous_task(
             db, task_id,
             status="failed",
             error=str(exc)[:2000],
-            completed_at=datetime.now(UTC),
+            completed_at=datetime.now(UTC).replace(tzinfo=None),
         )
 
         if conversation_id:
@@ -2552,7 +2555,7 @@ def recover_from_crash(db: Session) -> int:
         .filter(BackgroundTask.status.in_(stale_statuses))
         .all()
     )
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
 
     # Pass 1: Autonomous tasks — check if resumable
     autonomous_tasks = [t for t in orphaned_tasks if t.run_type == "autonomous"]
@@ -2662,7 +2665,7 @@ async def resume_autonomous_tasks(db: Session) -> int:
 
         # Update task status
         task.status = BackgroundTaskStatus.RUNNING
-        task.started_at = datetime.now(UTC)
+        task.started_at = datetime.now(UTC).replace(tzinfo=None)
         db.commit()
 
         # Load agent for the run
@@ -2670,7 +2673,7 @@ async def resume_autonomous_tasks(db: Session) -> int:
         if not agent:
             task.status = BackgroundTaskStatus.FAILED
             task.error = "Agent not found during resume"
-            task.completed_at = datetime.now(UTC)
+            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
             db.commit()
             continue
 

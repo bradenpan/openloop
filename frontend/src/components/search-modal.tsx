@@ -29,7 +29,7 @@ const TYPE_ICONS: Record<string, string> = {
 
 function highlightExcerpt(html: string): string {
   // SAFETY: The backend (search_service.py :: _safe_snippet) HTML-escapes the
-  // entire FTS5 snippet output, then restores only <mark>/<​/mark> tags from
+  // entire FTS5 snippet output, then restores only <mark>/</mark> tags from
   // null-byte delimiters that cannot appear in user content. The result is
   // guaranteed to contain no HTML other than <mark> highlight wrappers, so
   // dangerouslySetInnerHTML is safe here.

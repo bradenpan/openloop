@@ -110,7 +110,7 @@ def apply_rules(db: Session, *, agent_id: str, read_only: bool = False) -> list[
         .all()
     )
     if not read_only:
-        now = datetime.now(UTC)
+        now = datetime.now(UTC).replace(tzinfo=None)
         for rule in rules:
             rule.apply_count += 1
             rule.last_applied = now

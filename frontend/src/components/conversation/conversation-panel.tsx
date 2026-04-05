@@ -9,6 +9,7 @@ import { DelegationTree } from './delegation-tree';
 import { ApproveLaunchBanner } from './approve-launch-banner';
 import { MessageList } from './message-list';
 import { MessageInput } from './message-input';
+import { useToastStore } from '../../stores/toast-store';
 
 export interface ToolCallState {
   /** Synthetic ID: `${toolName}-${index}` */
@@ -257,6 +258,10 @@ export function ConversationPanel({
           // Mark as streaming — the backend background task will start producing SSE events
           setIsStreaming(true);
         },
+        onError: () => {
+          setIsStreaming(false);
+          useToastStore.getState().addToast('Failed to send message. Please try again.', 'error');
+        },
       },
     );
   };
@@ -266,17 +271,20 @@ export function ConversationPanel({
     // The permission enforcer polls the DB for status changes on the PermissionRequest row,
     // so this PATCH just updates the row's status field.
     try {
-      await fetch(`/api/v1/agents/permission-requests/${requestId}`, {
+      const response = await fetch(`/api/v1/agents/permission-requests/${requestId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: approved ? 'approved' : 'denied' }),
       });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      // Remove from local state on success
+      setApprovalRequests((prev) => prev.filter((r) => r.requestId !== requestId));
     } catch (err) {
       console.error('Failed to respond to approval request:', err);
+      useToastStore.getState().addToast('Approval response failed. Please try again.', 'error');
     }
-
-    // Remove from local state regardless — the backend will resolve via polling
-    setApprovalRequests((prev) => prev.filter((r) => r.requestId !== requestId));
   };
 
   const handleLaunchApproved = (_conversationId: string, _taskId: string) => {

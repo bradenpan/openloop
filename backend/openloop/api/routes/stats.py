@@ -33,7 +33,7 @@ def get_token_stats(
 ) -> TokenStatsResponse:
     """Return aggregated token usage, optionally filtered by agent, space, period."""
     hours = _PERIOD_HOURS.get(period, 24)
-    cutoff = datetime.now(UTC) - timedelta(hours=hours)
+    cutoff = datetime.now(UTC).replace(tzinfo=None) - timedelta(hours=hours)
 
     # Base query: messages that have token data
     q = (

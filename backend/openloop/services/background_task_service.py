@@ -42,7 +42,7 @@ def create_background_task(
         run_summary=run_summary,
         status=status,
         delegation_depth=delegation_depth,
-        started_at=datetime.now(UTC),
+        started_at=datetime.now(UTC).replace(tzinfo=None),
     )
     db.add(task)
     db.commit()
@@ -127,7 +127,7 @@ def detect_stale_stuck(db: Session) -> list[BackgroundTask]:
 
     Returns tasks that need attention.
     """
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
     stale_threshold = now - timedelta(minutes=10)
     stuck_threshold = now - timedelta(minutes=30)
 
@@ -187,7 +187,7 @@ def cascade_update_status(
             if error_note:
                 task.error = error_note
             if new_status in ("cancelled", "failed", "interrupted"):
-                task.completed_at = datetime.now(UTC)
+                task.completed_at = datetime.now(UTC).replace(tzinfo=None)
             count += 1
     if count > 0:
         db.commit()

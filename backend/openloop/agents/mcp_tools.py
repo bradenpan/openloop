@@ -975,7 +975,7 @@ async def get_task_state(space_id: str = "", *, _db=None, _agent_id: str = "") -
         )
         done = [t for t in all_tasks if t.is_done]
         pending = [t for t in all_tasks if not t.is_done]
-        now = datetime.now(UTC)
+        now = datetime.now(UTC).replace(tzinfo=None)
         overdue = [
             {
                 "id": t.id,
@@ -1538,7 +1538,7 @@ async def cancel_delegated_task(
         if task.status in ("running", "queued", "pending", "paused"):
             task.status = "cancelled"
             task.error = f"Cancelled by parent task {_background_task_id}"
-            task.completed_at = datetime.now(UTC)
+            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
             cancelled_count += 1
 
         # Cascade-cancel all descendants
@@ -2054,7 +2054,7 @@ async def get_attention_items(*, _db=None) -> str:
         ]
 
         # Overdue tasks
-        now = datetime.now(UTC)
+        now = datetime.now(UTC).replace(tzinfo=None)
         all_tasks = item_service.list_items(db, item_type="task", is_done=False, archived=False, limit=200)
         overdue = [
             {
