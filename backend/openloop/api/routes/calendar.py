@@ -60,7 +60,7 @@ def list_events(
     return [CalendarEventResponse.model_validate(e) for e in page]
 
 
-@router.get("/events/{event_id}")
+@router.get("/events/{event_id}", response_model=dict)
 def get_event(event_id: str, db: Session = Depends(get_db)) -> dict:
     return calendar_integration_service.get_event_with_brief(db, event_id)
 
@@ -155,7 +155,7 @@ def get_free_time(
     return [FreeTimeSlot(**s) for s in slots]
 
 
-@router.get("/calendars")
+@router.get("/calendars", response_model=list[dict])
 def list_calendars() -> list[dict]:
     return gcalendar_client.list_calendars()
 

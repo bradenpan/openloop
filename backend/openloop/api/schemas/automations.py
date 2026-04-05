@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from contract.enums import AutomationTriggerType
+from contract.enums import AutomationTriggerType, BackgroundTaskStatus
 from croniter import croniter
 from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 
@@ -71,7 +71,7 @@ class AutomationRunResponse(BaseModel):
     id: str
     automation_id: str
     background_task_id: str | None
-    status: str
+    status: BackgroundTaskStatus
     result_summary: str | None
     error: str | None
     started_at: datetime
@@ -87,14 +87,14 @@ class AutomationResponse(BaseModel):
     space_id: str | None
     agent_id: str
     instruction: str
-    trigger_type: str
+    trigger_type: AutomationTriggerType
     cron_expression: str | None
     event_source: str | None
     event_filter: dict | None
     model_override: str | None
     enabled: bool
     last_run_at: datetime | None
-    last_run_status: str | None
+    last_run_status: BackgroundTaskStatus | None
     created_at: datetime
     updated_at: datetime
     runs: list[AutomationRunResponse] = []

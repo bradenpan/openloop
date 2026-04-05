@@ -2,6 +2,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict
 
+from contract.enums import ConversationStatus
+
 __all__ = [
     "ConversationCreate",
     "ConversationResponse",
@@ -28,7 +30,7 @@ class ConversationResponse(BaseModel):
     space_id: str | None
     agent_id: str
     name: str
-    status: str
+    status: ConversationStatus
     model_override: str | None
     sdk_session_id: str | None
     created_at: datetime

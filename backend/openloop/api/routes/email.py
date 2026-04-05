@@ -197,7 +197,7 @@ def setup_email(
     return DataSourceResponse.model_validate(ds)
 
 
-@router.post("/setup-labels")
+@router.post("/setup-labels", response_model=dict)
 def setup_labels(db: Session = Depends(get_db)) -> dict:
     created = email_integration_service.ensure_triage_labels(db)
     return {"labels_created": len(created)}

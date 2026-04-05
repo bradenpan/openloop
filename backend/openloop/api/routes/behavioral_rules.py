@@ -16,10 +16,13 @@ router = APIRouter(prefix="/api/v1/agents/{agent_id}/rules", tags=["behavioral-r
 def list_rules(
     agent_id: str,
     active_only: bool = Query(True),
+    limit: int = Query(50, le=200),
+    offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[BehavioralRuleResponse]:
     rules = behavioral_rule_service.list_rules(db, agent_id=agent_id, active_only=active_only)
-    return [BehavioralRuleResponse.model_validate(r) for r in rules]
+    page = rules[offset : offset + limit]
+    return [BehavioralRuleResponse.model_validate(r) for r in page]
 
 
 @router.post("", response_model=BehavioralRuleResponse, status_code=201)

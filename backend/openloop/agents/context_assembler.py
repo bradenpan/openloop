@@ -790,6 +790,8 @@ def _build_calendar_section(db: Session, space_id: str | None = None) -> str:
             if event.attendees:
                 names = []
                 for a in event.attendees[:3]:
+                    if not isinstance(a, dict):
+                        continue
                     name = a.get("displayName") or a.get("email", "").split("@")[0]
                     names.append(name)
                 if len(event.attendees) > 3:

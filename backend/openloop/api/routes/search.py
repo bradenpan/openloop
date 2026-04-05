@@ -66,7 +66,7 @@ def search(
     return SearchResponse(query=q, total_count=total, results=typed_results)
 
 
-@router.post("/rebuild", status_code=200)
+@router.post("/rebuild", status_code=200, response_model=dict[str, str])
 def rebuild_indexes(db: Session = Depends(get_db)) -> dict[str, str]:
     """Rebuild all FTS5 indexes from source tables."""
     search_service.rebuild_fts_indexes(db)

@@ -2658,49 +2658,60 @@ async def resume_autonomous_tasks(db: Session) -> int:
 
     count = 0
     for task in pending:
-        # Restore conversation if exists
-        if task.conversation_id:
-            conversation_service.update_conversation(db, task.conversation_id, status="active")
-            _background_conversations.add(task.conversation_id)
+        try:
+            # Restore conversation if exists
+            if task.conversation_id:
+                conversation_service.update_conversation(db, task.conversation_id, status="active")
+                _background_conversations.add(task.conversation_id)
 
-        # Update task status
-        task.status = BackgroundTaskStatus.RUNNING
-        task.started_at = datetime.now(UTC).replace(tzinfo=None)
-        db.commit()
-
-        # Load agent for the run
-        agent = agent_service.get_agent(db, task.agent_id)
-        if not agent:
-            task.status = BackgroundTaskStatus.FAILED
-            task.error = "Agent not found during resume"
-            task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+            # Update task status
+            task.status = BackgroundTaskStatus.RUNNING
+            task.started_at = datetime.now(UTC).replace(tzinfo=None)
             db.commit()
-            continue
 
-        # Fire the autonomous task loop (same pattern as approve_autonomous_launch)
-        bg = asyncio.create_task(
-            _run_autonomous_task(
-                task_id=task.id,
-                conversation_id=task.conversation_id,
-                agent_id=task.agent_id,
-                agent_name=agent.name,
-                default_model=agent.default_model,
-                goal=task.goal or task.instruction,
-                constraints=None,
+            # Load agent for the run
+            agent = agent_service.get_agent(db, task.agent_id)
+            if not agent:
+                task.status = BackgroundTaskStatus.FAILED
+                task.error = "Agent not found during resume"
+                task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+                db.commit()
+                continue
+
+            # Fire the autonomous task loop (same pattern as approve_autonomous_launch)
+            bg = asyncio.create_task(
+                _run_autonomous_task(
+                    task_id=task.id,
+                    conversation_id=task.conversation_id,
+                    agent_id=task.agent_id,
+                    agent_name=agent.name,
+                    default_model=agent.default_model,
+                    goal=task.goal or task.instruction,
+                    constraints=None,
+                    space_id=task.space_id,
+                )
+            )
+            _background_tasks.add(bg)
+            bg.add_done_callback(_task_done)
+
+            notification_service.create_notification(
+                db,
+                type="system",
+                title="Autonomous run resumed",
+                body=f"Resumed after restart: {(task.goal or task.instruction)[:100]}",
                 space_id=task.space_id,
             )
-        )
-        _background_tasks.add(bg)
-        bg.add_done_callback(_task_done)
-
-        notification_service.create_notification(
-            db,
-            type="system",
-            title="Autonomous run resumed",
-            body=f"Resumed after restart: {(task.goal or task.instruction)[:100]}",
-            space_id=task.space_id,
-        )
-        count += 1
+            count += 1
+        except Exception as exc:
+            logger.error("Failed to resume autonomous task %s: %s", task.id, exc)
+            try:
+                db.rollback()
+                task.status = BackgroundTaskStatus.FAILED
+                task.error = f"Resume failed: {exc}"
+                task.completed_at = datetime.now(UTC).replace(tzinfo=None)
+                db.commit()
+            except Exception:
+                logger.error("Failed to mark task %s as failed during resume", task.id)
 
     logger.info("Resumed %d autonomous task(s) after crash recovery", count)
     return count

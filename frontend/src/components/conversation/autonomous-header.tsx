@@ -256,17 +256,7 @@ export function AutonomousHeader({
               &#9654;
             </Button>
           )}
-          {!isFinished && onClose && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={onClose}
-              title="Close"
-            >
-              &#x2715;
-            </Button>
-          )}
-          {isFinished && onClose && (
+          {onClose && (
             <Button
               size="sm"
               variant="ghost"

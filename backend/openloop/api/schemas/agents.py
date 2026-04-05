@@ -72,8 +72,8 @@ class AgentPermissionResponse(BaseModel):
     id: str
     agent_id: str
     resource_pattern: str
-    operation: str
-    grant_level: str
+    operation: Operation
+    grant_level: GrantLevel
 
 
 class PermissionRequestUpdate(BaseModel):
@@ -95,9 +95,9 @@ class PermissionRequestResponse(BaseModel):
     conversation_id: str | None
     tool_name: str
     resource: str
-    operation: str
+    operation: Operation
     tool_input: dict | None
-    status: str
+    status: PermissionRequestStatus
     resolved_by: str | None
     created_at: datetime
     resolved_at: datetime | None

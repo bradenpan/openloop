@@ -110,7 +110,7 @@ def get_daily_token_stats(
     days: int = Query(7, ge=1, le=90),
 ) -> DailyTokenStatsResponse:
     """Return token usage bucketed by day for sparkline rendering."""
-    now = datetime.now(UTC)
+    now = datetime.now(UTC).replace(tzinfo=None)
     cutoff = now - timedelta(days=days)
 
     # SQLite date() function extracts YYYY-MM-DD from a datetime column

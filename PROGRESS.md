@@ -808,10 +808,40 @@ Full codebase review run by eng-manager agent team. 6 review agents (4 pattern-f
 - Layout tools (5) and search tools (2) — already had `_agent_id` + `_validate_space_access`
 - Drive tools — operate at Google API level, not space-scoped; permission enforcer mapping provides access control
 
+## Round 2 Code Review + Fixes — 2026-04-05
+
+Full re-review after Round 1 fixes. 6 review agents (backend fresh eyes, frontend fresh eyes, agent system deep dive, security + data integrity, API contract, test coverage) + live webapp E2E testing via Playwright.
+
+**Automated checks:** 1454/1454 backend tests pass. TypeScript clean. ESLint clean.
+
+**Live webapp E2E testing:** 14/14 Playwright tests pass. App shell, navigation, space CRUD, item create, Odin bar (SDK test), search modal, agents page, automations page, conversation lifecycle (SDK test), settings. **Claude Max subscription confirmed working end-to-end** — Odin and conversation both got real responses from Anthropic servers via Agent SDK.
+
+**Agent system deep dive:** Clean bill — all 80+ checks pass, all Round 1 fixes verified correct, production ready.
+
+**Security review:** All injection, authorization, SSRF, XSS, secrets, FK cascade, FTS5, and enum checks pass. 1 missed timezone instance found and fixed.
+
+### Fixes Applied
+
+1. **CRITICAL: `resume_autonomous_tasks` crash recovery** — `agent_runner.py`: Wrapped per-task logic in try/except. One deleted conversation no longer crashes recovery for all remaining tasks. Failed tasks marked with error and rolled back.
+2. **`response_model` on 5 endpoints** — `calendar.py` (get_event, list_calendars), `email.py` (setup_labels), `notifications.py` (mark_all_read), `search.py` (rebuild). All now have explicit response_model for OpenAPI spec.
+3. **Schema enum types** — `conversations.py`: `status: str` → `ConversationStatus`. `automations.py`: `status`/`trigger_type`/`last_run_status` → `BackgroundTaskStatus`/`AutomationTriggerType`. `agents.py`: `operation`/`grant_level`/`status` → `Operation`/`GrantLevel`/`PermissionRequestStatus`.
+4. **Pagination on behavioral rules** — `behavioral_rules.py`: Added `limit`/`offset` params.
+5. **Duplicate close button** — `autonomous-header.tsx`: Collapsed identical `{!isFinished && onClose}` and `{isFinished && onClose}` into single `{onClose && ...}`.
+6. **useCallback dep cleanup** — `conversation-panel.tsx`: Removed `isStreaming` from SSE handler deps (ref pattern handles it, dep caused unnecessary recreations).
+7. **Calendar attendees type guard** — `context_assembler.py`: Added `isinstance(a, dict)` check before `.get()`.
+8. **Missed timezone** — `stats.py:113`: `datetime.now(UTC)` → `.replace(tzinfo=None)`.
+
+### Known Remaining Items (deferred)
+
+**Test coverage gaps** (12 files with zero tests — dedicated testing session needed):
+- `gcalendar_client.py` (185 lines), `gmail_client.py` (494 lines), `google_auth.py` (172 lines), `llm_utils.py` (232 lines), `lifecycle_scheduler.py` (138 lines), `task_monitor.py` (76 lines)
+- API routes: `background_tasks.py`, `behavioral_rules.py`, `drive.py`, `system.py`, `integrations.py`, `running.py`
+
 ## Current State
 
 - **1454 backend tests passing**, lint clean on new code
-- **63 Playwright E2E tests passing** (new comprehensive suite) + 39 prior component tests
+- **14 live E2E Playwright tests passing** (app shell, CRUD, SDK/conversation, search, agents, automations, settings)
+- **63 Playwright E2E tests passing** (pre-existing comprehensive suite) + 39 prior component tests
 - **OpenAPI spec freshly regenerated** from current routes
 - Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes, permission inheritance with no-escalation enforcement, parallel sub-agent delegation with per-run caps, cascade termination/pause/resume, delegation monitoring MCP tools, audit-logged sub-agent completions, autonomous crash recovery with task list resumption, approval queue lifecycle with per-agent expiry and steering re-injection, structured run summaries with morning brief dashboard, **Google Calendar integration** (shared OAuth, 7 MCP tools, 15-min sync, cross-space data sources, per-space exclusion, calendar context in working memory, meeting prep automation template), **Gmail integration** (10 MCP tools, 15-min sync, triage labels, email context in working memory, email triage automation template), **Integration Builder agent** (3 exclusive MCP tools, SKILL.md, Odin routing, SSRF protection)
 - Frontend: dashboard with skeleton loading + backup reminder + morning brief, space view (widget-based layout), conversation panel with stream_end support, agent management with max_spawn_depth + approval_timeout_hours, search modal, document panel + viewer, Space Settings (tabbed: layout editor + memory health + history), task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, toast notifications, keyboard shortcuts + help overlay, browser tab badge, page transitions, empty states, 3 palettes × 2 themes, Odin SSE filtering with race-condition handling, accessible sidebar/panel, agent dropdown fix, type-safe API calls, local column toggle, validated localStorage, aria-labels, delegation tree sidebar, nested sub-agents in Active Agents panel, **Calendar** (home widget, /calendar page with sync + expandable events, space widget, conditional sidebar nav), **Email** (home widget with triage grouping, /email page with search + quick actions, space widget, conditional sidebar nav)

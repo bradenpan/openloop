@@ -184,7 +184,7 @@ export function ConversationPanel({
           }
         }
       },
-      [conversationId, isStreaming, finalizeStreaming],
+      [conversationId, finalizeStreaming],
     ),
   );
 
