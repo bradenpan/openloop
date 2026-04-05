@@ -154,6 +154,7 @@ class WidgetType(StrEnum):
     KANBAN_BOARD = "kanban_board"
     DATA_TABLE = "data_table"
     CONVERSATIONS = "conversations"
+    CALENDAR_EVENTS = "calendar_events"
     CHART = "chart"
     STAT_CARD = "stat_card"
     MARKDOWN = "markdown"
@@ -165,3 +166,13 @@ class WidgetSize(StrEnum):
     MEDIUM = "medium"
     LARGE = "large"
     FULL = "full"
+
+
+# ---------------------------------------------------------------------------
+# Source type constants (not an enum — source_type is a plain String column)
+# ---------------------------------------------------------------------------
+
+SOURCE_TYPE_GOOGLE_DRIVE = "google_drive"
+SOURCE_TYPE_GOOGLE_CALENDAR = "google_calendar"
+SOURCE_TYPE_GMAIL = "gmail"
+SOURCE_TYPE_API = "api"

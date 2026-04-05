@@ -5,6 +5,7 @@ import { KanbanBoard } from './kanban-board';
 import { TableView } from './table-view';
 import { ConversationSidebar } from './conversation-sidebar';
 import { DocumentPanel } from './document-panel';
+import { CalendarEventsWidget } from './calendar-events-widget';
 
 // Standard widget props that every widget receives
 export interface WidgetProps {
@@ -126,6 +127,7 @@ const registry: Record<string, ComponentType<WidgetProps>> = {
   data_table: DataTableWidget,
   conversations: ConversationsSidebarWidget,
   document_panel: DocumentPanelWidget,
+  calendar_events: CalendarEventsWidget,
   // Extended types render placeholders
   chart: PlaceholderWidget,
   stat_card: PlaceholderWidget,

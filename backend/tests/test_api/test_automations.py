@@ -327,6 +327,65 @@ def test_mark_all_read_no_notifications(client: TestClient):
     assert resp.json()["marked_read"] == 0
 
 
+# ---------------------------------------------------------------------------
+# System automations (include_system filter + 403 on delete)
+# ---------------------------------------------------------------------------
+
+
+def test_list_automations_include_system(client: TestClient, db_session: Session):
+    """GET /automations?include_system=true includes system automations."""
+    agent = _create_agent(client)
+    auto = _create_automation(client, agent["id"], name="Regular")
+
+    # Create a system automation directly (API doesn't expose is_system on create)
+    sys_auto = automation_service.create_automation(
+        db_session,
+        name="Sync Automation",
+        agent_id=agent["id"],
+        instruction="System sync task.",
+        trigger_type="event",
+    )
+    sys_auto.is_system = True
+    db_session.commit()
+
+    # Default: system hidden
+    resp = client.get("/api/v1/automations")
+    names = [a["name"] for a in resp.json()]
+    assert "Regular" in names
+    assert "Sync Automation" not in names
+
+    # With include_system=true
+    resp = client.get("/api/v1/automations", params={"include_system": True})
+    names = [a["name"] for a in resp.json()]
+    assert "Regular" in names
+    assert "Sync Automation" in names
+
+
+def test_delete_system_automation_returns_403(client: TestClient, db_session: Session):
+    """DELETE /automations/{id} for a system automation should return 403."""
+    agent = _create_agent(client)
+    auto = automation_service.create_automation(
+        db_session,
+        name="System Only",
+        agent_id=agent["id"],
+        instruction="Do not delete.",
+        trigger_type="event",
+    )
+    auto.is_system = True
+    db_session.commit()
+
+    resp = client.delete(f"/api/v1/automations/{auto.id}")
+    assert resp.status_code == 403
+
+
+def test_delete_non_system_automation_succeeds(client: TestClient, db_session: Session):
+    """DELETE /automations/{id} for a regular automation still returns 204."""
+    agent = _create_agent(client)
+    auto = _create_automation(client, agent["id"], name="Deletable")
+    resp = client.delete(f"/api/v1/automations/{auto['id']}")
+    assert resp.status_code == 204
+
+
 def test_mark_all_read_already_read_not_double_counted(client: TestClient, db_session: Session):
     notif = notification_service.create_notification(
         db_session, type="system", title="Already Read", body="X"

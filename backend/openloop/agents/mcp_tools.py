@@ -22,7 +22,9 @@ from backend.openloop.services import (
     agent_service,
     background_task_service,
     behavioral_rule_service,
+    calendar_integration_service,
     conversation_service,
+    data_source_service,
     document_service,
     item_link_service,
     item_service,
@@ -31,6 +33,7 @@ from backend.openloop.services import (
     search_service,
     space_service,
 )
+from contract.enums import SOURCE_TYPE_GOOGLE_CALENDAR
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -2460,6 +2463,328 @@ async def update_task_list(
 
 
 # ---------------------------------------------------------------------------
+# Calendar tools (conditionally registered)
+# ---------------------------------------------------------------------------
+
+
+async def list_calendar_events(
+    start: str, end: str, calendar_id: str = "",
+    *, _db=None,
+) -> str:
+    """List calendar events between start and end datetimes. Dates are ISO format (e.g. 2026-04-05T09:00:00). Optionally filter by calendar_id."""
+    db = _get_db(_db)
+    try:
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+
+        # If most recent synced_at is >30 min old, trigger a sync first
+        from backend.openloop.db.models import CalendarEvent, DataSource
+
+        latest = (
+            db.query(CalendarEvent.synced_at)
+            .order_by(CalendarEvent.synced_at.desc())
+            .first()
+        )
+        stale = True
+        if latest and latest[0]:
+            age = datetime.now(UTC).replace(tzinfo=None) - latest[0]
+            stale = age.total_seconds() > 1800  # 30 minutes
+
+        if stale:
+            cal_ds = (
+                db.query(DataSource)
+                .filter(
+                    DataSource.source_type == SOURCE_TYPE_GOOGLE_CALENDAR,
+                    DataSource.space_id.is_(None),
+                )
+                .first()
+            )
+            if cal_ds:
+                try:
+                    calendar_integration_service.sync_events(db, cal_ds.id)
+                except Exception:
+                    pass  # sync failure is non-fatal; use cached data
+
+        events = calendar_integration_service.get_cached_events(
+            db, start_dt, end_dt,
+            calendar_id=calendar_id or None,
+        )
+        return _ok(
+            [
+                {
+                    "id": e.id,
+                    "title": e.title,
+                    "start_time": e.start_time.isoformat() if e.start_time else None,
+                    "end_time": e.end_time.isoformat() if e.end_time else None,
+                    "all_day": e.all_day,
+                    "location": e.location,
+                    "calendar_id": e.calendar_id,
+                    "status": e.status,
+                    "attendees": (
+                        [a.get("email", a.get("displayName", "")) for a in (e.attendees or [])]
+                        if e.attendees else []
+                    ),
+                    "has_conference": bool(e.conference_data),
+                }
+                for e in events
+            ]
+        )
+    except ValueError as ve:
+        return _err(f"Invalid date format: {ve}")
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def get_calendar_event(
+    event_id: str, *, _db=None,
+) -> str:
+    """Get full details of a calendar event including any related meeting brief."""
+    db = _get_db(_db)
+    try:
+        result = calendar_integration_service.get_event_with_brief(db, event_id)
+        return _ok(result)
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def create_calendar_event(
+    title: str, start: str, end: str,
+    attendees: str = "", description: str = "", location: str = "",
+    *, _db=None,
+) -> str:
+    """Create a new calendar event. start/end are ISO datetimes. attendees is a comma-separated list of email addresses."""
+    db = _get_db(_db)
+    try:
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+
+        # Parse comma-separated attendees into list of dicts
+        attendee_list = None
+        if attendees:
+            attendee_list = [
+                {"email": email.strip()}
+                for email in attendees.split(",")
+                if email.strip()
+            ]
+
+        # Get default calendar_id from DataSource config
+        from backend.openloop.db.models import DataSource
+
+        cal_ds = (
+            db.query(DataSource)
+            .filter(
+                DataSource.source_type == SOURCE_TYPE_GOOGLE_CALENDAR,
+                DataSource.space_id.is_(None),
+            )
+            .first()
+        )
+        cal_id = "primary"
+        if cal_ds and cal_ds.config:
+            cal_id = cal_ds.config.get("default_calendar_id", "primary")
+
+        event = calendar_integration_service.create_event(
+            db,
+            calendar_id=cal_id,
+            title=title,
+            start=start_dt,
+            end=end_dt,
+            description=description or None,
+            location=location or None,
+            attendees=attendee_list,
+        )
+        return _ok(
+            {
+                "id": event.id,
+                "title": event.title,
+                "start_time": event.start_time.isoformat() if event.start_time else None,
+                "end_time": event.end_time.isoformat() if event.end_time else None,
+                "calendar_id": event.calendar_id,
+                "html_link": event.html_link,
+            }
+        )
+    except ValueError as ve:
+        return _err(f"Invalid date format: {ve}")
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def update_calendar_event(
+    event_id: str,
+    title: str = "", start: str = "", end: str = "",
+    description: str = "", location: str = "", attendees: str = "",
+    *, _db=None,
+) -> str:
+    """Update a calendar event. Only non-empty fields are changed. attendees is a comma-separated list of email addresses."""
+    db = _get_db(_db)
+    try:
+        kwargs: dict = {}
+        if title:
+            kwargs["title"] = title
+        if start:
+            kwargs["start"] = datetime.fromisoformat(start)
+        if end:
+            kwargs["end"] = datetime.fromisoformat(end)
+        if description:
+            kwargs["description"] = description
+        if location:
+            kwargs["location"] = location
+        if attendees:
+            kwargs["attendees"] = [
+                {"email": email.strip()}
+                for email in attendees.split(",")
+                if email.strip()
+            ]
+
+        if not kwargs:
+            return _err("No fields to update")
+
+        event = calendar_integration_service.update_event(db, event_id, **kwargs)
+        return _ok(
+            {
+                "id": event.id,
+                "title": event.title,
+                "start_time": event.start_time.isoformat() if event.start_time else None,
+                "end_time": event.end_time.isoformat() if event.end_time else None,
+                "calendar_id": event.calendar_id,
+                "html_link": event.html_link,
+            }
+        )
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except ValueError as ve:
+        return _err(f"Invalid date format: {ve}")
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def delete_calendar_event(
+    event_id: str, *, _db=None,
+) -> str:
+    """Delete a calendar event from Google Calendar."""
+    db = _get_db(_db)
+    try:
+        calendar_integration_service.delete_event(db, event_id)
+        return _ok({"deleted": event_id})
+    except HTTPException as exc:
+        return _err(exc.detail)
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def find_free_time(
+    start: str, end: str, duration_minutes: str,
+    *, _db=None,
+) -> str:
+    """Find available time slots of at least duration_minutes between start and end. Dates are ISO format."""
+    db = _get_db(_db)
+    try:
+        start_dt = datetime.fromisoformat(start)
+        end_dt = datetime.fromisoformat(end)
+        duration = int(duration_minutes)
+
+        slots = calendar_integration_service.find_free_time(
+            db, start_dt, end_dt, duration,
+        )
+        return _ok(slots)
+    except ValueError as ve:
+        return _err(f"Invalid input: {ve}")
+    except Exception as e:
+        db.rollback()
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+async def list_calendars(*, _db=None) -> str:
+    """List all Google Calendars the user has access to."""
+    try:
+        from backend.openloop.services import gcalendar_client
+
+        if not gcalendar_client.is_authenticated():
+            return _err("Google Calendar is not authenticated.")
+
+        calendars = gcalendar_client.list_calendars()
+        return _ok(
+            [
+                {
+                    "id": c.get("id"),
+                    "summary": c.get("summary"),
+                    "primary": c.get("primary", False),
+                    "access_role": c.get("accessRole"),
+                }
+                for c in calendars
+            ]
+        )
+    except Exception as e:
+        return _err(str(e))
+
+
+# Calendar tool registry
+_CALENDAR_TOOLS = {
+    "list_calendar_events": list_calendar_events,
+    "get_calendar_event": get_calendar_event,
+    "create_calendar_event": create_calendar_event,
+    "update_calendar_event": update_calendar_event,
+    "delete_calendar_event": delete_calendar_event,
+    "find_free_time": find_free_time,
+    "list_calendars": list_calendars,
+}
+
+
+def _has_calendar_data_source(space_id: str | None = None) -> bool:
+    """Check if a Google Calendar system DataSource exists and is not excluded for the space.
+
+    Returns True if calendar tools should be included.
+    """
+    db = SessionLocal()
+    try:
+        from backend.openloop.db.models import DataSource
+
+        cal_ds = (
+            db.query(DataSource)
+            .filter(
+                DataSource.source_type == SOURCE_TYPE_GOOGLE_CALENDAR,
+                DataSource.space_id.is_(None),
+            )
+            .first()
+        )
+        if not cal_ds:
+            return False
+
+        # If space_id provided, check exclusion
+        if space_id:
+            if data_source_service.is_excluded(db, space_id, cal_ds.id):
+                return False
+
+        return True
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
 # Builder functions
 # ---------------------------------------------------------------------------
 
@@ -2589,16 +2914,24 @@ def _make_decorated_tools(
     return decorated
 
 
-def build_agent_tools(agent_name: str, agent_id: str = "", background_task_id: str = ""):
+def build_agent_tools(
+    agent_name: str, agent_id: str = "", background_task_id: str = "",
+    space_id: str | None = None,
+):
     """Build the standard MCP tool server for a space agent.
 
     Returns a server from create_sdk_mcp_server with tools 1-33 + queue_approval.
+    Conditionally includes calendar tools if a Google Calendar DataSource exists
+    and is not excluded for the agent's space.
     agent_id is the UUID needed for behavioral rule operations.
     background_task_id is needed for queue_approval in autonomous mode.
     """
     from claude_agent_sdk import create_sdk_mcp_server
 
-    tools = _make_decorated_tools(_STANDARD_TOOLS, agent_name, agent_id, background_task_id)
+    tool_map = dict(_STANDARD_TOOLS)
+    if _has_calendar_data_source(space_id):
+        tool_map.update(_CALENDAR_TOOLS)
+    tools = _make_decorated_tools(tool_map, agent_name, agent_id, background_task_id)
     return create_sdk_mcp_server(f"openloop_{agent_name}", tools=tools)
 
 
@@ -2606,11 +2939,14 @@ def build_odin_tools(agent_id: str = "", background_task_id: str = ""):
     """Build the Odin-specific MCP tool server.
 
     Returns a server from create_sdk_mcp_server with standard tools (1-33)
-    plus Odin-only tools (20-25).
+    plus Odin-only tools (20-25). Includes calendar tools if a Google Calendar
+    DataSource exists (no space exclusion check for Odin).
     """
     from claude_agent_sdk import create_sdk_mcp_server
 
     all_tools = {**_STANDARD_TOOLS, **_ODIN_TOOLS}
+    if _has_calendar_data_source():
+        all_tools.update(_CALENDAR_TOOLS)
     tools = _make_decorated_tools(all_tools, "odin", agent_id, background_task_id)
     return create_sdk_mcp_server("openloop_odin", tools=tools)
 
@@ -2622,13 +2958,19 @@ _AGENT_BUILDER_TOOLS = {
 }
 
 
-def build_agent_builder_tools(agent_name: str, agent_id: str = "", background_task_id: str = ""):
+def build_agent_builder_tools(
+    agent_name: str, agent_id: str = "", background_task_id: str = "",
+    space_id: str | None = None,
+):
     """Build MCP tools for the Agent Builder agent.
 
     Standard tools + register_agent + test_agent (exclusive to Agent Builder).
+    Conditionally includes calendar tools if available.
     """
     from claude_agent_sdk import create_sdk_mcp_server
 
     all_tools = {**_STANDARD_TOOLS, **_AGENT_BUILDER_TOOLS}
+    if _has_calendar_data_source(space_id):
+        all_tools.update(_CALENDAR_TOOLS)
     tools = _make_decorated_tools(all_tools, agent_name, agent_id, background_task_id)
     return create_sdk_mcp_server(f"openloop_{agent_name}", tools=tools)

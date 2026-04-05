@@ -1,6 +1,6 @@
 # OpenLoop: Capability Specification (DRAFT v6)
 
-**Status:** Under review — not yet approved for implementation.
+**Status:** Active — P0, P1, P0-Autonomy, P1-Autonomy, and P2-Autonomy fully implemented. P2 partially complete (Google Calendar integration built in Phase 12). See build status markers on each capability.
 
 ---
 
@@ -356,86 +356,103 @@ Accessible from Home or Settings. Shows:
 
 ## Capabilities by Priority
 
-### P0 — Must work at launch
+### P0 — Must work at launch — ALL BUILT
 
-1. **Home dashboard** — cross-space task list, attention items, active agents, space list, Odin chat
-2. **Space management** — create spaces from templates (Project, CRM, Knowledge Base, Simple), configure data sources
-3. **Unified items** — all tracked work (tasks and records) in a single data model. List view (checklist style), Kanban view, and Table view of the same data. Cross-space task aggregation on Home. is_done/stage bidirectional sync.
-4. **Board with stages** — create, move, edit, archive items. Kanban drag-and-drop. Optional per space. Default columns: Idea → Scoping → To Do → In Progress → Done. "Done" column hideable.
-5. **Odin (front door)** — always-visible chat input running on Haiku. Handles simple actions directly, routes complex work to space agents. Natural language, no memorized commands.
-6. **Agent conversations** — start a named conversation with an agent in a space context. Interactive chat with streaming responses. Agent has access to space data, memory, and board state. Can create/update items (tasks, records) and manage item links. Model selectable per conversation (default Sonnet, option for Opus).
-7. **Agent delegation** — tell an agent to go work on a task in the background. Status indicator with expandable log. Results flow back.
-8. **Context management** — conversations maintain history. Closing generates a summary. Mandatory pre-compaction memory flush before any summarization (agent saves unsaved facts to persistent memory before context is compressed), followed by post-compaction verification (check that key facts from the compressed section exist in persistent memory). Proactive budget enforcement checks context size before each LLM call and compresses at clean turn boundaries when needed. Most recent 7 exchanges kept verbatim during compression — only older history is summarized. Auto-checkpoint when context usage exceeds 70%. Stale-session recovery: if an SDK session expires, the system retries with fresh context automatically. Rate limit handling: automatic retry with exponential backoff and user notification. New conversations get summaries + facts + behavioral rules + board state. Context ordered for maximum model attention: high-priority at beginning/end, reference material in middle.
-9. **Agent memory tools** — agents have explicit tools to save, update, and delete facts. Agents actively curate their knowledge rather than passively receiving context. System prompts instruct agents to use these proactively. Write-time dedup prevents contradictory or duplicate entries.
-10. **Permissions layer** — per-agent, per-resource, per-operation permissions with three grant levels. Inline approval in conversations, pending approvals visible in Home Attention Items. No timeout — agents wait indefinitely for approval. System guardrails non-overridable.
+1. **Home dashboard** [BUILT] — cross-space task list, attention items, active agents, space list, Odin chat
+2. **Space management** [BUILT] — create spaces from templates (Project, CRM, Knowledge Base, Simple), configure data sources
+3. **Unified items** [BUILT] — all tracked work (tasks and records) in a single data model. List view (checklist style), Kanban view, and Table view of the same data. Cross-space task aggregation on Home. is_done/stage bidirectional sync.
+4. **Board with stages** [BUILT] — create, move, edit, archive items. Kanban drag-and-drop. Optional per space. Default columns: Idea → Scoping → To Do → In Progress → Done. "Done" column hideable.
+5. **Odin (front door)** [BUILT] — always-visible chat input running on Haiku. Handles simple actions directly, routes complex work to space agents. Natural language, no memorized commands.
+6. **Agent conversations** [BUILT] — start a named conversation with an agent in a space context. Interactive chat with streaming responses. Agent has access to space data, memory, and board state. Can create/update items (tasks, records) and manage item links. Model selectable per conversation (default Sonnet, option for Opus).
+7. **Agent delegation** [BUILT] — tell an agent to go work on a task in the background. Status indicator with expandable log. Results flow back.
+8. **Context management** [BUILT] — conversations maintain history. Closing generates a summary. Mandatory pre-compaction memory flush before any summarization (agent saves unsaved facts to persistent memory before context is compressed), followed by post-compaction verification (check that key facts from the compressed section exist in persistent memory). Proactive budget enforcement checks context size before each LLM call and compresses at clean turn boundaries when needed. Most recent 7 exchanges kept verbatim during compression — only older history is summarized. Auto-checkpoint when context usage exceeds 70%. Stale-session recovery: if an SDK session expires, the system retries with fresh context automatically. Rate limit handling: automatic retry with exponential backoff and user notification. New conversations get summaries + facts + behavioral rules + board state. Context ordered for maximum model attention: high-priority at beginning/end, reference material in middle.
+9. **Agent memory tools** [BUILT] — agents have explicit tools to save, update, and delete facts. Agents actively curate their knowledge rather than passively receiving context. System prompts instruct agents to use these proactively. Write-time dedup prevents contradictory or duplicate entries.
+10. **Permissions layer** [BUILT] — per-agent, per-resource, per-operation permissions with three grant levels. Inline approval in conversations, pending approvals visible in Home Attention Items. No timeout — agents wait indefinitely for approval. System guardrails non-overridable.
 
-### P1 — Important, build soon after launch
+### P1 — Important, build soon after launch — ALL BUILT
 
-11. **Agent Builder** — specialized agent for creating new agents through conversational requirements gathering. Writes config and registers in system. Accessible via Odin. (At P0 launch, agents created via UI form. Agent Builder adds the conversational creation flow.)
-12. **Records (CRM-style items)** — tracked entities with custom fields and pipelines. Linked tasks via item_links (many-to-many). Table view.
-13. **Table view** — alternative to Kanban for CRM-style spaces. Rows = records, columns = configurable fields.
-14. **Google Drive integration** — link Drive folders to spaces. Agents read/write documents. Indexed and searchable.
-15. **Documents/data management** — per-space document management with metadata, tags, search.
-16. **Sub-agent delegation** — agents can spin up sub-agents for focused work within a conversation.
-17. **Conversation management** — list all conversations across spaces, sort by recency, close stale ones, search history.
-18. **Multiple active conversations** — up to 5 open simultaneously, flip between them.
-19. **Proactive surfacing** — agents scan board and data for dropped balls, stale items, overdue follow-ups.
-20. **Automated daily backup** — scheduled Google Drive backup of SQLite database.
-21. **Cron-based automations** — scheduled agent runs (daily briefing, hourly email check, weekly health summary). Automation CRUD, run history, dashboard. Manual trigger button.
-22. **Procedural memory** — behavioral rules learned from user corrections and validated approaches, captured with confidence scores (asymmetric: contradictions decrease confidence at 2x the rate of confirmations), injected into agent context at start of every conversation. Agents improve over time — corrections and confirmed successes both stick across sessions.
-23. **Temporal fact management** — facts track when they became true and when they were superseded. Historical facts preserved for querying. Write-time comparison detects contradictions and supersedes old facts automatically.
-24. **Cross-space and deep search** — FTS5 full-text indexes on memory, messages, and summaries. Conversation and summary search across spaces (scoped to agent permissions). Replaces basic substring matching with ranked results.
-25. **Mid-task steering** — send a message to a running background agent to redirect it. Background delegation uses a managed turn loop: the agent runner auto-continues between agent turns, checking a steering queue at each turn boundary. User corrections are picked up at the next turn boundary — no restart needed. Works within the Claude Agent SDK's existing `query()` + `resume` mechanism.
-26. **Widget-based space layouts** — spaces use a configurable widget layout instead of hardcoded views. Templates provide defaults. Layouts editable via settings panel and agent MCP tools. Core widgets: task list panel, kanban board, data table, conversation sidebar. Agents can read, modify, and fully redesign space layouts.
+11. **Agent Builder** [BUILT] — specialized agent for creating new agents through conversational requirements gathering. Writes config and registers in system. Accessible via Odin. (At P0 launch, agents created via UI form. Agent Builder adds the conversational creation flow.)
+12. **Records (CRM-style items)** [BUILT] — tracked entities with custom fields and pipelines. Linked tasks via item_links (many-to-many). Table view.
+13. **Table view** [BUILT] — alternative to Kanban for CRM-style spaces. Rows = records, columns = configurable fields.
+14. **Google Drive integration** [BUILT] — link Drive folders to spaces. Agents read/write documents. Indexed and searchable.
+15. **Documents/data management** [BUILT] — per-space document management with metadata, tags, search.
+16. **Sub-agent delegation** [BUILT] — agents can spin up sub-agents for focused work within a conversation.
+17. **Conversation management** [BUILT] — list all conversations across spaces, sort by recency, close stale ones, search history.
+18. **Multiple active conversations** [BUILT] — up to 5 open simultaneously, flip between them.
+19. **Proactive surfacing** [PARTIAL] — automation templates exist for stale work, follow-ups, and daily task review (disabled by default). Full proactive system depends on calendar/email integrations.
+20. **Automated daily backup** [BUILT] — scheduled Google Drive backup of SQLite database.
+21. **Cron-based automations** [BUILT] — scheduled agent runs (daily briefing, hourly email check, weekly health summary). Automation CRUD, run history, dashboard. Manual trigger button.
+22. **Procedural memory** [BUILT] — behavioral rules learned from user corrections and validated approaches, captured with confidence scores (asymmetric: contradictions decrease confidence at 2x the rate of confirmations), injected into agent context at start of every conversation. Agents improve over time — corrections and confirmed successes both stick across sessions.
+23. **Temporal fact management** [BUILT] — facts track when they became true and when they were superseded. Historical facts preserved for querying. Write-time comparison detects contradictions and supersedes old facts automatically.
+24. **Cross-space and deep search** [BUILT] — FTS5 full-text indexes on memory, messages, and summaries. Conversation and summary search across spaces (scoped to agent permissions). Replaces basic substring matching with ranked results.
+25. **Mid-task steering** [BUILT] — send a message to a running background agent to redirect it. Background delegation uses a managed turn loop: the agent runner auto-continues between agent turns, checking a steering queue at each turn boundary. User corrections are picked up at the next turn boundary — no restart needed. Works within the Claude Agent SDK's existing `query()` + `resume` mechanism.
+26. **Widget-based space layouts** [BUILT] — spaces use a configurable widget layout instead of hardcoded views. Templates provide defaults. Layouts editable via settings panel and agent MCP tools. Core widgets: task list panel, kanban board, data table, conversation sidebar. Agents can read, modify, and fully redesign space layouts.
 
 ### P2 — Valuable, build when core is solid
 
-27. **Calendar integration** — read calendar, surface upcoming meetings.
-28. **Email integration** — read/draft emails, sort inbox, flag items needing response.
-29. **Event-based automations** — triggered by calendar events, new emails, data source updates. Requires event bus.
-30. **Morning briefing** — pre-configured automation: daily summary across all spaces.
-31. **Meeting prep automation** — event-triggered: detect meetings without briefs, auto-dispatch prep agents.
-32. **Follow-up tracking** — scheduled automation: time-based reminders on items and records.
-33. **Stale work detection** — scheduled automation: surface items that haven't moved.
-34. **API data source integrations** — connect Garmin, bank feeds, and other APIs to spaces.
-35. **Configurable autonomy** — per-agent autonomy levels for specific operation types.
-36. **Subspaces** — nested spaces with context inheritance.
-37. **Memory lifecycle management** — hard caps per namespace with lowest-scored eviction. Auto-archival of superseded facts after 90 days. Periodic LLM-driven consolidation: merges related facts, flags contradictions, suggests archival — surfaces to user for approval.
-38. **Summary consolidation** — automated meta-summary generation when a space exceeds 20 unconsolidated summaries. Condensed overview replaces individual summaries in context assembly. Manual trigger available. Successive consolidation keeps one current meta-summary covering full history.
-39. **Retrieval scoring** — context assembly scores facts by importance, recency, and access frequency (Ebbinghaus-inspired decay). Frequently-used, high-importance facts stay prominent regardless of age.
-40. **Multi-step workflow tracking** — background tasks track current step, total steps, and step results. Parent-child task hierarchies for sub-agent delegation. Failed tasks show exactly where they stopped, enabling resume from failure point.
-41. **Extended widget library** — chart/graph widgets (connected to data sources), stat cards, markdown/notes panels, data feed widgets. Depends on API data source integrations. Enables agent-designed spaces like a health dashboard with Garmin charts and bloodwork tracking.
+27. **Calendar integration** [BUILT] — Phase 12: agents read/write events via 7 MCP tools (list, get, create, update, delete, find_free_time, list_calendars). Event cache syncs every 15 min via cron. Calendar widget on Home dashboard + dedicated Calendar page with day/week navigation. Cross-space data source (space_id=null) with per-space exclusion. Shared OAuth with incremental scope authorization. See INTEGRATION-CAPABILITIES.md.
+28. **Email integration** [NOT BUILT] — read/triage inbox, draft replies, sort with agent-managed labels. Dashboard-style widget grouped by triage labels, click-through to Gmail. Dedicated Email page. See INTEGRATION-CAPABILITIES.md.
+29. **Event-based automations** [NOT BUILT] — triggered by calendar events, new emails, data source updates. Requires event bus. Deferred — 15-min cron sync is the v1 approach for calendar. Event-driven triggers planned separately.
+30. **Morning briefing** [PARTIAL] — automation template exists (disabled by default). Morning brief API and UI component built (Phase 11). Calendar data now available for briefings via Phase 12 MCP tools. Full briefing with email summary depends on Gmail integration (Phase 13). Meeting Prep automation template added in Phase 12.
+31. **Meeting prep automation** [PARTIAL] — cron-based Meeting Prep template added in Phase 12.4b. Runs on a schedule to detect upcoming meetings without briefs and dispatch prep agents. Event-triggered version (auto-fire when new meeting appears) deferred to event-based automations (#29).
+32. **Follow-up tracking** [PARTIAL] — automation template exists (disabled by default).
+33. **Stale work detection** [PARTIAL] — automation template exists (disabled by default).
+34. **API data source integrations** [NOT BUILT] — connect Garmin, bank feeds, and other APIs to spaces. To be handled by the Integration Builder agent. See INTEGRATION-CAPABILITIES.md.
+35. **Configurable autonomy** [BUILT] — three tiers (interactive/supervised/autonomous) with per-agent settings for max_spawn_depth, approval_timeout_hours, heartbeat configuration.
+36. **Subspaces** [NOT BUILT] — nested spaces with context inheritance. `parent_space_id` in schema for future use.
+37. **Memory lifecycle management** [BUILT] — hard caps per namespace with lowest-scored eviction. Auto-archival of superseded facts after 90 days. Periodic LLM-driven consolidation: merges related facts, flags contradictions, suggests archival — surfaces to user for approval.
+38. **Summary consolidation** [BUILT] — automated meta-summary generation when a space exceeds 20 unconsolidated summaries. Condensed overview replaces individual summaries in context assembly. Manual trigger available. Successive consolidation keeps one current meta-summary covering full history.
+39. **Retrieval scoring** [BUILT] — context assembly scores facts by importance, recency, and access frequency (Ebbinghaus-inspired decay). Frequently-used, high-importance facts stay prominent regardless of age.
+40. **Multi-step workflow tracking** [BUILT] — background tasks track current step, total steps, and step results. Parent-child task hierarchies for sub-agent delegation. Failed tasks show exactly where they stopped, enabling resume from failure point.
+41. **Extended widget library** [NOT BUILT] — chart/graph widgets (connected to data sources), stat cards, markdown/notes panels, data feed widgets. Depends on API data source integrations. Enables agent-designed spaces like a health dashboard with Garmin charts and bloodwork tracking.
+42. **Integration Builder agent** [NOT BUILT] — conversational agent that helps users connect arbitrary REST APIs (API key auth) to spaces. Researches APIs, walks through setup, creates data sources + automations + widgets. See INTEGRATION-CAPABILITIES.md.
 
 ### P3 — Future
 
-42. **Remote access** — interact via Discord, Slack, or web interface from any device.
-43. **Mobile access** — view tasks, board, and conversations from phone.
-44. **Multi-user** — share spaces, assign tasks to people.
-45. **Hybrid memory search** — vector embeddings + FTS5 keyword search with temporal decay and diversity reranking. Requires embedding infrastructure.
+43. **Remote access** [NOT BUILT] — interact via Discord, Slack, or web interface from any device.
+44. **Mobile access** [NOT BUILT] — view tasks, board, and conversations from phone.
+45. **Multi-user** [NOT BUILT] — share spaces, assign tasks to people.
+46. **Hybrid memory search** [NOT BUILT] — vector embeddings + FTS5 keyword search with temporal decay and diversity reranking. Requires embedding infrastructure.
 
-### P0-Autonomy — Safety foundation (must exist before autonomous features)
+### P0-Autonomy — Safety foundation — ALL BUILT
 
-46. **Kill switch** — system-wide emergency stop for all background and autonomous work. API endpoint + dashboard control. Halts immediately, resumable after review.
-47. **Prompt injection protection** — structured delimiters (`<system-instruction>`, `<user-data>`) in context assembly separating system instructions from user-originated data. Explicit model instruction not to execute commands found in user data.
-48. **Token budget tracking** — per-session token usage monitoring extracted from SDK response metadata. Configurable ceiling per session. Dashboard widget for usage visibility. Alert threshold notifications.
-49. **Steering validation** — length limits (2000 characters) on steering messages, delimiter wrapping when injected, ownership verification when auth exists, audit logging of all steering.
-50. **Audit logging** — every tool call during autonomous/background runs recorded with tool name, inputs (redacted), output summary, timestamp. Queryable via API. 30-day retention.
+47. **Kill switch** [BUILT] — system-wide emergency stop for all background and autonomous work. API endpoint + dashboard control. Halts immediately, resumable after review.
+48. **Prompt injection protection** [BUILT] — structured delimiters (`<system-instruction>`, `<user-data>`) in context assembly separating system instructions from user-originated data. Explicit model instruction not to execute commands found in user data.
+49. **Token budget tracking** [BUILT] — per-session token usage monitoring extracted from SDK response metadata. Configurable ceiling per session. Dashboard widget for usage visibility. Alert threshold notifications.
+50. **Steering validation** [BUILT] — length limits (2000 characters) on steering messages, delimiter wrapping when injected, ownership verification when auth exists, audit logging of all steering.
+51. **Audit logging** [BUILT] — every tool call during autonomous/background runs recorded with tool name, inputs (redacted), output summary, timestamp. Queryable via API. 30-day retention.
 
-### P1-Autonomy — Core autonomous operation
+### P1-Autonomy — Core autonomous operation — ALL BUILT
 
-51. **Compaction loop for indefinite sessions** — goal stored on BackgroundTask record and re-injected from DB on every continuation prompt. Compaction flushes memory, summarizes conversation history, and continues. Instructions are never at risk because they come from the DB, not the context window. Replaces hard 20-turn cap with soft budgets (token, time, completion signal).
-52. **Autonomous launch flow** — goal → clarifying questions → user approval → task list generation → iterative execution → adaptive planning → completion. The only autonomy tier requiring explicit user setup.
-53. **Self-directed work queue** — agent-managed task lists stored as structured data on the BackgroundTask record. Items can be marked complete, added, reordered, skipped, or blocked. Visible in the UI alongside the conversation. Survives compaction.
-54. **Lane-isolated concurrency** — independent concurrency lanes (interactive, autonomous, automation, sub-agent) that don't compete. Each lane has its own session cap. Removes the "yield to interactive" check that currently freezes background work.
-55. **Smart continuation prompts** — context-aware prompts replacing the static continuation string. Include progress (8/30 items), budget remaining (62% tokens, 2h 45m), items completed this cycle, queued approvals, and explicit permission to adapt priorities.
-56. **Dashboard monitoring** — Active Agents panel (running agents with progress and controls), Activity Feed (real-time stream of agent actions), Pending Approvals (queued actions needing sign-off). Integrated into the Home dashboard, not a separate page.
+52. **Compaction loop for indefinite sessions** [BUILT] — goal stored on BackgroundTask record and re-injected from DB on every continuation prompt. Compaction flushes memory, summarizes conversation history, and continues. Instructions are never at risk because they come from the DB, not the context window. Replaces hard 20-turn cap with soft budgets (token, time, completion signal).
+53. **Autonomous launch flow** [BUILT] — goal → clarifying questions → user approval → task list generation → iterative execution → adaptive planning → completion. The only autonomy tier requiring explicit user setup.
+54. **Self-directed work queue** [BUILT] — agent-managed task lists stored as structured data on the BackgroundTask record. Items can be marked complete, added, reordered, skipped, or blocked. Visible in the UI alongside the conversation. Survives compaction.
+55. **Lane-isolated concurrency** [BUILT] — independent concurrency lanes (interactive, autonomous, automation, sub-agent) that don't compete. Each lane has its own session cap. Removes the "yield to interactive" check that currently freezes background work.
+56. **Smart continuation prompts** [BUILT] — context-aware prompts replacing the static continuation string. Include progress (8/30 items), budget remaining (62% tokens, 2h 45m), items completed this cycle, queued approvals, and explicit permission to adapt priorities.
+57. **Dashboard monitoring** [BUILT] — Active Agents panel (running agents with progress and controls), Activity Feed (real-time stream of agent actions), Pending Approvals (queued actions needing sign-off). Integrated into the Home dashboard, not a separate page.
 
-### P2-Autonomy — Extended autonomy
+### P2-Autonomy — Extended autonomy — ALL BUILT
 
-57. **Parallel sub-agent fan-out** — autonomous agents delegate items to parallel sub-agents. Concurrency cap per run (default: 3). Sub-agents inherit parent permissions (cannot exceed parent scope). Configurable `max_spawn_depth` per agent. Failure isolation: sub-agent failures don't kill the parent run.
-58. **Heartbeat protocol** — periodic autonomous check-ins where the agent wakes up, surveys its spaces, and decides whether to act or stay quiet. Built on automation infrastructure with a survey prompt instead of an instruction. Configurable frequency (default: 30 minutes during working hours).
-59. **Overnight summary generation** — autonomous agents that complete overnight work generate a summary of everything they did, discoverable on the dashboard Activity Feed in the morning.
-60. **Crash recovery for autonomous runs** — on startup, interrupted autonomous sessions are detected. Task list state on BackgroundTask records enables resume from the last completed item rather than full restart.
+58. **Parallel sub-agent fan-out** [BUILT] — autonomous agents delegate items to parallel sub-agents. Concurrency cap per run (default: 3). Sub-agents inherit parent permissions (cannot exceed parent scope). Configurable `max_spawn_depth` per agent. Failure isolation: sub-agent failures don't kill the parent run.
+59. **Heartbeat protocol** [BUILT] — periodic autonomous check-ins where the agent wakes up, surveys its spaces, and decides whether to act or stay quiet. Built on automation infrastructure with a survey prompt instead of an instruction. Configurable frequency (default: 30 minutes during working hours).
+60. **Overnight summary generation** [BUILT] — autonomous agents that complete overnight work generate a summary of everything they did, discoverable on the dashboard Activity Feed in the morning.
+61. **Crash recovery for autonomous runs** [BUILT] — on startup, interrupted autonomous sessions are detected. Task list state on BackgroundTask records enables resume from the last completed item rather than full restart.
+
+### Beyond Spec — Additional capabilities built during implementation
+
+62. **Rate limit retry** [BUILT] — exponential backoff wrapper (30s/60s/120s, 3 retries) around all SDK query() calls with notification and SSE event on rate limit.
+63. **SSE replay buffer** [BUILT] — last 100 events with sequential IDs and Last-Event-ID header support for reconnection without data loss.
+64. **Graceful shutdown** [BUILT] — closes active sessions with 30s timeout on server stop.
+65. **Toast notification system** [BUILT] — bottom-right, auto-dismiss, accessible (role="status", aria-live="polite").
+66. **Skeleton loading states** [BUILT] — pulsing placeholder components on Home and Space views.
+67. **Theming** [BUILT] — 3 color palettes (Slate+Cyan, Warm Stone+Amber, Neutral+Indigo) x 2 themes (light/dark) with Settings toggle and localStorage persistence.
+68. **Keyboard shortcuts** [BUILT] — / focus Odin, Escape close panel/modal, n new item, ? help overlay, Ctrl+K search.
+69. **Browser tab badge** [BUILT] — (N) OpenLoop for pending approvals + unread notifications.
+70. **Space Settings panel** [BUILT] — tabbed slide-over (Layout, Memory, History) with memory health dashboard, consolidation trigger, and per-entry management.
+71. **Stale/stuck task detection** [BUILT] — background monitor flags tasks queued >10min or running >30min with dedup notifications.
+72. **Morning Brief component** [BUILT] — overnight autonomous run summaries grouped by agent with dismiss functionality.
+73. **Approval queue lifecycle** [BUILT] — per-agent configurable timeout, steering re-injection on resolve/deny/expire.
+74. **Notification panel** [BUILT] — slide-over with type badges, mark-all-read, routing on click.
 
 ---
 

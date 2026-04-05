@@ -122,6 +122,8 @@ Call write_memory with:
   value     = [the full summary text from step 5]
 
 This is your final output. Do not take any action on the items themselves.
+
+Also check today's calendar events and flag any that need preparation. Include a schedule summary at the top of the review.
 """,
     },
     {
@@ -177,6 +179,8 @@ Call write_memory with:
   value     = [the full summary text from step 5]
 
 This is your final output. Do not update, move, or modify any items.
+
+Also check for follow-up items linked to calendar events that have passed without action.
 """,
     },
     {
@@ -243,6 +247,21 @@ Call write_memory with:
   value     = [the full summary text from step 4]
 
 This is your final output. Do not modify any records or tasks.
+""",
+    },
+    {
+        "name": "Meeting Prep",
+        "description": "Prepare briefing materials for upcoming meetings",
+        "trigger_type": "cron",
+        "cron_expression": "0 7 * * *",
+        "enabled": False,
+        "space_id": None,
+        "instruction": """\
+Check calendar for meetings in the next 24 hours. For each meeting without a \
+prepared brief: look up attendees in CRM/items, check recent conversation \
+summaries for context, draft a brief with attendee info, agenda, and context. \
+Save the brief as a document linked to the space. Flag meetings with no context \
+as 'needs manual prep' via notification.
 """,
     },
 ]

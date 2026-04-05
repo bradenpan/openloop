@@ -457,3 +457,70 @@ def test_create_automation_valid_event_passes_validation(db_session: Session):
     )
     assert auto.trigger_type == "event"
     assert auto.cron_expression is None
+
+
+# ---------------------------------------------------------------------------
+# System automations
+# ---------------------------------------------------------------------------
+
+
+def test_list_automations_hides_system_by_default(db_session: Session):
+    """list_automations(include_system=False) should hide system automations."""
+    agent = _make_agent(db_session)
+    auto = _make_automation(db_session, agent_id=agent.id, name="Regular")
+    sys_auto = _make_automation(db_session, agent_id=agent.id, name="System Auto")
+    sys_auto.is_system = True
+    db_session.commit()
+
+    result = automation_service.list_automations(db_session, include_system=False)
+    names = [a.name for a in result]
+    assert "Regular" in names
+    assert "System Auto" not in names
+
+
+def test_list_automations_includes_system_when_requested(db_session: Session):
+    """list_automations(include_system=True) should include system automations."""
+    agent = _make_agent(db_session)
+    _make_automation(db_session, agent_id=agent.id, name="Regular")
+    sys_auto = _make_automation(db_session, agent_id=agent.id, name="System Auto")
+    sys_auto.is_system = True
+    db_session.commit()
+
+    result = automation_service.list_automations(db_session, include_system=True)
+    names = [a.name for a in result]
+    assert "Regular" in names
+    assert "System Auto" in names
+
+
+def test_delete_automation_rejects_system(db_session: Session):
+    """delete_automation should raise 403 for system automations."""
+    agent = _make_agent(db_session)
+    auto = _make_automation(db_session, agent_id=agent.id, name="System")
+    auto.is_system = True
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        automation_service.delete_automation(db_session, auto.id)
+    assert exc_info.value.status_code == 403
+
+
+def test_update_automation_rejects_is_system_kwarg(db_session: Session):
+    """update_automation should reject any attempt to set is_system."""
+    agent = _make_agent(db_session)
+    auto = _make_automation(db_session, agent_id=agent.id, name="Test")
+
+    with pytest.raises(HTTPException) as exc_info:
+        automation_service.update_automation(db_session, auto.id, is_system=True)
+    assert exc_info.value.status_code == 403
+
+
+def test_update_automation_rejects_is_system_false(db_session: Session):
+    """Even setting is_system=False should be rejected (the kwarg is forbidden)."""
+    agent = _make_agent(db_session)
+    auto = _make_automation(db_session, agent_id=agent.id, name="Test")
+    auto.is_system = True
+    db_session.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        automation_service.update_automation(db_session, auto.id, is_system=False)
+    assert exc_info.value.status_code == 403

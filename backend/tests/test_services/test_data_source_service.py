@@ -145,3 +145,136 @@ def test_delete_data_source_not_found(db_session: Session):
     with pytest.raises(HTTPException) as exc_info:
         data_source_service.delete_data_source(db_session, "nonexistent")
     assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# System-level data sources
+# ---------------------------------------------------------------------------
+
+
+def test_create_data_source_system_level(db_session: Session):
+    """space_id=None creates a system-level data source."""
+    ds = data_source_service.create_data_source(
+        db_session, space_id=None, name="System DS", source_type="google_calendar"
+    )
+    assert ds.space_id is None
+    assert ds.name == "System DS"
+
+
+def test_list_system_data_sources(db_session: Session):
+    """list_system_data_sources returns only system (space_id IS NULL) sources."""
+    space = _make_space(db_session)
+    data_source_service.create_data_source(
+        db_session, space_id=None, name="System", source_type="google_calendar"
+    )
+    data_source_service.create_data_source(
+        db_session, space_id=space.id, name="Space-bound", source_type="local"
+    )
+    result = data_source_service.list_system_data_sources(db_session)
+    assert len(result) == 1
+    assert result[0].name == "System"
+
+
+def test_list_data_sources_system_true(db_session: Session):
+    """list_data_sources(system=True) returns only system sources."""
+    space = _make_space(db_session)
+    data_source_service.create_data_source(
+        db_session, space_id=None, name="Sys", source_type="api"
+    )
+    data_source_service.create_data_source(
+        db_session, space_id=space.id, name="Space", source_type="local"
+    )
+    result = data_source_service.list_data_sources(db_session, system=True)
+    assert len(result) == 1
+    assert result[0].name == "Sys"
+
+
+def test_list_data_sources_system_false(db_session: Session):
+    """list_data_sources(system=False) returns only space-bound sources."""
+    space = _make_space(db_session)
+    data_source_service.create_data_source(
+        db_session, space_id=None, name="Sys", source_type="api"
+    )
+    data_source_service.create_data_source(
+        db_session, space_id=space.id, name="Space", source_type="local"
+    )
+    result = data_source_service.list_data_sources(db_session, system=False)
+    assert len(result) == 1
+    assert result[0].name == "Space"
+
+
+# ---------------------------------------------------------------------------
+# Exclusions
+# ---------------------------------------------------------------------------
+
+
+def test_exclude_from_space(db_session: Session):
+    """exclude_from_space creates an exclusion row."""
+    space = _make_space(db_session)
+    ds = data_source_service.create_data_source(
+        db_session, space_id=None, name="Cal", source_type="google_calendar"
+    )
+    data_source_service.exclude_from_space(db_session, space.id, ds.id)
+    assert data_source_service.is_excluded(db_session, space.id, ds.id) is True
+
+
+def test_exclude_from_space_idempotent(db_session: Session):
+    """Calling exclude_from_space twice does not error."""
+    space = _make_space(db_session)
+    ds = data_source_service.create_data_source(
+        db_session, space_id=None, name="Cal", source_type="google_calendar"
+    )
+    data_source_service.exclude_from_space(db_session, space.id, ds.id)
+    data_source_service.exclude_from_space(db_session, space.id, ds.id)  # no error
+    assert data_source_service.is_excluded(db_session, space.id, ds.id) is True
+
+
+def test_exclude_rejects_space_level_source(db_session: Session):
+    """Only system data sources can be excluded — space-level raises 422."""
+    space = _make_space(db_session)
+    ds = data_source_service.create_data_source(
+        db_session, space_id=space.id, name="Local", source_type="local"
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        data_source_service.exclude_from_space(db_session, space.id, ds.id)
+    assert exc_info.value.status_code == 422
+
+
+def test_include_in_space_removes_exclusion(db_session: Session):
+    """include_in_space removes an existing exclusion."""
+    space = _make_space(db_session)
+    ds = data_source_service.create_data_source(
+        db_session, space_id=None, name="Cal", source_type="google_calendar"
+    )
+    data_source_service.exclude_from_space(db_session, space.id, ds.id)
+    assert data_source_service.is_excluded(db_session, space.id, ds.id) is True
+
+    data_source_service.include_in_space(db_session, space.id, ds.id)
+    assert data_source_service.is_excluded(db_session, space.id, ds.id) is False
+
+
+def test_include_in_space_validates_space_exists(db_session: Session):
+    """include_in_space raises 404 for nonexistent space."""
+    ds = data_source_service.create_data_source(
+        db_session, space_id=None, name="Cal", source_type="google_calendar"
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        data_source_service.include_in_space(db_session, "nonexistent-space", ds.id)
+    assert exc_info.value.status_code == 404
+
+
+def test_include_in_space_validates_ds_exists(db_session: Session):
+    """include_in_space raises 404 for nonexistent data source."""
+    space = _make_space(db_session)
+    with pytest.raises(HTTPException) as exc_info:
+        data_source_service.include_in_space(db_session, space.id, "nonexistent-ds")
+    assert exc_info.value.status_code == 404
+
+
+def test_is_excluded_returns_false_when_not_excluded(db_session: Session):
+    """is_excluded returns False for non-excluded data source."""
+    space = _make_space(db_session)
+    ds = data_source_service.create_data_source(
+        db_session, space_id=None, name="Cal", source_type="google_calendar"
+    )
+    assert data_source_service.is_excluded(db_session, space.id, ds.id) is False

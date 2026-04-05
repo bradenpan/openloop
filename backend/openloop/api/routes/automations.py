@@ -39,12 +39,13 @@ def create_automation(
 @router.get("", response_model=list[AutomationResponse])
 def list_automations(
     enabled: bool | None = Query(None),
+    include_system: bool = Query(False),
     limit: int = Query(50, le=200),
     offset: int = Query(0, ge=0),
     db: Session = Depends(get_db),
 ) -> list[AutomationResponse]:
     automations = automation_service.list_automations(
-        db, enabled=enabled, limit=limit, offset=offset
+        db, enabled=enabled, include_system=include_system, limit=limit, offset=offset
     )
     responses = []
     for a in automations:

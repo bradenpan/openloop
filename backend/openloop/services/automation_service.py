@@ -86,19 +86,28 @@ def list_automations(
     db: Session,
     *,
     enabled: bool | None = None,
+    include_system: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> list[Automation]:
-    """List automations with optional enabled filter."""
+    """List automations with optional enabled filter.
+
+    By default, system automations (is_system=True) are hidden.
+    Pass include_system=True to include them.
+    """
     query = db.query(Automation)
     if enabled is not None:
         query = query.filter(Automation.enabled == enabled)
+    if not include_system:
+        query = query.filter(Automation.is_system == False)  # noqa: E712
     return query.order_by(Automation.created_at.desc()).offset(offset).limit(limit).all()
 
 
 def update_automation(db: Session, automation_id: str, **kwargs) -> Automation:
     """Update automation fields. Uses exclude_unset pattern — only set fields are updated."""
     automation = get_automation(db, automation_id)
+    if "is_system" in kwargs:
+        raise HTTPException(status_code=403, detail="Cannot modify is_system flag")
     updatable = {
         "name",
         "description",
@@ -119,8 +128,10 @@ def update_automation(db: Session, automation_id: str, **kwargs) -> Automation:
 
 
 def delete_automation(db: Session, automation_id: str) -> None:
-    """Delete an automation."""
+    """Delete an automation. System automations cannot be deleted (403)."""
     automation = get_automation(db, automation_id)
+    if automation.is_system:
+        raise HTTPException(status_code=403, detail="Cannot delete system automations")
     db.delete(automation)
     db.commit()
 

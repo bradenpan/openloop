@@ -144,12 +144,14 @@ from backend.openloop.api.routes.background_tasks import router as background_ta
 from backend.openloop.api.routes.audit import router as audit_router  # noqa: E402
 from backend.openloop.api.routes.automations import router as automations_router  # noqa: E402
 from backend.openloop.api.routes.behavioral_rules import router as behavioral_rules_router  # noqa: E402
+from backend.openloop.api.routes.calendar import router as calendar_router  # noqa: E402
 from backend.openloop.api.routes.conversations import router as conversations_router  # noqa: E402
 from backend.openloop.api.routes.data_sources import router as data_sources_router  # noqa: E402
 from backend.openloop.api.routes.documents import router as documents_router  # noqa: E402
 from backend.openloop.api.routes.drive import router as drive_router  # noqa: E402
 from backend.openloop.api.routes.events import router as events_router  # noqa: E402
 from backend.openloop.api.routes.home import router as home_router  # noqa: E402
+from backend.openloop.api.routes.integrations import router as integrations_router  # noqa: E402
 from backend.openloop.api.routes.items import router as items_router  # noqa: E402
 from backend.openloop.api.routes.layout import router as layout_router  # noqa: E402
 from backend.openloop.api.routes.memory import router as memory_router  # noqa: E402
@@ -172,12 +174,14 @@ app.include_router(background_tasks_router)
 app.include_router(audit_router)
 app.include_router(automations_router)
 app.include_router(behavioral_rules_router)
+app.include_router(calendar_router)
 app.include_router(conversations_router)
 app.include_router(data_sources_router)
 app.include_router(events_router)
 app.include_router(documents_router)
 app.include_router(drive_router)
 app.include_router(home_router)
+app.include_router(integrations_router)
 app.include_router(items_router)
 app.include_router(memory_router)
 app.include_router(space_memory_router)

@@ -8,13 +8,14 @@ from __future__ import annotations
 
 import io
 import logging
-from pathlib import Path
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
+
+from backend.openloop.services import google_auth
 
 logger = logging.getLogger(__name__)
 
@@ -27,10 +28,13 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive.file",
 ]
 
-# Project root is 3 levels up from services/
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_CREDENTIALS_PATH = _PROJECT_ROOT / "credentials.json"
-_TOKEN_PATH = _PROJECT_ROOT / "token.json"
+# Register Drive scopes with the shared OAuth infrastructure
+google_auth.register_scopes("drive", SCOPES)
+
+# Re-export paths so existing test patches on this module still work.
+# Tests patch e.g. "backend.openloop.services.gdrive_client._TOKEN_PATH".
+_CREDENTIALS_PATH = google_auth._CREDENTIALS_PATH
+_TOKEN_PATH = google_auth._TOKEN_PATH
 
 # Google Docs MIME types that require export rather than direct download
 _GOOGLE_EXPORT_MAP = {
@@ -60,12 +64,9 @@ def is_authenticated() -> bool:
 def get_drive_service():
     """Authenticate with Google Drive and return a service resource.
 
-    Uses credentials.json for OAuth2 flow. Saves/refreshes token.json.
+    First tries shared OAuth credentials; falls back to interactive flow.
     """
-    creds = None
-
-    if _TOKEN_PATH.exists():
-        creds = Credentials.from_authorized_user_file(str(_TOKEN_PATH), SCOPES)
+    creds = google_auth.get_credentials()
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -76,10 +77,13 @@ def get_drive_service():
                     f"Google OAuth credentials not found at {_CREDENTIALS_PATH}. "
                     "Download credentials.json from Google Cloud Console."
                 )
-            flow = InstalledAppFlow.from_client_secrets_file(str(_CREDENTIALS_PATH), SCOPES)
+            # Interactive fallback — launches browser for consent
+            flow = InstalledAppFlow.from_client_secrets_file(
+                str(_CREDENTIALS_PATH), SCOPES
+            )
             creds = flow.run_local_server(port=0)
 
-        _TOKEN_PATH.write_text(creds.to_json())
+        google_auth._TOKEN_PATH.write_text(creds.to_json())
 
     return build("drive", "v3", credentials=creds)
 

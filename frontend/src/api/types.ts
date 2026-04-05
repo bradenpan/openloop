@@ -411,6 +411,128 @@ export interface paths {
         patch: operations["update_rule_api_v1_agents__agent_id__rules__rule_id__patch"];
         trace?: never;
     };
+    "/api/v1/calendar/auth-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Auth Status */
+        get: operations["get_auth_status_api_v1_calendar_auth_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Events */
+        get: operations["list_events_api_v1_calendar_events_get"];
+        put?: never;
+        /** Create Event */
+        post: operations["create_event_api_v1_calendar_events_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar/events/{event_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Event */
+        get: operations["get_event_api_v1_calendar_events__event_id__get"];
+        put?: never;
+        post?: never;
+        /** Delete Event */
+        delete: operations["delete_event_api_v1_calendar_events__event_id__delete"];
+        options?: never;
+        head?: never;
+        /** Update Event */
+        patch: operations["update_event_api_v1_calendar_events__event_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/calendar/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Sync Events */
+        post: operations["sync_events_api_v1_calendar_sync_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar/free-time": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Free Time */
+        get: operations["get_free_time_api_v1_calendar_free_time_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar/calendars": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List Calendars */
+        get: operations["list_calendars_api_v1_calendar_calendars_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar/setup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Setup Calendar */
+        post: operations["setup_calendar_api_v1_calendar_setup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/conversations": {
         parameters: {
             query?: never;
@@ -572,6 +694,24 @@ export interface paths {
         head?: never;
         /** Update Data Source */
         patch: operations["update_data_source_api_v1_data_sources__data_source_id__patch"];
+        trace?: never;
+    };
+    "/api/v1/data-sources/{data_source_id}/exclude": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Exclude Data Source */
+        post: operations["exclude_data_source_api_v1_data_sources__data_source_id__exclude_post"];
+        /** Include Data Source */
+        delete: operations["include_data_source_api_v1_data_sources__data_source_id__exclude_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/events": {
@@ -765,6 +905,83 @@ export interface paths {
         };
         /** Get Dashboard */
         get: operations["get_dashboard_api_v1_home_dashboard_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/home/morning-brief/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Morning Brief
+         * @description Mark morning brief as dismissed by updating user_last_seen.
+         */
+        post: operations["dismiss_morning_brief_api_v1_home_morning_brief_dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/home/morning-brief": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Morning Brief */
+        get: operations["get_morning_brief_api_v1_home_morning_brief_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/auth-status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Auth Status
+         * @description Get current Google OAuth authentication status.
+         */
+        get: operations["get_auth_status_api_v1_integrations_auth_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/integrations/auth-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Auth Url
+         * @description Generate OAuth consent URL. Optionally specify scopes (comma-separated).
+         */
+        get: operations["get_auth_url_api_v1_integrations_auth_url_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1152,7 +1369,7 @@ export interface paths {
         };
         /**
          * Search
-         * @description Full-text search across conversations, summaries, memory, and documents.
+         * @description Full-text search across conversations, summaries, memory, documents, and items.
          */
         get: operations["search_api_v1_search_get"];
         put?: never;
@@ -1469,6 +1686,8 @@ export interface components {
             heartbeat_enabled: boolean;
             /** Heartbeat Cron */
             heartbeat_cron?: string | null;
+            /** Approval Timeout Hours */
+            approval_timeout_hours?: number | null;
             /**
              * Created At
              * Format: date-time
@@ -1502,6 +1721,8 @@ export interface components {
             heartbeat_enabled?: boolean | null;
             /** Heartbeat Cron */
             heartbeat_cron?: string | null;
+            /** Approval Timeout Hours */
+            approval_timeout_hours?: number | null;
         };
         /** ApprovalBatchResolveRequest */
         ApprovalBatchResolveRequest: {
@@ -1579,6 +1800,22 @@ export interface components {
              * Format: date-time
              */
             timestamp: string;
+        };
+        /** AuthStatusResponse */
+        AuthStatusResponse: {
+            /** Authenticated */
+            authenticated: boolean;
+            /** Granted Scopes */
+            granted_scopes: string[];
+            /** Missing Scopes */
+            missing_scopes: string[];
+            /** Has Credentials File */
+            has_credentials_file: boolean;
+        };
+        /** AuthUrlResponse */
+        AuthUrlResponse: {
+            /** Url */
+            url: string;
         };
         /** AutomationCreate */
         AutomationCreate: {
@@ -1782,6 +2019,125 @@ export interface components {
             /** File */
             file: string;
         };
+        /** CalendarAuthStatusResponse */
+        CalendarAuthStatusResponse: {
+            /** Authenticated */
+            authenticated: boolean;
+            /** Has Calendar Scopes */
+            has_calendar_scopes: boolean;
+        };
+        /** CalendarEventCreate */
+        CalendarEventCreate: {
+            /**
+             * Calendar Id
+             * @default primary
+             */
+            calendar_id: string;
+            /** Title */
+            title: string;
+            /** Start */
+            start: string;
+            /** End */
+            end: string;
+            /** Description */
+            description?: string | null;
+            /** Location */
+            location?: string | null;
+            /** Attendees */
+            attendees?: string[] | null;
+        };
+        /** CalendarEventResponse */
+        CalendarEventResponse: {
+            /** Id */
+            id: string;
+            /** Data Source Id */
+            data_source_id: string | null;
+            /** Google Event Id */
+            google_event_id: string | null;
+            /** Calendar Id */
+            calendar_id: string;
+            /** Title */
+            title: string;
+            /** Description */
+            description: string | null;
+            /** Location */
+            location: string | null;
+            /**
+             * Start Time
+             * Format: date-time
+             */
+            start_time: string;
+            /**
+             * End Time
+             * Format: date-time
+             */
+            end_time: string;
+            /** All Day */
+            all_day: boolean;
+            /** Attendees */
+            attendees: unknown[] | null;
+            /** Organizer */
+            organizer: {
+                [key: string]: unknown;
+            } | null;
+            /** Conference Data */
+            conference_data: {
+                [key: string]: unknown;
+            } | null;
+            /** Status */
+            status: string;
+            /** Recurrence Rule */
+            recurrence_rule: string | null;
+            /** Html Link */
+            html_link: string | null;
+            /** Etag */
+            etag: string | null;
+            /** Synced At */
+            synced_at: string | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Brief */
+            brief?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /** CalendarEventUpdate */
+        CalendarEventUpdate: {
+            /** Title */
+            title?: string | null;
+            /** Start */
+            start?: string | null;
+            /** End */
+            end?: string | null;
+            /** Description */
+            description?: string | null;
+            /** Location */
+            location?: string | null;
+            /** Attendees */
+            attendees?: string[] | null;
+        };
+        /** CalendarSetupRequest */
+        CalendarSetupRequest: {
+            /** Calendar Ids */
+            calendar_ids?: string[] | null;
+        };
+        /** CalendarSyncResponse */
+        CalendarSyncResponse: {
+            /** Added */
+            added: number;
+            /** Updated */
+            updated: number;
+            /** Removed */
+            removed: number;
+        };
         /** ConsolidationApplyRequest */
         ConsolidationApplyRequest: {
             /** Merges */
@@ -1937,7 +2293,7 @@ export interface components {
         /** DataSourceCreate */
         DataSourceCreate: {
             /** Space Id */
-            space_id: string;
+            space_id?: string | null;
             /** Name */
             name: string;
             /** Source Type */
@@ -1954,7 +2310,7 @@ export interface components {
             /** Id */
             id: string;
             /** Space Id */
-            space_id: string;
+            space_id: string | null;
             /** Source Type */
             source_type: string;
             /** Name */
@@ -2100,6 +2456,18 @@ export interface components {
             tasks_interrupted: number;
             /** Interrupted Task Ids */
             interrupted_task_ids: string[];
+        };
+        /** ExcludeBody */
+        ExcludeBody: {
+            /** Space Id */
+            space_id: string;
+        };
+        /** FreeTimeSlot */
+        FreeTimeSlot: {
+            /** Start */
+            start: string;
+            /** End */
+            end: string;
         };
         /**
          * GrantLevel
@@ -2392,6 +2760,51 @@ export interface components {
              * Format: date-time
              */
             created_at: string;
+        };
+        /** MorningBriefAgent */
+        MorningBriefAgent: {
+            /** Agent Id */
+            agent_id: string;
+            /** Agent Name */
+            agent_name: string;
+            /** Runs */
+            runs: components["schemas"]["MorningBriefRun"][];
+        };
+        /** MorningBriefResponse */
+        MorningBriefResponse: {
+            /** Agents */
+            agents: components["schemas"]["MorningBriefAgent"][];
+            /** Pending Approvals Count */
+            pending_approvals_count: number;
+            /** Failed Tasks Count */
+            failed_tasks_count: number;
+            /** Since */
+            since?: string | null;
+        };
+        /** MorningBriefRun */
+        MorningBriefRun: {
+            /** Task Id */
+            task_id: string;
+            /** Goal */
+            goal?: string | null;
+            /** Run Summary */
+            run_summary?: string | null;
+            /** Status */
+            status: string;
+            /**
+             * Completed Count
+             * @default 0
+             */
+            completed_count: number;
+            /**
+             * Total Count
+             * @default 0
+             */
+            total_count: number;
+            /** Started At */
+            started_at?: string | null;
+            /** Completed At */
+            completed_at?: string | null;
         };
         /** NotificationResponse */
         NotificationResponse: {
@@ -3458,6 +3871,7 @@ export interface operations {
         parameters: {
             query?: {
                 enabled?: boolean | null;
+                include_system?: boolean;
                 limit?: number;
                 offset?: number;
             };
@@ -3814,6 +4228,299 @@ export interface operations {
             };
         };
     };
+    get_auth_status_api_v1_calendar_auth_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarAuthStatusResponse"];
+                };
+            };
+        };
+    };
+    list_events_api_v1_calendar_events_get: {
+        parameters: {
+            query?: {
+                start?: string | null;
+                end?: string | null;
+                calendar_id?: string | null;
+                limit?: number;
+                offset?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarEventResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_event_api_v1_calendar_events_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarEventCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarEventResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_event_api_v1_calendar_events__event_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_event_api_v1_calendar_events__event_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_event_api_v1_calendar_events__event_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarEventUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarEventResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    sync_events_api_v1_calendar_sync_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarSyncResponse"];
+                };
+            };
+        };
+    };
+    get_free_time_api_v1_calendar_free_time_get: {
+        parameters: {
+            query: {
+                start: string;
+                end: string;
+                duration_minutes: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FreeTimeSlot"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_calendars_api_v1_calendar_calendars_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: unknown;
+                    }[];
+                };
+            };
+        };
+    };
+    setup_calendar_api_v1_calendar_setup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CalendarSetupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataSourceResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_conversations_api_v1_conversations_get: {
         parameters: {
             query?: {
@@ -4116,6 +4823,7 @@ export interface operations {
         parameters: {
             query?: {
                 space_id?: string | null;
+                system?: boolean | null;
                 limit?: number;
                 offset?: number;
             };
@@ -4261,6 +4969,70 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DataSourceResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    exclude_data_source_api_v1_data_sources__data_source_id__exclude_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                data_source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ExcludeBody"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    include_data_source_api_v1_data_sources__data_source_id__exclude_delete: {
+        parameters: {
+            query: {
+                space_id: string;
+            };
+            header?: never;
+            path: {
+                data_source_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {
@@ -4690,6 +5462,95 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DashboardResponse"];
+                };
+            };
+        };
+    };
+    dismiss_morning_brief_api_v1_home_morning_brief_dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_morning_brief_api_v1_home_morning_brief_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MorningBriefResponse"];
+                };
+            };
+        };
+    };
+    get_auth_status_api_v1_integrations_auth_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthStatusResponse"];
+                };
+            };
+        };
+    };
+    get_auth_url_api_v1_integrations_auth_url_get: {
+        parameters: {
+            query?: {
+                scopes?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthUrlResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -5643,7 +6504,7 @@ export interface operations {
                 space_id?: string | null;
                 /** @description Filter message search to a specific conversation */
                 conversation_id?: string | null;
-                /** @description Filter by type: messages, summaries, memory, documents */
+                /** @description Filter by type: messages, summaries, memory, documents, items */
                 type?: string | null;
                 limit?: number;
                 offset?: number;

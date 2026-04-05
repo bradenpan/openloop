@@ -1,7 +1,7 @@
 # OpenLoop: Architecture Proposal (DRAFT v5)
 
-**Status:** Under review — not yet approved for implementation.
-**Companion document:** CAPABILITIES.md (defines what the system does; this document defines how it's built)
+**Status:** Active — architecture implemented through Phase 12. All layers operational. Phase 12 added Google Calendar integration (cross-space data source, MCP tools, sync service, frontend).
+**Companion documents:** CAPABILITIES.md (what the system does), INTEGRATION-CAPABILITIES.md (calendar, email, and Integration Builder)
 
 ---
 
@@ -85,7 +85,7 @@ This means every OpenLoop agent is, at the infrastructure level, a Claude Code s
 
 **What OpenLoop adds on top:**
 - **Multi-agent identity** — Claude Code is one agent in one terminal. OpenLoop runs multiple agents simultaneously, each with a distinct system prompt, tool set, and permission boundary, organized by domain (recruiting, code, health, etc.).
-- **Structured context injection** — Claude Code gets CLAUDE.md files and whatever it reads during a conversation. OpenLoop assembles ~8,000 tokens of curated context before every first message: behavioral rules, conversation summaries, scored facts, and live board state — ranked by importance and ordered for maximum model attention.
+- **Structured context injection** — Claude Code gets CLAUDE.md files and whatever it reads during a conversation. OpenLoop assembles ~8,800 tokens of curated context before every first message: behavioral rules, conversation summaries, scored facts, live board state, and working memory (calendar events, future email stats) — ranked by importance and ordered for maximum model attention.
 - **Persistent memory across conversations** — Claude Code's memory is per-project markdown files. OpenLoop has four-tier memory (semantic facts, episodic summaries, procedural rules, working state) with write-time dedup, temporal tracking, scored retrieval, and lifecycle management. An agent on conversation #30 knows decisions from conversation #2.
 - **Work tracking** — items (tasks, records), boards, spaces, CRM pipelines. Agents read and write structured data, not just files.
 - **Permission enforcement** — every tool call goes through a permission layer with per-agent, per-resource, per-operation grants. Claude Code has its own permission model, but OpenLoop adds domain-specific controls (e.g., "this agent can read Drive files but needs approval to edit them").
@@ -214,6 +214,21 @@ POST   /api/v1/notifications/{id}/read     Mark notification as read
 
 # Background agents
 GET    /api/v1/agents/running              List all running/queued agent sessions
+
+# Calendar (Phase 12) [BUILT]
+GET    /api/v1/calendar/setup              Setup status + next steps (auth, sync state)
+GET    /api/v1/calendar/events             List events (query params: start, end, calendar_id)
+GET    /api/v1/calendar/events/{id}        Get event detail
+POST   /api/v1/calendar/events             Create event
+PATCH  /api/v1/calendar/events/{id}        Update event
+DELETE /api/v1/calendar/events/{id}        Delete event
+POST   /api/v1/calendar/sync              Trigger manual sync
+GET    /api/v1/calendar/free-time          Find available slots (query params: start, end, duration)
+GET    /api/v1/calendar/calendars          List available calendars
+
+# Integrations auth (Phase 12) [BUILT]
+GET    /api/v1/integrations/auth-status    OAuth status for all integrations (calendar, drive, etc.)
+GET    /api/v1/integrations/auth-url       Get OAuth authorization URL with requested scopes
 ```
 
 ### Layer 3: Service Layer
@@ -253,6 +268,9 @@ Business logic. Stateless functions that operate on the database and coordinate 
 - **DocumentService** — index local files and Drive files. Metadata storage. Search. Coordinate with Google Drive API.
 - **AgentService** — agent CRUD. Configuration management. Permission matrix storage.
 - **~~ToolRegistryService~~** — *Deferred. Agent tool configurations live in the `agents` table (`tools` and `mcp_tools` JSON fields). A dedicated registry is not needed for P0/P1.*
+- **CalendarIntegrationService** [BUILT] — sync logic (incremental via syncToken, 15-min cron cycle), event CRUD (maps to Google Calendar API), free time calculation. Creates/manages the system-level `google_calendar` DataSource record (`space_id=null`).
+- **GoogleAuth** [BUILT] — shared OAuth module (`google_auth.py`). Manages `credentials.json`/`token.json` with incremental scope authorization — adding calendar scopes does not invalidate existing Drive tokens. Used by both `gcalendar_client` and `gdrive_client`.
+- **GCalendarClient** [BUILT] — Google Calendar API client. Handles event list/get/create/update/delete, calendar listing, and sync token management. Uses `GoogleAuth` for credentials.
 - **AutomationService** — CRUD for automation definitions. Runs the cron scheduler (checks every minute for matching automations). Fires matching automations as background tasks. Tracks run history. Event listener for event-based automations (P2).
 - **AutomationScheduler** — background loop within the FastAPI process. Every 60 seconds, checks all enabled cron-based automations against the current time. When matched, creates a background task with the automation's agent + instruction. Lightweight — no external dependencies (no Celery, no Redis). On startup, checks for missed runs during downtime and surfaces notifications. Max concurrent automation sessions configurable (default 3). Automations run in their own concurrency lane, independent of interactive sessions (see Lane-Isolated Concurrency).
 
@@ -541,6 +559,15 @@ update_widget(widget_id, size?, config?, position?)           # modifies existin
 remove_widget(widget_id)                                      # removes widget from layout
 set_space_layout(space_id, widgets)                           # bulk replace — for full redesigns
 
+# Calendar operations (Phase 12) [BUILT] — available when google_calendar data source is active
+list_calendar_events(start, end, calendar_id?)           # read events in date range from cache + API
+get_calendar_event(event_id)                             # read event detail (attendees, description, conferencing)
+create_calendar_event(title, start, end, attendees?, description?, location?)  # create event, optionally with invites (requires approval)
+update_calendar_event(event_id, **fields)                # modify event (requires approval)
+delete_calendar_event(event_id)                          # cancel/delete event (requires approval)
+find_free_time(start, end, duration_minutes)             # find available slots in date range
+list_calendars()                                         # list all calendars the user has access to
+
 # Agent operations (for sub-agent delegation, P1)
 delegate_task(agent_name, instruction, space_id)
 ```
@@ -598,8 +625,9 @@ Odin is a system-level agent that runs on Haiku. It is always visible at the bot
 │  - Attention items summary                       │
 │  - Odin's own prior conversation summaries       │
 │  - Global memory facts                           │
-│  Budget: ~4000 tokens (lighter than space agents │
-│  because Odin routes, doesn't do deep work)      │
+│  Budget: ~4800 tokens (lighter than space agents │
+│  because Odin routes, doesn't do deep work;      │
+│  includes calendar summary when connected)       │
 │                                                  │
 │  Routing Flow:                                   │
 │  User: "Help me plan the recruiting pipeline"    │
@@ -765,7 +793,14 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │                                               │
 │  ┌─ END (high model attention) ──────────────┐│
 │  │                                           ││
-│  │  7. Item state (fresh from DB)              ││
+│  │  7. Working memory (live system state)      ││
+│  │     Calendar: next 48h events (~500 tok)   ││
+│  │     Email: inbox summary (Phase 13)        ││
+│  │     Included when system data source is    ││
+│  │     active and not excluded for this space. ││
+│  │     Budget: up to 800 tokens               ││
+│  │                                           ││
+│  │  8. Item state (fresh from DB)              ││
 │  │     Open tasks, board items by stage,      ││
 │  │     upcoming deadlines, recent changes.    ││
 │  │     Closest to user's message for maximum  ││
@@ -774,7 +809,7 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │  │                                           ││
 │  └───────────────────────────────────────────┘│
 │                                               │
-│  Total budget: ~8000 tokens                   │
+│  Total budget: ~8800 tokens                   │
 │  (leaves room for user message + response)    │
 │                                               │
 │  Scoring fields on memory_entries:            │
@@ -794,11 +829,13 @@ Builds the system prompt context injected into new sessions. Manages token budge
 
 **SQLite database** — structured data (items, spaces, conversations, agents, memory, permissions).
 
-**SQLite FTS5 virtual tables** (P1) — full-text search indexes shadowing conversation_messages, conversation_summaries, memory_entries, and documents tables. Kept in sync via SQLite triggers. Enables the `search_conversations` MCP tool and global search. Not required for P0 launch.
+**SQLite FTS5 virtual tables** [BUILT] — full-text search indexes shadowing conversation_messages, conversation_summaries, memory_entries, documents, and calendar_events tables. Kept in sync via SQLite triggers. Enables the `search_conversations` MCP tool and global search. Phase 13 will add `email_cache_fts`.
 
 **Local filesystem** — agent-generated artifacts, verbose logs.
 
-**Google Drive** (P1) — primary document storage. Accessed via Google Drive API. Indexed in SQLite for search.
+**Google Drive** [BUILT] — primary document storage. Accessed via Google Drive API. Indexed in SQLite for search.
+
+**Google Calendar** [BUILT] — event cache synced every 15 minutes. Agents read/write events via MCP tools. Shared OAuth infrastructure with Drive (incremental scope authorization via `google_auth.py`). Phase 13 adds Gmail via the same pattern.
 
 ---
 
@@ -900,8 +937,8 @@ agent_permissions (granular permission matrix — replaces JSON blob)
 
 data_sources (connected data per space)
 ├── id (UUID, PK)
-├── space_id (FK → spaces, indexed)
-├── source_type ("drive_folder" | "git_repo" | "api_integration" | "local_folder")
+├── space_id (FK → spaces, indexed, nullable — null for system-level sources like Calendar/Gmail)
+├── source_type ("google_drive" | "google_calendar" | "gmail" | "api" | "git_repo" | "local_folder")
 ├── name (string)
 ├── config (JSON — folder ID, repo path, API endpoint, credentials reference, etc.)
 ├── refresh_schedule (string, nullable — cron expression for API integrations)
@@ -1100,9 +1137,38 @@ system_state (global key-value store for system-wide flags and configuration)
 ├── value (JSON)
 ├── updated_at
 
+calendar_events (cached Google Calendar events, synced every 15 min) [BUILT — Phase 12]
+├── id (UUID, PK)
+├── google_event_id (string, unique — Google's event ID)
+├── calendar_id (string — which calendar)
+├── title (string)
+├── description (text, nullable)
+├── location (string, nullable)
+├── start_time (datetime)
+├── end_time (datetime)
+├── all_day (boolean, default false)
+├── attendees (JSON — [{email, name, response_status}])
+├── organizer (JSON — {email, name, self})
+├── conference_data (JSON, nullable — Meet/Zoom link info)
+├── status (string — "confirmed" | "tentative" | "cancelled")
+├── recurrence_rule (string, nullable — RRULE if recurring)
+├── html_link (string — click-through URL to Google Calendar)
+├── etag (string — for sync conflict detection)
+├── synced_at (datetime)
+├── created_at
+└── updated_at
+
+email_cache (reserved for Phase 13 — Gmail header cache)
+  — Not yet built. See INTEGRATION-CAPABILITIES.md for planned schema.
+
+space_data_source_exclusions (per-space opt-out for system-level data sources) [BUILT — Phase 12]
+├── space_id (FK → spaces, PK component)
+├── data_source_id (FK → data_sources, PK component)
+└── PRIMARY KEY (space_id, data_source_id)
+
 ```
 
-### FTS5 Virtual Tables (P1)
+### FTS5 Virtual Tables [BUILT]
 
 Full-text search indexes for agent search tools. Kept in sync via SQLite triggers on INSERT/UPDATE/DELETE of the shadowed tables.
 
@@ -1110,7 +1176,10 @@ Full-text search indexes for agent search tools. Kept in sync via SQLite trigger
 memory_entries_fts    — shadows memory_entries.value (only active, non-archived entries)
 messages_fts          — shadows conversation_messages.content
 summaries_fts         — shadows conversation_summaries.summary
-documents_fts         — shadows documents.title (extend to content when document indexing is built)
+documents_fts         — shadows documents.title + content_text
+calendar_events_fts   — shadows calendar_events.title + description [BUILT — Phase 12]
+items_fts             — shadows items.title + description [BUILT — Phase 12]
+email_cache_fts       — shadows email_cache.subject + from_name + snippet (Phase 13)
 ```
 
 ### Relationships
@@ -1161,6 +1230,10 @@ Audit Log ──N:1──> Background Task (nullable)
 
 Approval Queue ──N:1──> Background Task
 Approval Queue ──N:1──> Agent
+
+Data Source ──N:1──> Space (nullable — null for system-level sources like Calendar/Gmail)
+Space ──N:N──> Data Source exclusions (via space_data_source_exclusions — per-space opt-out of system sources)
+Calendar Event: standalone cache table, keyed by google_event_id. Synced from Google Calendar API.
 
 System State: standalone key-value store (kill switch flag, global config)
 
@@ -1753,7 +1826,7 @@ This means an agent that needs context from 3 months ago can find it without tha
 ### Overall Context Budget
 
 ```
-Context assembly total: ~8000 tokens (~4% of 200k context window)
+Context assembly total: ~8800 tokens (~4.4% of 200k context window)
 
 BEGINNING (high model attention):
   Agent identity + role prompt:     ~1500 tokens (fixed, never truncated)
@@ -1766,10 +1839,11 @@ MIDDLE (lower model attention):
   Global facts:                      ~500 tokens (scored: importance × decay × access)
 
 END (high model attention):
+  Working memory (live state):       ~800 tokens (calendar: next 48h events; email: inbox summary when built)
   Item state:                       ~1500 tokens (fresh, pruned by recency)
 ```
 
-The vast majority of the context window remains available for the actual conversation. The 8000-token injection is a starting point — tunable per space or per agent if needed. Content ordering exploits the U-shaped attention curve documented in "Lost in the Middle" (Liu et al., 2023).
+The vast majority of the context window remains available for the actual conversation. The 8800-token injection is a starting point — tunable per space or per agent if needed. Content ordering exploits the U-shaped attention curve documented in "Lost in the Middle" (Liu et al., 2023).
 
 ---
 

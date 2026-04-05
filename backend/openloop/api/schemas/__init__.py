@@ -10,11 +10,13 @@ from backend.openloop.api.schemas.autonomous import *  # noqa: F401, F403
 from backend.openloop.api.schemas.audit import *  # noqa: F401, F403
 from backend.openloop.api.schemas.automations import *  # noqa: F401, F403
 from backend.openloop.api.schemas.behavioral_rules import *  # noqa: F401, F403
+from backend.openloop.api.schemas.calendar import *  # noqa: F401, F403
 from backend.openloop.api.schemas.conversations import *  # noqa: F401, F403
 from backend.openloop.api.schemas.data_sources import *  # noqa: F401, F403
 from backend.openloop.api.schemas.documents import *  # noqa: F401, F403
 from backend.openloop.api.schemas.drive import *  # noqa: F401, F403
 from backend.openloop.api.schemas.home import *  # noqa: F401, F403
+from backend.openloop.api.schemas.integrations import *  # noqa: F401, F403
 from backend.openloop.api.schemas.items import *  # noqa: F401, F403
 from backend.openloop.api.schemas.memory import *  # noqa: F401, F403
 from backend.openloop.api.schemas.notifications import *  # noqa: F401, F403

@@ -13,6 +13,7 @@ import { ConversationList } from '../components/home/conversation-list';
 import { WelcomeCard } from '../components/home/welcome-card';
 import { CreateSpaceModal } from '../components/home/create-space-modal';
 import { TokenSparkline } from '../components/home/token-sparkline';
+import { CalendarWidget } from '../components/home/calendar-widget';
 
 function HomeSkeleton() {
   return (
@@ -131,6 +132,11 @@ export default function Home() {
 
       {/* Active Agents — in default position when no agents running */}
       {!hasActiveAgents && activeAgentsSection}
+
+      {/* Calendar — only renders when connected */}
+      <section>
+        <CalendarWidget />
+      </section>
 
       {/* Activity Feed */}
       <section>

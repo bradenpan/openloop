@@ -607,13 +607,83 @@ Spike found that vector search adds unnecessary complexity for a small personal 
 - New: `backend/alembic/versions/10_2_fts_items.py`, `backend/tests/test_e2e/test_search_e2e.py`
 - Modified: search_service.py, mcp_tools.py, context_assembler.py, routes/search.py, search-modal.tsx, test_search_service.py, test_mcp_search_tools.py, test_phase4_integration.py
 
+## Phase 12: Google Calendar Integration — COMPLETE
+
+Full Google Calendar integration: agents read/write events, calendar data in context assembly, sync every 15 minutes, calendar UI on Home and dedicated page.
+
+**Task 12.1 — Cross-space data source infrastructure:**
+- `DataSource.space_id` made nullable (system-level sources not bound to any space)
+- `Space.data_sources` cascade changed from `delete-orphan` to `delete` + `passive_deletes=True`
+- `space_data_source_exclusions` table for per-space opt-out
+- `is_system` flag on `Automation` model (hidden from dashboard, undeletable via API)
+- `CalendarEvent` and `EmailCache` models + FTS5 virtual tables with triggers
+- Source type constants in `contract/enums.py`
+- Service/route/schema updates for system data sources and exclusions
+- Single Alembic migration for all Phase 12-14 schema changes
+
+**Task 12.2 — Shared OAuth + Calendar client:**
+- `google_auth.py` — shared scope registry, incremental authorization, background callback server with thread cancellation
+- `gcalendar_client.py` — 7 Calendar API functions with exponential backoff retry
+- `gdrive_client.py` refactored to use shared OAuth (all 15 Drive tests pass unchanged)
+- `/api/v1/integrations/auth-status` and `/auth-url` endpoints
+
+**Task 12.3 — Calendar sync service:**
+- `calendar_integration_service.py` — setup, sync, CRUD, free time, brief linking
+- `_parse_iso()` helper handles Google's Z suffix
+- Sync failure tracking with 3-strike notification threshold
+- Token expiry detection with re-auth notification
+- 15-minute integration sync loop in `automation_scheduler.py`
+
+**Task 12.4 — Calendar MCP tools + context assembly:**
+- 7 MCP tools: list_calendar_events, get_calendar_event, create_calendar_event, update_calendar_event, delete_calendar_event, find_free_time, list_calendars
+- Permission enforcer mappings (read=always, create/edit/delete=approval)
+- Conditional tool loading based on DataSource existence and space exclusion
+- `_build_calendar_section()` in context assembler — 48h lookahead, grouped by day, 500-token budget
+- `BUDGET_CALENDAR=500`, `BUDGET_EMAIL=300` constants; total context 8,000→8,800, Odin 4,000→4,800
+
+**Task 12.4b — Automation templates:**
+- Meeting Prep template (daily 7am, disabled by default)
+- Daily Task Review updated to reference calendar
+- Stale Work Check updated to reference calendar follow-ups
+
+**Task 12.5 — Calendar API routes:**
+- 10 endpoints under `/api/v1/calendar/`: auth-status, events CRUD, sync, free-time, calendars, setup
+- Pydantic schemas with ORM compat
+- Consistent timezone handling (strip tzinfo) with try-except for 400 on bad input
+
+**Task 12.6 — Calendar frontend:**
+- Home dashboard calendar widget (today + tomorrow, conditional on auth)
+- `/calendar` page with day grouping, expandable events, sync button with error handling, auto-refresh
+- Space calendar widget (compact, 5 events)
+- Sidebar "Calendar" nav item (conditional on connection)
+- `CALENDAR_EVENTS` widget type in registry and enum
+
+**Task 12.7 — Tests:** 65 new tests across 6 files (calendar service, calendar API, data source exclusions, system automations, context assembler calendar section). Total: 1315 passing.
+
+**Task 12.8 — Documentation:** ARCHITECTURE-PROPOSAL.md, CAPABILITIES.md (#27 → [BUILT]), INTEGRATION-CAPABILITIES.md updated. OpenAPI spec regenerated.
+
+**Review findings fixed:**
+- B1: `fromisoformat()` Z suffix crash → `_parse_iso()` helper
+- B2: Deletion detection wrong query → proper overlap detection
+- B3: All-day event end time off by 24h → subtract 1 second for inclusive end
+- B4: Timezone inconsistency across routes → standardized `.replace(tzinfo=None)`
+- R1: Hardcoded string in scheduler → `SOURCE_TYPE_GOOGLE_CALENDAR` constant
+- R3: SQL wildcard injection in brief search → `_escape_like()` helper
+- R4: Missing route error handling → try-except with HTTP 400
+- R5: Missing frontend error states → error UI in all 3 calendar components
+- R6: Sync mutation no error handling → onError callback with red error text
+- R7: Context assembler zero test coverage → 8 dedicated tests
+
+**Files created:** 12 new files (google_auth.py, gcalendar_client.py, calendar_integration_service.py, integrations routes/schemas, calendar routes/schemas, Alembic migration, 3 frontend components, 2 test files)
+**Files modified:** ~20 files (models.py, enums.py, data_source_service.py, automation_service.py, mcp_tools.py, permission_enforcer.py, context_assembler.py, agent_runner.py, automation_scheduler.py, main.py, sidebar.tsx, App.tsx, widget-registry.tsx, register_automation_templates.py, 3 doc files)
+
 ## Current State
 
-- **~1300 backend tests passing**, lint clean on new code
+- **~1315 backend tests passing**, lint clean on new code
 - **63 Playwright E2E tests passing** (new comprehensive suite) + 39 prior component tests
 - **OpenAPI spec freshly regenerated** from current routes
-- Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes, permission inheritance with no-escalation enforcement, parallel sub-agent delegation with per-run caps, cascade termination/pause/resume, delegation monitoring MCP tools, audit-logged sub-agent completions, autonomous crash recovery with task list resumption, approval queue lifecycle with per-agent expiry and steering re-injection, structured run summaries with morning brief dashboard
-- Frontend: dashboard with skeleton loading + backup reminder + morning brief, space view (widget-based layout), conversation panel with stream_end support, agent management with max_spawn_depth + approval_timeout_hours, search modal, document panel + viewer, Space Settings (tabbed: layout editor + memory health + history), task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, toast notifications, keyboard shortcuts + help overlay, browser tab badge, page transitions, empty states, 3 palettes × 2 themes, Odin SSE filtering with race-condition handling, accessible sidebar/panel, agent dropdown fix, type-safe API calls, local column toggle, validated localStorage, aria-labels, delegation tree sidebar, nested sub-agents in Active Agents panel
+- Backend: CRUD, agent sessions, SSE streaming with replay buffer, permissions, Odin, four-tier memory, context safety, records/CRM, documents, FTS5 search, Google Drive, widget layouts, unified items, item links, sub-agent delegation, managed turn loop, mid-task steering, Agent Builder, skill-based agents, step tracking, stale/stuck detection, automation scheduler, cron matching, run lifecycle, missed-run detection, notification infrastructure, memory lifecycle management, summary consolidation, backup system, rate limit retry, graceful shutdown, orphaned task cleanup, space-scoped MCP tools, permission polling timeout, FK cascade enforcement, FTS5 active filtering, bounded event queues, context size caching, stream_end SSE event, SDK session cleanup, tag filtering, behavioral rules API, messages pagination, typed enums, query indexes, permission inheritance with no-escalation enforcement, parallel sub-agent delegation with per-run caps, cascade termination/pause/resume, delegation monitoring MCP tools, audit-logged sub-agent completions, autonomous crash recovery with task list resumption, approval queue lifecycle with per-agent expiry and steering re-injection, structured run summaries with morning brief dashboard, **Google Calendar integration** (shared OAuth, 7 MCP tools, 15-min sync, cross-space data sources, per-space exclusion, calendar context in working memory, meeting prep automation template)
+- Frontend: dashboard with skeleton loading + backup reminder + morning brief, space view (widget-based layout), conversation panel with stream_end support, agent management with max_spawn_depth + approval_timeout_hours, search modal, document panel + viewer, Space Settings (tabbed: layout editor + memory health + history), task list with stage dropdown, background task monitoring with steering, automations dashboard with cron presets, notification panel, toast notifications, keyboard shortcuts + help overlay, browser tab badge, page transitions, empty states, 3 palettes × 2 themes, Odin SSE filtering with race-condition handling, accessible sidebar/panel, agent dropdown fix, type-safe API calls, local column toggle, validated localStorage, aria-labels, delegation tree sidebar, nested sub-agents in Active Agents panel, **Calendar** (home widget, /calendar page with sync + expandable events, space widget, conditional sidebar nav)
 
 ---
 
@@ -641,3 +711,7 @@ Spike found that vector search adds unnecessary complexity for a small personal 
 20. **Approval queue is non-blocking** — autonomous agents queue actions outside their permissions and continue with other work. The user approves/denies from the dashboard in batch. Agents don't wait.
 21. **Heartbeat cron expression controls working hours** — no separate working-hours feature needed. `*/30 9-17 * * 1-5` = business hours only.
 22. **Permission inheritance, not narrowing** — sub-agents inherit the parent's full permissions by default. No depth-based stripping. The only hard rule: child can never exceed parent scope (no-escalation invariant). Delegation walks up to the root coordinator to anchor permissions, preventing escalation when a sub-agent has broader DB permissions than what it inherited. `max_spawn_depth` limits recursion depth, not permissions.
+23. **Cross-space data sources use nullable space_id** — system-level DataSources (Calendar, Email) have `space_id=null`. The Space relationship cascade changed from `delete-orphan` to `delete` + `passive_deletes=True` so system sources survive space deletions. Per-space opt-out via `space_data_source_exclusions` table.
+24. **Shared OAuth with incremental authorization** — `google_auth.py` manages a scope registry. Each integration registers scopes on import. `include_granted_scopes=true` preserves existing grants when adding new scopes. Single token file covers Drive + Calendar (+ Gmail later).
+25. **Integration sync is not agent work** — Calendar/email sync runs as a direct function call in the automation scheduler loop (every 15 minutes), not via `delegate_background`. No LLM reasoning needed for API-to-DB sync. Failure counter with 3-strike notification threshold.
+26. **Context budget increased for integrations** — Total context 8,000→8,800 tokens (500 calendar + 300 email placeholder). Odin 4,000→4,800. Calendar and email are separate END sections, not carved from existing board/todo budget.

@@ -6,7 +6,7 @@ __all__ = ["DataSourceCreate", "DataSourceUpdate", "DataSourceResponse"]
 
 
 class DataSourceCreate(BaseModel):
-    space_id: str
+    space_id: str | None = None
     name: str
     source_type: str
     config: dict | None = None
@@ -24,7 +24,7 @@ class DataSourceResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: str
-    space_id: str
+    space_id: str | None
     source_type: str
     name: str
     config: dict | None

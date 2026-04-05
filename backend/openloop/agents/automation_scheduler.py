@@ -10,19 +10,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from contract.enums import AutomationTriggerType, BackgroundTaskRunType, BackgroundTaskStatus, NotificationType
+from contract.enums import AutomationTriggerType, BackgroundTaskRunType, BackgroundTaskStatus, NotificationType, SOURCE_TYPE_GOOGLE_CALENDAR
 from croniter import croniter
 
 from backend.openloop.agents import concurrency_manager
 from backend.openloop.database import SessionLocal
-from backend.openloop.db.models import Agent, BackgroundTask, Notification
+from backend.openloop.db.models import Agent, BackgroundTask, DataSource, Notification
 from backend.openloop.services import automation_service, notification_service
 
 logger = logging.getLogger(__name__)
 
 _scheduler_task: asyncio.Task | None = None
+_last_integration_sync: datetime | None = None
+_INTEGRATION_SYNC_INTERVAL = timedelta(minutes=15)
 
 
 async def _run_scheduler() -> None:
@@ -137,6 +139,9 @@ async def _tick() -> None:
         # --- Heartbeat evaluation ---
         await _evaluate_heartbeats(db, now_naive)
 
+        # --- Integration syncs (calendar, email) — every 15 minutes ---
+        await _run_integration_syncs(db)
+
         # --- Expire stale approvals ---
         await _expire_stale_approvals(db)
     finally:
@@ -165,6 +170,38 @@ def _is_due(automation, now_naive: datetime) -> bool:
     cron = croniter(automation.cron_expression, ref)
     next_run = cron.get_next(datetime)
     return next_run <= now_naive
+
+
+async def _run_integration_syncs(db) -> None:
+    """Run integration syncs (calendar, email) — called from _tick every 15 minutes."""
+    global _last_integration_sync
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    if _last_integration_sync and (now - _last_integration_sync) < _INTEGRATION_SYNC_INTERVAL:
+        return  # Not yet time
+
+    _last_integration_sync = now
+
+    # Calendar sync
+    try:
+        from backend.openloop.services import calendar_integration_service
+
+        # Find calendar data source
+        calendar_ds = (
+            db.query(DataSource)
+            .filter(DataSource.source_type == SOURCE_TYPE_GOOGLE_CALENDAR, DataSource.space_id.is_(None))
+            .first()
+        )
+        if calendar_ds:
+            result = calendar_integration_service.sync_events(db, calendar_ds.id)
+            logger.info(
+                "Calendar sync: +%d -%d ~%d",
+                result["added"],
+                result["removed"],
+                result["updated"],
+            )
+    except Exception as exc:
+        logger.error("Calendar integration sync failed: %s", exc, exc_info=True)
 
 
 async def _evaluate_heartbeats(db, now_naive: datetime) -> None:

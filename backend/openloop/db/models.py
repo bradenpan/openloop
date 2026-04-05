@@ -55,6 +55,13 @@ document_items = Table(
     Column("item_id", String(36), ForeignKey("items.id", ondelete="CASCADE"), primary_key=True),
 )
 
+space_data_source_exclusions = Table(
+    "space_data_source_exclusions",
+    Base.metadata,
+    Column("space_id", String(36), ForeignKey("spaces.id", ondelete="CASCADE"), primary_key=True),
+    Column("data_source_id", String(36), ForeignKey("data_sources.id", ondelete="CASCADE"), primary_key=True),
+)
+
 
 # ---------------------------------------------------------------------------
 # 1. spaces
@@ -104,7 +111,8 @@ class Space(Base):
         "DataSource",
         back_populates="space",
         lazy="select",
-        cascade="all, delete-orphan",
+        cascade="all, delete",
+        passive_deletes=True,
     )
     conversation_summaries: Mapped[list["ConversationSummary"]] = relationship(
         "ConversationSummary",
@@ -326,8 +334,8 @@ class DataSource(Base):
     __tablename__ = "data_sources"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
-    space_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=False, index=True
+    space_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("spaces.id", ondelete="CASCADE"), nullable=True, index=True
     )
     source_type: Mapped[str] = mapped_column(String, nullable=False)
     name: Mapped[str] = mapped_column(String, nullable=False)
@@ -338,7 +346,7 @@ class DataSource(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
     # Relationships
-    space: Mapped["Space"] = relationship("Space", back_populates="data_sources")
+    space: Mapped["Space | None"] = relationship("Space", back_populates="data_sources")
 
 
 # ---------------------------------------------------------------------------
@@ -609,6 +617,7 @@ class Automation(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_run_status: Mapped[str | None] = mapped_column(String, nullable=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
@@ -775,4 +784,65 @@ class SystemState(Base):
 
     key: Mapped[str] = mapped_column(String, primary_key=True)
     value: Mapped[dict | None] = mapped_column(SA_JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# 19. calendar_events (Phase 12.3 — Google Calendar cache)
+# ---------------------------------------------------------------------------
+
+
+class CalendarEvent(Base):
+    __tablename__ = "calendar_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    data_source_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    google_event_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    calendar_id: Mapped[str] = mapped_column(String, nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    location: Mapped[str | None] = mapped_column(String, nullable=True)
+    start_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    end_time: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    all_day: Mapped[bool] = mapped_column(Boolean, default=False)
+    attendees: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
+    organizer: Mapped[dict | None] = mapped_column(SA_JSON, nullable=True)
+    conference_data: Mapped[dict | None] = mapped_column(SA_JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String, default="confirmed")
+    recurrence_rule: Mapped[str | None] = mapped_column(String, nullable=True)
+    html_link: Mapped[str | None] = mapped_column(String, nullable=True)
+    etag: Mapped[str | None] = mapped_column(String, nullable=True)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+# ---------------------------------------------------------------------------
+# 20. email_cache (Phase 13.2 — Gmail cache)
+# ---------------------------------------------------------------------------
+
+
+class EmailCache(Base):
+    __tablename__ = "email_cache"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    data_source_id: Mapped[str | None] = mapped_column(
+        String(36), ForeignKey("data_sources.id", ondelete="CASCADE"), nullable=True, index=True
+    )
+    gmail_message_id: Mapped[str | None] = mapped_column(String, unique=True, nullable=True)
+    gmail_thread_id: Mapped[str | None] = mapped_column(String, nullable=True)
+    subject: Mapped[str | None] = mapped_column(String, nullable=True)
+    from_address: Mapped[str | None] = mapped_column(String, nullable=True)
+    from_name: Mapped[str | None] = mapped_column(String, nullable=True)
+    to_addresses: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
+    cc_addresses: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
+    snippet: Mapped[str | None] = mapped_column(Text, nullable=True)
+    labels: Mapped[list | None] = mapped_column(SA_JSON, nullable=True)
+    is_unread: Mapped[bool] = mapped_column(Boolean, default=True)
+    received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    gmail_link: Mapped[str | None] = mapped_column(String, nullable=True)
+    synced_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)

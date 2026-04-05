@@ -28,14 +28,17 @@ from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
-from backend.openloop.db.models import Agent, Conversation, ConversationSummary, Item
+from backend.openloop.db.models import Agent, Conversation, ConversationSummary, DataSource, Item
 from backend.openloop.services import (
     agent_service,
     behavioral_rule_service,
+    calendar_integration_service,
+    data_source_service,
     item_service,
     memory_service,
     space_service,
 )
+from contract.enums import SOURCE_TYPE_GOOGLE_CALENDAR
 
 # ---------------------------------------------------------------------------
 # Token budgets (approximate, using 1 token ≈ 4 chars heuristic)
@@ -53,6 +56,8 @@ BUDGET_GLOBAL_FACTS = 500
 
 # END (high attention)
 BUDGET_TODOS_BOARD = 1500
+BUDGET_CALENDAR = 500
+BUDGET_EMAIL = 300
 
 # Odin mode uses a lighter total budget
 BUDGET_ODIN_TOTAL = 4000
@@ -220,6 +225,11 @@ def _assemble_space_context(
     if todo_board:
         sections.append(_truncate_to_budget(todo_board, BUDGET_TODOS_BOARD))
 
+    # 8. Calendar events (upcoming 48h)
+    calendar = _build_calendar_section(db, space_id=space_id)
+    if calendar:
+        sections.append(_truncate_to_budget(calendar, BUDGET_CALENDAR))
+
     return "\n\n".join(sections)
 
 
@@ -314,6 +324,14 @@ def _assemble_odin_context(db: Session, agent: Agent, read_only: bool = False) -
         attention = _build_odin_attention_items(db)
         if attention:
             truncated = _truncate_to_budget(attention, remaining)
+            sections.append(truncated)
+            remaining -= estimate_tokens(truncated)
+
+    # Calendar events (no space exclusion for Odin)
+    if remaining > 0:
+        calendar = _build_calendar_section(db)
+        if calendar:
+            truncated = _truncate_to_budget(calendar, min(remaining, BUDGET_CALENDAR))
             sections.append(truncated)
             remaining -= estimate_tokens(truncated)
 
@@ -681,6 +699,100 @@ def _build_tool_docs_section(agent: Agent) -> str:
             lines.append(f"- {tool}")
 
     return _wrap_user_data("\n".join(lines), "tool-docs")
+
+
+# ---------------------------------------------------------------------------
+# Calendar section builder
+# ---------------------------------------------------------------------------
+
+
+def _build_calendar_section(db: Session, space_id: str | None = None) -> str:
+    """Build upcoming calendar events section for context.
+
+    Checks if a google_calendar DataSource exists. If space_id is given,
+    checks it's not excluded for that space. For Odin (space_id=None),
+    always includes if the DataSource exists.
+
+    Groups events by day (Today/Tomorrow/date), shows time range, title,
+    abbreviated attendees, and conference link indicator.
+    Truncates to ~2000 chars.
+    """
+    from datetime import timedelta
+
+    # Check if Google Calendar DataSource exists
+    cal_ds = (
+        db.query(DataSource)
+        .filter(
+            DataSource.source_type == SOURCE_TYPE_GOOGLE_CALENDAR,
+            DataSource.space_id.is_(None),
+        )
+        .first()
+    )
+    if not cal_ds:
+        return ""
+
+    # If space_id given, check exclusion
+    if space_id:
+        if data_source_service.is_excluded(db, space_id, cal_ds.id):
+            return ""
+
+    # Get upcoming events (48h)
+    events = calendar_integration_service.get_upcoming_events(db, hours=48)
+    if not events:
+        return ""
+
+    now = datetime.now(UTC).replace(tzinfo=None)
+    today = now.date()
+    tomorrow = today + timedelta(days=1)
+
+    # Group by day
+    day_groups: dict[str, list] = {}
+    for event in events:
+        if not event.start_time:
+            continue
+        event_date = event.start_time.date()
+        if event_date == today:
+            day_label = "Today"
+        elif event_date == tomorrow:
+            day_label = "Tomorrow"
+        else:
+            day_label = event_date.strftime("%A, %b %d")
+        day_groups.setdefault(day_label, []).append(event)
+
+    lines = ["## Upcoming Calendar"]
+    for day_label, day_events in day_groups.items():
+        lines.append(f"### {day_label}")
+        for event in day_events:
+            # Time range
+            if event.all_day:
+                time_str = "All day"
+            else:
+                start_str = event.start_time.strftime("%H:%M") if event.start_time else "?"
+                end_str = event.end_time.strftime("%H:%M") if event.end_time else "?"
+                time_str = f"{start_str}-{end_str}"
+
+            # Abbreviated attendees (first 3 names/emails)
+            attendee_str = ""
+            if event.attendees:
+                names = []
+                for a in event.attendees[:3]:
+                    name = a.get("displayName") or a.get("email", "").split("@")[0]
+                    names.append(name)
+                if len(event.attendees) > 3:
+                    names.append(f"+{len(event.attendees) - 3}")
+                attendee_str = f" [{', '.join(names)}]"
+
+            # Conference link indicator
+            conf_str = " [video]" if event.conference_data else ""
+
+            lines.append(f"- {time_str} {event.title}{attendee_str}{conf_str}")
+
+    inner = "\n".join(lines)
+    # Truncate to ~2000 chars
+    if len(inner) > 2000:
+        inner = inner[:1997] + "..."
+
+    return _wrap_user_data(inner, "calendar")
 
 
 # ---------------------------------------------------------------------------

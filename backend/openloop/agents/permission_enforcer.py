@@ -245,6 +245,14 @@ _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
     "navigate_to_space": ("openloop-spaces", Operation.READ),
     "get_attention_items": ("openloop-attention", Operation.READ),
     "get_cross_space_tasks": ("openloop-board", Operation.READ),
+    # Calendar tools
+    "list_calendar_events": ("google_calendar", Operation.READ),
+    "get_calendar_event": ("google_calendar", Operation.READ),
+    "find_free_time": ("google_calendar", Operation.READ),
+    "list_calendars": ("google_calendar", Operation.READ),
+    "create_calendar_event": ("google_calendar", Operation.CREATE),
+    "update_calendar_event": ("google_calendar", Operation.EDIT),
+    "delete_calendar_event": ("google_calendar", Operation.DELETE),
 }
 
 

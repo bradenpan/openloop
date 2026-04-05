@@ -212,7 +212,7 @@ def _convert_stream_event(stream_event, conversation_id: str) -> dict | None:
     return None
 
 
-def _build_mcp_server(agent, agent_id: str):
+def _build_mcp_server(agent, agent_id: str, space_id: str | None = None):
     """Build the appropriate MCP tool server for an agent."""
     is_odin = agent.name.lower() == "odin"
     is_agent_builder = agent.name.lower() in ("agent-builder", "agent builder")
@@ -221,9 +221,9 @@ def _build_mcp_server(agent, agent_id: str):
     elif is_agent_builder:
         from backend.openloop.agents.mcp_tools import build_agent_builder_tools
 
-        return build_agent_builder_tools(agent.name, agent_id)
+        return build_agent_builder_tools(agent.name, agent_id, space_id=space_id)
     else:
-        return build_agent_tools(agent.name, agent_id)
+        return build_agent_tools(agent.name, agent_id, space_id=space_id)
 
 
 def _check_concurrency(db: Session, lane: str) -> None:
@@ -546,7 +546,7 @@ async def _run_compaction_cycle(
         return True, None, None
 
     # 2. Generate summary of completed work
-    mcp_server = _build_mcp_server_by_name(agent_name, agent_id)
+    mcp_server = _build_mcp_server_by_name(agent_name, agent_id, space_id=space_id)
     summary_text = ""
     new_session_id: str | None = None
     try:
@@ -645,7 +645,7 @@ async def _run_interactive_inner(
         _check_concurrency(db, "interactive")
 
     # Build MCP tools + model + hooks
-    mcp_server = _build_mcp_server(agent, agent.id)
+    mcp_server = _build_mcp_server(agent, agent.id, space_id=conversation.space_id)
     model_name = conversation.model_override or agent.default_model
     model = resolve_model(model_name)
     hooks = _build_hooks_dict(agent.id, conversation_id)
@@ -856,7 +856,7 @@ async def close_conversation(
 
     if sdk_session_id:
         agent = agent_service.get_agent(db, conversation.agent_id)
-        mcp_server = _build_mcp_server(agent, agent.id)
+        mcp_server = _build_mcp_server(agent, agent.id, space_id=conversation.space_id)
         model_name = conversation.model_override or agent.default_model
         model = resolve_model(model_name)
         hooks = _build_hooks_dict(conversation.agent_id, conversation_id)
@@ -1316,7 +1316,7 @@ async def _run_background_task(
     from backend.openloop.agents.event_bus import event_bus
     from backend.openloop.services import audit_service
 
-    mcp_server = _build_mcp_server_by_name(agent_name, agent_id)
+    mcp_server = _build_mcp_server_by_name(agent_name, agent_id, space_id=space_id)
     model = resolve_model(model_override or default_model)
 
     db = _new_db_session()
@@ -1912,7 +1912,7 @@ async def _run_autonomous_task(
 
     from backend.openloop.agents.event_bus import event_bus
 
-    mcp_server = _build_mcp_server_by_name(agent_name, agent_id)
+    mcp_server = _build_mcp_server_by_name(agent_name, agent_id, space_id=space_id)
     model = resolve_model(default_model)
 
     db = _new_db_session()
@@ -2490,7 +2490,7 @@ def _extract_autonomous_task_list(instruction: str, turn_results: list[str]) -> 
 register_persistent_extractor(_extract_autonomous_task_list)
 
 
-def _build_mcp_server_by_name(agent_name: str, agent_id: str):
+def _build_mcp_server_by_name(agent_name: str, agent_id: str, space_id: str | None = None):
     """Build MCP server from agent name (used in background tasks where we
     don't have the full agent ORM object)."""
     is_odin = agent_name.lower() == "odin"
@@ -2500,9 +2500,9 @@ def _build_mcp_server_by_name(agent_name: str, agent_id: str):
     elif is_agent_builder:
         from backend.openloop.agents.mcp_tools import build_agent_builder_tools
 
-        return build_agent_builder_tools(agent_name, agent_id)
+        return build_agent_builder_tools(agent_name, agent_id, space_id=space_id)
     else:
-        return build_agent_tools(agent_name, agent_id)
+        return build_agent_tools(agent_name, agent_id, space_id=space_id)
 
 
 # ---------------------------------------------------------------------------

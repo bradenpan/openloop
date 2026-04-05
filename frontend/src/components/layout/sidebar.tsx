@@ -3,10 +3,33 @@ import { useUIStore } from '../../stores/ui-store';
 import { $api } from '../../api/hooks';
 import { SearchButton } from '../search-modal';
 
+function CalendarIcon() {
+  return (
+    <svg
+      width="14"
+      height="14"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className="shrink-0"
+    >
+      <rect x="3" y="4" width="18" height="18" rx="2" ry="2" />
+      <line x1="16" y1="2" x2="16" y2="6" />
+      <line x1="8" y1="2" x2="8" y2="6" />
+      <line x1="3" y1="10" x2="21" y2="10" />
+    </svg>
+  );
+}
+
 export function Sidebar() {
   const collapsed = useUIStore((s) => s.sidebarCollapsed);
   const toggle = useUIStore((s) => s.toggleSidebar);
   const { data } = $api.useQuery('get', '/api/v1/spaces', { params: { query: { limit: 50 } } });
+  const calendarAuth = $api.useQuery('get', '/api/v1/calendar/auth-status');
+  const calendarConnected = calendarAuth.data?.authenticated === true;
 
   if (collapsed) {
     return (
@@ -50,6 +73,18 @@ export function Sidebar() {
         >
           Home
         </NavLink>
+
+        {calendarConnected && (
+          <NavLink
+            to="/calendar"
+            className={({ isActive }) =>
+              `flex items-center gap-2 px-3 py-2 rounded-md text-sm transition-colors ${isActive ? 'bg-primary/10 text-primary font-semibold' : 'text-foreground hover:bg-raised'}`
+            }
+          >
+            <CalendarIcon />
+            Calendar
+          </NavLink>
+        )}
 
         <div className="mt-4 mb-1 px-3 text-[11px] font-semibold text-muted uppercase tracking-wider">
           Spaces
