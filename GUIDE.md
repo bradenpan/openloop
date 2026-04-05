@@ -128,7 +128,7 @@ An agent is a configured AI with a specific role. Think of agents as specialized
 
 1. Click "New Conversation" in a space
 2. Pick an agent
-3. Pick a model (Sonnet is default — use Opus for complex planning)
+3. Pick a model (Sonnet is default — use Opus for complex planning, Haiku for quick lookups)
 4. Start chatting
 
 Conversations are persistent. You can close them when done (the system saves a summary), and start new ones later. The agent in the new conversation gets the summaries from prior conversations, so context carries over.
@@ -144,6 +144,8 @@ If a background agent is going down the wrong path, you can send it a correction
 ### Odin
 
 Odin is the system-level AI. Always available at the bottom of the screen. It runs on Haiku for fast responses (~1-2 seconds).
+
+When Odin routes you to an agent, it considers task complexity and selects the appropriate model: Haiku for simple lookups, the agent's default (Sonnet) for standard work, or Opus for complex planning and deep analysis. You can also request a specific model ("open a conversation with the Recruiting Agent using Opus").
 
 Use Odin for:
 - Quick actions: "Add a task: call dentist"
