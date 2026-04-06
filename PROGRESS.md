@@ -873,6 +873,41 @@ Merged overlapping agent-builder and skill-creator skills. Built out all 7 skill
 
 **No backend code changes** — mcp_tools.py and agent_runner.py already handle agent-builder and integration-builder routing correctly. All standard agents get the same ~48 MCP tools from `_STANDARD_TOOLS` registry. Agents also have Claude Code built-in tools (Read, Write, Edit, Bash, WebSearch, WebFetch) via the SDK runtime.
 
+## Agent Context Loading Overhaul — 2026-04-06
+
+Comprehensive review and fix of how agents receive instructions and behavioral rules at runtime.
+
+**Problem:** Three systemic issues identified during context loading audit:
+1. `agents.md` (core behavioral rules) was never injected into agent calls — 6 of 7 SKILL.md files said "Reference agents.md" but agents had no mechanism to read it
+2. `BUDGET_AGENT_IDENTITY` was 1,500 tokens — eng-manager (~3,372 tokens) and agent-builder (~3,559 tokens) SKILL.md files were being silently truncated, losing code review procedures, sub-agent management, quality gates, etc.
+3. Anti-sycophancy and reasoning rules from `~/.claude/CLAUDE.md` only loaded by Claude Code CLI, never reached SDK-powered agents
+
+**Context assembler changes (`context_assembler.py`):**
+- `BUDGET_AGENT_IDENTITY`: 1,500 → 5,000 tokens (accommodates all current SKILL.md files)
+- New `BUDGET_BASE_INSTRUCTIONS = 600` — universal rules injected into every agent (space agents and Odin)
+- New `_BASE_AGENT_INSTRUCTIONS` constant containing condensed core principles, anti-sycophancy rules, reasoning guidelines, and error recovery from `agents.md` + global CLAUDE.md
+- Injected in BEGINNING section (high attention) after agent identity, before behavioral rules
+- Total space agent budget: ~8,850 → ~13,400 tokens (~6.7% of 200K context window)
+- Odin budget unchanged at 4,000 tokens (base instructions deducted from remaining)
+
+**Agent-builder personality requirement (`agents/skills/agent-builder/SKILL.md`):**
+- Phase 1 Round 3 renamed "Personality & Quality" — explicitly gathers domain archetype, formality, communication style
+- Phase 2 lists Personality as required section in SKILL.md output
+- New Personality subsection with guidelines: 5-10 lines, behavior not theatrics, identity framing, domain-grounded, auto-generated when user has no strong preference
+- Every agent must ship with a personality — builder generates domain-appropriate default
+
+**CLAUDE.md consolidation:**
+- Consolidated rules from 11 files across 7+ repos into unified rule set
+- `openloop/CLAUDE.md` is canonical (version-controlled, survives machine migration) with "Universal Rules" section at top + new "Agent System" section documenting context loading, skill files, base instructions
+- `~/.claude/CLAUDE.md` is deployed copy pointing to openloop repo as canonical source
+- Rules organized: Anti-Sycophancy, Reasoning & Analysis, Action Rules, Information Gathering, Communication, Subagent Rules, Secrets & Security
+
+**Documentation updates:**
+- CAPABILITIES.md: context assembly (~8,000 → ~13,400), agent creation (personality requirement), procedural memory (universal vs agent-specific rules)
+- ARCHITECTURE-PROPOSAL.md: context assembler diagram (new section 2 for base instructions, renumbered 1-9), all token budgets updated, Odin budget corrected (4,800 → 4,000), Agent Builder flow (skill file output with personality), overall context budget breakdown
+- Guide.md: walkthrough step 3 (personality in agent creation), context assembly list (base instructions bullet), token budget, Claude Code relationship description
+- agents/agents.md: unchanged (remains human documentation; runtime rules now in `_BASE_AGENT_INSTRUCTIONS` constant)
+
 ---
 
 ## Key Decisions Made During Build

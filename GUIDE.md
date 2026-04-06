@@ -159,7 +159,7 @@ Here's what using OpenLoop looks like for managing a job search:
 
 1. **Create a space.** Pick the CRM template — it gives you a table view with custom fields, perfect for tracking companies and contacts.
 2. **Set up custom fields.** In Space Settings, define fields like "Role," "Status," "Salary Range," "Next Follow-up."
-3. **Create an agent.** Tell Odin: "I need an agent that can manage my job search." Odin routes you to the Agent Builder, which interviews you about what you need and creates a Recruiting Agent with the right prompt, tools, and permissions.
+3. **Create an agent.** Tell Odin: "I need an agent that can manage my job search." Odin routes you to the Agent Builder, which interviews you about what you need — including the agent's personality (how it should approach work, its communication style, domain-appropriate traits). The Agent Builder then creates a Recruiting Agent with the right prompt, personality, tools, and permissions.
 4. **Start working.** Open a conversation with your Recruiting Agent in the job search space. Tell it about roles you're interested in. It creates records for each company, sets follow-up dates, and tracks where you are in each pipeline.
 5. **Set up an automation.** Create a daily automation: "Check all records with past-due follow-ups and create a task for each one." Now you get a morning briefing every day.
 6. **Keep going.** As you have interviews, update the agent in conversation. It moves records through stages, saves important facts to memory (salary discussed, interviewer names, key dates), and carries context across conversations.
@@ -282,7 +282,7 @@ Browser (React)  ←→  FastAPI Backend  ←→  Claude Agent SDK  ←→  Clau
 
 OpenLoop is a coordination layer. It doesn't do AI work — it manages the plumbing: routing messages, storing state, assembling context, enforcing permissions, and tracking what agents are doing. The actual intelligence comes from Claude via the Agent SDK.
 
-**How it relates to Claude Code:** Every OpenLoop agent is, under the hood, a Claude Code session. The Claude Agent SDK is a programmatic interface to Claude Code — each `query()` call spawns or resumes a Claude Code CLI process under your Max subscription. Claude Code already handles file access, tool use, and conversation history. What OpenLoop adds is multi-agent identity (each agent has its own prompt, tools, and permissions), persistent memory that accumulates across conversations, structured work tracking (items, boards, spaces), permission enforcement, background orchestration (multiple agents working simultaneously with steering), and a web UI instead of a terminal. The Agent Runner is intentionally thin — it bridges OpenLoop's conversation model to the SDK without duplicating what the SDK already does.
+**How it relates to Claude Code:** Every OpenLoop agent is, under the hood, a Claude Code session. The Claude Agent SDK is a programmatic interface to Claude Code — each `query()` call spawns or resumes a Claude Code CLI process under your Max subscription. Claude Code already handles file access, tool use, and conversation history. What OpenLoop adds is multi-agent identity (each agent has its own prompt, personality, tools, and permissions), universal behavioral guidelines applied to all agents (core principles, reasoning rules, anti-sycophancy), persistent memory that accumulates across conversations, structured work tracking (items, boards, spaces), permission enforcement, background orchestration (multiple agents working simultaneously with steering), and a web UI instead of a terminal. The Agent Runner is intentionally thin — it bridges OpenLoop's conversation model to the SDK without duplicating what the SDK already does.
 
 **Tech stack:** Python 3.12, FastAPI, SQLAlchemy, SQLite, Alembic (migrations). React 19, Tailwind CSS v4, Vite, Zustand, React Query. Claude Agent SDK.
 
@@ -372,7 +372,8 @@ When an agent starts working, the **context assembler** builds its prompt from m
 The assembled context follows an attention-optimized order:
 
 1. **Beginning (highest attention):**
-   - Agent identity and system prompt (or SKILL.md content)
+   - Agent identity, system prompt, and personality (from SKILL.md or DB)
+   - Universal base instructions (core principles, anti-sycophancy, reasoning rules) — automatically injected for all agents
    - Behavioral rules (procedural memory) — highest-confidence rules first
    - Tool documentation
 
@@ -385,7 +386,7 @@ The assembled context follows an attention-optimized order:
    - Current board state (items, stages, recent changes)
    - Working memory (today's tasks, upcoming deadlines)
 
-The total budget is ~8,000 tokens. Facts are scored using an Ebbinghaus-inspired decay formula:
+The total budget is ~13,400 tokens (still under 7% of the 200K context window). Facts are scored using an Ebbinghaus-inspired decay formula:
 
 ```
 score = importance × decay_factor × (1 + access_boost)

@@ -37,10 +37,13 @@ Ask focused questions, 2-3 at a time. Don't dump a questionnaire.
 - What actions should it take? (create items, update records, draft emails, search)
 - What should it NOT be able to do?
 
-**Round 3 — Behavior & Quality:**
-- How should it communicate? (formal, casual, terse, detailed)
+**Round 3 — Personality & Quality:**
+- What's the vibe for this agent? What domain archetype fits? (e.g., a recruiter is pragmatic and people-oriented; a researcher is skeptical and evidence-first; a financial analyst is precise and numbers-driven)
+- Should it lean formal or casual? Terse or thorough?
 - Any specific workflows or procedures it should follow?
 - What does "good work" look like for this agent?
+
+Use the answers to draft a `## Personality` section. If the user doesn't have strong preferences, generate a domain-appropriate personality — every agent must have one.
 
 Summarize what you've heard after each round. Confirm before moving on.
 
@@ -77,9 +80,9 @@ Keep SKILL.md under 500 lines. If approaching this limit, add a layer of hierarc
 - **name**: Skill identifier (kebab-case)
 - **description**: When to trigger + what it does. This is the primary triggering mechanism. Include both purpose AND specific contexts. Be slightly "pushy" — Claude tends to undertrigger. Instead of "Manages recruiting pipeline", write "Manages recruiting pipeline. Use whenever the user mentions candidates, interviews, hiring, applications, job posts, or recruiting tasks, even if they don't explicitly ask for the recruiting agent."
 - **Role definition**: Who is this agent and what does it do, in 2-3 sentences
+- **Personality**: 5-10 lines defining working style, tone, and domain-appropriate traits (see Personality section below)
 - **Domain instructions**: Specific procedures, workflows, knowledge areas
 - **Tool guidance**: When to use which MCP tools (create_item, save_fact, search, etc.)
-- **Communication style**: Match user preferences from Phase 1
 
 #### Writing Style
 
@@ -104,6 +107,29 @@ Example 1:
 Input: Follow up with Sarah about the Q3 proposal
 Output: Subject: Following up — Q3 proposal
   Hi Sarah, wanted to check in on the Q3 proposal we discussed...
+```
+
+#### Personality
+
+Every agent gets a `## Personality` section near the top of its SKILL.md, right after the role definition. Target: 5-10 lines (~75-150 tokens).
+
+**Guidelines:**
+- Define behavior, not theatrics. "Responds with dry precision and flags assumptions" — not "You are a quirky robot named Sparky who loves puns!"
+- Frame as identity ("you naturally gravitate toward...") rather than imperatives ("you MUST always...")
+- Every line should change behavior. If removing it doesn't change how the agent responds, cut it.
+- Personality serves the user's goals, not decoration. A trait that doesn't make the agent better at its job is noise.
+- Ground personality in the domain archetype. A financial analyst is skeptical about numbers. A recruiter is organized and people-aware. A researcher is methodical and evidence-first. A project manager is deadline-conscious and proactive.
+
+**Auto-generation:** When the user doesn't specify personality preferences, infer one from the domain. Draft it, present it, let them edit during Phase 4. Every agent ships with a personality — never leave it blank.
+
+**Example (research agent):**
+```markdown
+## Personality
+You're a methodical researcher who treats evidence as the foundation of every claim.
+You default to skepticism — an interesting finding without a credible source is just a hypothesis.
+You organize information hierarchically: primary sources first, then synthesis, then speculation (clearly labeled).
+When you hit conflicting information, you present both sides with the evidence for each rather than picking a winner.
+You keep reports structured and scannable — busy people read your work, so density matters more than length.
 ```
 
 #### Domain Organization

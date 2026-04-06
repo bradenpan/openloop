@@ -85,7 +85,7 @@ This means every OpenLoop agent is, at the infrastructure level, a Claude Code s
 
 **What OpenLoop adds on top:**
 - **Multi-agent identity** — Claude Code is one agent in one terminal. OpenLoop runs multiple agents simultaneously, each with a distinct system prompt, tool set, and permission boundary, organized by domain (recruiting, code, health, etc.).
-- **Structured context injection** — Claude Code gets CLAUDE.md files and whatever it reads during a conversation. OpenLoop assembles ~8,800 tokens of curated context before every first message: behavioral rules, conversation summaries, scored facts, live board state, and working memory (calendar events, email inbox summary) — ranked by importance and ordered for maximum model attention.
+- **Structured context injection** — Claude Code gets CLAUDE.md files and whatever it reads during a conversation. OpenLoop assembles ~13,400 tokens of curated context before every first message: universal base instructions (core principles, anti-sycophancy, reasoning rules), agent identity and personality, behavioral rules, conversation summaries, scored facts, live board state, and working memory (calendar events, email inbox summary) — ranked by importance and ordered for maximum model attention.
 - **Persistent memory across conversations** — Claude Code's memory is per-project markdown files. OpenLoop has four-tier memory (semantic facts, episodic summaries, procedural rules, working state) with write-time dedup, temporal tracking, scored retrieval, and lifecycle management. An agent on conversation #30 knows decisions from conversation #2.
 - **Work tracking** — items (tasks, records), boards, spaces, CRM pipelines. Agents read and write structured data, not just files.
 - **Permission enforcement** — every tool call goes through a permission layer with per-agent, per-resource, per-operation grants. Claude Code has its own permission model, but OpenLoop adds domain-specific controls (e.g., "this agent can read Drive files but needs approval to edit them").
@@ -659,7 +659,7 @@ Odin is a system-level agent that runs on Haiku. It is always visible at the bot
 │  - Attention items summary                       │
 │  - Odin's own prior conversation summaries       │
 │  - Global memory facts                           │
-│  Budget: ~4800 tokens (lighter than space agents │
+│  Budget: ~4000 tokens (lighter than space agents │
 │  because Odin routes, doesn't do deep work;      │
 │  includes calendar summary when connected)       │
 │                                                  │
@@ -789,9 +789,16 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │  │                                           ││
 │  │  1. Agent identity + role prompt (always)  ││
 │  │     "You are the Recruiting Agent..."      ││
-│  │     Budget: up to 1500 tokens              ││
+│  │     Includes personality section.          ││
+│  │     Budget: up to 5000 tokens              ││
 │  │                                           ││
-│  │  2. Procedural memory (behavioral rules)   ││
+│  │  2. Universal base instructions            ││
+│  │     Core principles, anti-sycophancy,      ││
+│  │     reasoning rules, error recovery.       ││
+│  │     Auto-injected for every agent.         ││
+│  │     Budget: up to 600 tokens               ││
+│  │                                           ││
+│  │  3. Procedural memory (behavioral rules)   ││
 │  │     Active rules for this agent, ranked    ││
 │  │     by confidence score. Injected as part  ││
 │  │     of the system prompt — highest priority.││
@@ -799,7 +806,7 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │  │     follow-up emails." (confidence: 0.9)   ││
 │  │     Budget: up to 500 tokens               ││
 │  │                                           ││
-│  │  3. Available tools documentation          ││
+│  │  4. Available tools documentation          ││
 │  │     MCP tools the agent can use            ││
 │  │     Budget: up to 1000 tokens              ││
 │  │                                           ││
@@ -807,12 +814,12 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │                                               │
 │  ┌─ MIDDLE (lower model attention) ──────────┐│
 │  │                                           ││
-│  │  4. Conversation summaries                 ││
+│  │  5. Conversation summaries                 ││
 │  │     Meta-summary first (if exists), then   ││
 │  │     most recent unconsolidated summaries.  ││
 │  │     Budget: up to 2000 tokens              ││
 │  │                                           ││
-│  │  5. Space facts (scored retrieval)         ││
+│  │  6. Space facts (scored retrieval)         ││
 │  │     Active facts in space namespace,       ││
 │  │     ranked by:                             ││
 │  │       score = importance                   ││
@@ -822,7 +829,7 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │  │     Higher importance = slower decay.       ││
 │  │     Budget: up to 1000 tokens              ││
 │  │                                           ││
-│  │  6. Global facts (scored retrieval)        ││
+│  │  7. Global facts (scored retrieval)        ││
 │  │     System-wide knowledge entries,         ││
 │  │     same scoring formula.                  ││
 │  │     Budget: up to 500 tokens               ││
@@ -831,14 +838,14 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │                                               │
 │  ┌─ END (high model attention) ──────────────┐│
 │  │                                           ││
-│  │  7. Working memory (live system state)      ││
+│  │  8. Working memory (live system state)      ││
 │  │     Calendar: next 48h events (~500 tok)   ││
 │  │     Email: inbox summary (~300 tok)        ││
 │  │     Included when system data source is    ││
 │  │     active and not excluded for this space. ││
 │  │     Budget: up to 800 tokens               ││
 │  │                                           ││
-│  │  8. Item state (fresh from DB)              ││
+│  │  9. Item state (fresh from DB)              ││
 │  │     Open tasks, board items by stage,      ││
 │  │     upcoming deadlines, recent changes.    ││
 │  │     Closest to user's message for maximum  ││
@@ -847,8 +854,8 @@ Builds the system prompt context injected into new sessions. Manages token budge
 │  │                                           ││
 │  └───────────────────────────────────────────┘│
 │                                               │
-│  Total budget: ~8800 tokens                   │
-│  (leaves room for user message + response)    │
+│  Total budget: ~13,400 tokens                 │
+│  (~6.7% of 200K context window)               │
 │                                               │
 │  Scoring fields on memory_entries:            │
 │  - importance (float, 0.0-1.0, default 0.5)  │
@@ -1498,9 +1505,10 @@ Agent Builder engages in requirements gathering:
 User answers questions interactively
   │
   ▼
-Agent Builder produces agent configuration:
-  → Calls MCP tool: create_agent(name, description, system_prompt, tools, permissions, space_ids)
-  → Agent registered in DB
+Agent Builder produces agent skill file (SKILL.md) with:
+  role definition, personality (5-10 lines), domain instructions, tool guidance
+  → Calls MCP tool: register_agent(skill_name, model, space_names, description)
+  → Agent registered in DB with skill_path pointing to SKILL.md
   → "I've created the Recruiting Agent. It can read and create files in your recruiting Drive folder,
      but will ask permission before editing. It has access to Gmail for drafting emails (sending requires
      your approval). Want to adjust anything?"
@@ -1881,24 +1889,25 @@ This means an agent that needs context from 3 months ago can find it without tha
 ### Overall Context Budget
 
 ```
-Context assembly total: ~8800 tokens (~4.4% of 200k context window)
+Context assembly total: ~13,400 tokens (~6.7% of 200k context window)
 
 BEGINNING (high model attention):
-  Agent identity + role prompt:     ~1500 tokens (fixed, never truncated)
-  Procedural rules:                  ~500 tokens (active rules, ranked by confidence)
-  Tool documentation:               ~1000 tokens (fixed, never truncated)
+  Agent identity + role + personality: ~5000 tokens (from SKILL.md or system_prompt)
+  Universal base instructions:          ~600 tokens (core principles, anti-sycophancy, reasoning)
+  Procedural rules:                     ~500 tokens (active rules, ranked by confidence)
+  Tool documentation:                  ~1000 tokens (fixed, never truncated)
 
 MIDDLE (lower model attention):
-  Conversation summaries:           ~2000 tokens (meta-summary + recent unconsolidated)
-  Space facts:                      ~1000 tokens (scored: importance × decay × access)
-  Global facts:                      ~500 tokens (scored: importance × decay × access)
+  Conversation summaries:              ~2000 tokens (meta-summary + recent unconsolidated)
+  Space facts:                         ~1000 tokens (scored: importance × decay × access)
+  Global facts:                         ~500 tokens (scored: importance × decay × access)
 
 END (high model attention):
-  Working memory (live state):       ~800 tokens (calendar: ~500 tokens, next 48h events; email: ~300 tokens, inbox summary)
-  Item state:                       ~1500 tokens (fresh, pruned by recency)
+  Working memory (live state):          ~800 tokens (calendar: ~500 tokens, next 48h events; email: ~300 tokens, inbox summary)
+  Item state:                          ~1500 tokens (fresh, pruned by recency)
 ```
 
-The vast majority of the context window remains available for the actual conversation. The 8800-token injection is a starting point — tunable per space or per agent if needed. Content ordering exploits the U-shaped attention curve documented in "Lost in the Middle" (Liu et al., 2023).
+The vast majority of the context window remains available for the actual conversation. The ~13,400-token injection is a starting point — tunable per space or per agent if needed. Content ordering exploits the U-shaped attention curve documented in "Lost in the Middle" (Liu et al., 2023).
 
 ---
 

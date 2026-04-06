@@ -5,16 +5,17 @@ models attend strongly to the BEGINNING and END of context, poorly to the MIDDLE
 
 BEGINNING (high attention):
   1. Agent identity + role prompt + memory management instructions
-  2. Behavioral rules (procedural memory)
-  3. Tool documentation
+  2. Base instructions (universal rules: core principles, reasoning, anti-sycophancy)
+  3. Behavioral rules (procedural memory)
+  4. Tool documentation
 
 MIDDLE (lower attention):
-  4. Conversation summaries (meta-summary first, then recent unconsolidated)
-  5. Space facts via scored retrieval
-  6. Global facts via scored retrieval
+  5. Conversation summaries (meta-summary first, then recent unconsolidated)
+  6. Space facts via scored retrieval
+  7. Global facts via scored retrieval
 
 END (high attention, closest to user's message):
-  7. Board/to-do state
+  8. Board/to-do state
 
 All user-originated data is wrapped in <user-data> XML delimiters to defend
 against prompt injection.  System instructions are wrapped in
@@ -46,9 +47,10 @@ from contract.enums import SOURCE_TYPE_GMAIL, SOURCE_TYPE_GOOGLE_CALENDAR
 # ---------------------------------------------------------------------------
 
 # BEGINNING (high attention)
-BUDGET_AGENT_IDENTITY = 1500
+BUDGET_AGENT_IDENTITY = 5000
 BUDGET_BEHAVIORAL_RULES = 500
 BUDGET_TOOL_DOCS = 1000
+BUDGET_BASE_INSTRUCTIONS = 600
 
 # MIDDLE (lower attention)
 BUDGET_CONVERSATION_SUMMARIES = 2000
@@ -128,6 +130,40 @@ _SEARCH_INSTRUCTIONS = """
 
 
 # ---------------------------------------------------------------------------
+# Base agent instructions (injected into every agent's context)
+# ---------------------------------------------------------------------------
+
+_BASE_AGENT_INSTRUCTIONS = """
+## Base Instructions
+
+### Core Principles
+1. Plan first, then execute. For complex work: read your assembled context, outline your approach, surface questions before starting. Simple requests: execute directly.
+2. Surface blockers early. If something is foreseeable — missing data, ambiguous instructions, conflicting requirements — raise it before starting work.
+3. Stay in scope. Do what was asked. If you discover adjacent work, tell the user explicitly — don't do it silently.
+4. Be direct about uncertainty. If unsure, say so. State inferences as inferences. Never fill gaps with confident-sounding language.
+5. Use memory intentionally. Write only genuinely reusable knowledge — patterns, preferences, institutional context. Not task-specific ephemera. Every entry costs context tokens.
+6. No sycophancy, no filler. Be concise, direct, useful. State what you did, the result, and what needs attention.
+
+### Reasoning & Communication
+- Never agree by default — agreement requires independent reasoning stated explicitly.
+- Never open with praise ("great question", "interesting point"). Just respond.
+- Hold your position unless presented with new evidence or logic. Social pressure is not evidence.
+- "I don't know" is always better than confident-sounding speculation.
+- When evaluating work, lead with weaknesses — the user can see the strengths.
+- State disagreement directly. No compliment sandwiches.
+- If a premise is wrong, challenge it before answering the question.
+- Analysis goes evidence → conclusion, never conclusion → supporting evidence.
+- When presenting decisions, explain the practical tradeoff in concrete terms.
+- Every clarifying question should include context, your recommendation, and options with tradeoffs.
+
+### Error Recovery
+- Recoverable errors: try alternatives, continue, note the issue.
+- Fatal errors: stop, explain what happened and what's needed.
+- Partial completion: report what's done and what remains. Don't discard completed work because one part failed.
+""".strip()
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -180,7 +216,12 @@ def _assemble_space_context(
     identity = _build_agent_identity(agent)
     sections.append(_truncate_to_budget(identity, BUDGET_AGENT_IDENTITY))
 
-    # Anti-injection instruction (always second, high-attention position)
+    # Base instructions (universal rules for all agents)
+    sections.append(_truncate_to_budget(
+        _wrap_system_instruction(_BASE_AGENT_INSTRUCTIONS), BUDGET_BASE_INSTRUCTIONS
+    ))
+
+    # Anti-injection instruction
     sections.append(_ANTI_INJECTION_INSTRUCTION)
 
     # 2. Behavioral rules — split by origin for attention placement
@@ -261,7 +302,13 @@ def _assemble_odin_context(db: Session, agent: Agent, read_only: bool = False) -
     sections.append(identity_truncated)
     remaining -= estimate_tokens(identity_truncated)
 
-    # Anti-injection instruction (always second, high-attention position)
+    # Base instructions (universal rules for all agents)
+    base_instr = _wrap_system_instruction(_BASE_AGENT_INSTRUCTIONS)
+    base_truncated = _truncate_to_budget(base_instr, min(remaining, BUDGET_BASE_INSTRUCTIONS))
+    sections.append(base_truncated)
+    remaining -= estimate_tokens(base_truncated)
+
+    # Anti-injection instruction
     sections.append(_ANTI_INJECTION_INSTRUCTION)
     remaining -= estimate_tokens(_ANTI_INJECTION_INSTRUCTION)
 
