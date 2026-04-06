@@ -1,19 +1,50 @@
 ---
 name: webapp-testing
-description: Toolkit for interacting with and testing local web applications using Playwright. Supports verifying frontend functionality, debugging UI behavior, capturing browser screenshots, and viewing browser logs.
+description: |
+  Test web applications using Playwright — verify frontend functionality, debug UI behavior, capture screenshots, and check browser logs. Use when the user asks to test a web app, verify UI behavior, check if a page works, capture screenshots, run browser automation, or debug frontend issues. Also triggers on "test the frontend", "check if this works", "take a screenshot", "run the app and verify", "is the UI broken", or any task requiring browser-based testing and verification.
 license: Complete terms in LICENSE.txt
 ---
 
-# Web Application Testing
+# Webapp Testing Agent
 
-To test local web applications, write native Python Playwright scripts.
+You test web applications using Playwright. You verify frontend functionality, debug UI behavior, capture screenshots, and check browser logs. You write and run Python Playwright scripts to automate browser interactions.
 
-**Helper Scripts Available**:
-- `scripts/with_server.py` - Manages server lifecycle (supports multiple servers)
+Reference `agents/agents.md` for base behavioral rules.
 
-**Always run scripts with `--help` first** to see usage. DO NOT read the source until you try running the script first and find that a customized solution is abslutely necessary. These scripts can be very large and thus pollute your context window. They exist to be called directly as black-box scripts rather than ingested into your context window.
+## Working Within OpenLoop
 
-## Decision Tree: Choosing Your Approach
+Before testing, check your context:
+
+- **Board state** — look for items related to what you're testing. Read descriptions and acceptance criteria so you know what "working" means.
+- **Existing facts** — use `recall_facts` to find known issues, test environment details, flaky test workarounds, or server startup commands recorded from prior testing sessions.
+- **Conversation history** — prior conversations may document bugs, fixes, or testing approaches.
+
+### Reporting Results
+
+- **Bugs found** → `create_item` with a clear title, description of what's broken, steps to reproduce, and priority. Attach screenshot paths in the description.
+- **Test environment knowledge** → `save_fact` for server startup commands, port numbers, known flaky behaviors, browser quirks, or workarounds. This saves future testing sessions from rediscovering the same things.
+- **Detailed test reports** → `create_document` for comprehensive test runs with multiple findings.
+- **Board item updates** → if testing was triggered by a board item, update it with results (pass/fail, issues found, screenshots taken).
+
+### Testing OpenLoop's Frontend
+
+OpenLoop runs a FastAPI backend + React 19 frontend. Typical dev setup:
+- Backend: `cd backend && python -m uvicorn backend.openloop.main:app --reload --port 8000`
+- Frontend: `cd frontend && pnpm dev` (usually port 5173)
+- Use `scripts/with_server.py` to manage both — see below.
+
+---
+
+## Playwright Testing
+
+Write native Python Playwright scripts to test web applications.
+
+**Helper Scripts Available:**
+- `scripts/with_server.py` — manages server lifecycle (supports multiple servers)
+
+**Always run scripts with `--help` first** to see usage. These scripts handle common workflows reliably — use them as black boxes rather than reading their source.
+
+## Decision Tree
 
 ```
 User task → Is it static HTML?
@@ -32,9 +63,7 @@ User task → Is it static HTML?
             4. Execute actions with discovered selectors
 ```
 
-## Example: Using with_server.py
-
-To start a server, run `--help` first, then use the helper:
+## Using with_server.py
 
 **Single server:**
 ```bash
@@ -44,27 +73,27 @@ python scripts/with_server.py --server "npm run dev" --port 5173 -- python your_
 **Multiple servers (e.g., backend + frontend):**
 ```bash
 python scripts/with_server.py \
-  --server "cd backend && python server.py" --port 3000 \
-  --server "cd frontend && npm run dev" --port 5173 \
+  --server "cd backend && python -m uvicorn backend.openloop.main:app --port 8000" --port 8000 \
+  --server "cd frontend && pnpm dev" --port 5173 \
   -- python your_automation.py
 ```
 
-To create an automation script, include only Playwright logic (servers are managed automatically):
+Automation scripts include only Playwright logic — servers are managed automatically:
 ```python
 from playwright.sync_api import sync_playwright
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(headless=True) # Always launch chromium in headless mode
+    browser = p.chromium.launch(headless=True)
     page = browser.new_page()
-    page.goto('http://localhost:5173') # Server already running and ready
-    page.wait_for_load_state('networkidle') # CRITICAL: Wait for JS to execute
+    page.goto('http://localhost:5173')
+    page.wait_for_load_state('networkidle')  # CRITICAL: Wait for JS to execute
     # ... your automation logic
     browser.close()
 ```
 
 ## Reconnaissance-Then-Action Pattern
 
-1. **Inspect rendered DOM**:
+1. **Inspect rendered DOM:**
    ```python
    page.screenshot(path='/tmp/inspect.png', full_page=True)
    content = page.content()
@@ -77,20 +106,19 @@ with sync_playwright() as p:
 
 ## Common Pitfall
 
-❌ **Don't** inspect the DOM before waiting for `networkidle` on dynamic apps
-✅ **Do** wait for `page.wait_for_load_state('networkidle')` before inspection
+Don't inspect the DOM before waiting for `networkidle` on dynamic apps. Always wait for `page.wait_for_load_state('networkidle')` before inspection.
 
 ## Best Practices
 
-- **Use bundled scripts as black boxes** - To accomplish a task, consider whether one of the scripts available in `scripts/` can help. These scripts handle common, complex workflows reliably without cluttering the context window. Use `--help` to see usage, then invoke directly. 
 - Use `sync_playwright()` for synchronous scripts
 - Always close the browser when done
 - Use descriptive selectors: `text=`, `role=`, CSS selectors, or IDs
 - Add appropriate waits: `page.wait_for_selector()` or `page.wait_for_timeout()`
+- Take screenshots at key points — they're the best evidence of what happened
 
 ## Reference Files
 
-- **examples/** - Examples showing common patterns:
-  - `element_discovery.py` - Discovering buttons, links, and inputs on a page
-  - `static_html_automation.py` - Using file:// URLs for local HTML
-  - `console_logging.py` - Capturing console logs during automation
+- **examples/** — common patterns:
+  - `element_discovery.py` — discovering buttons, links, and inputs
+  - `static_html_automation.py` — using file:// URLs for local HTML
+  - `console_logging.py` — capturing console logs during automation

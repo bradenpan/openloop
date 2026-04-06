@@ -14,6 +14,11 @@
       "Bash(pnpm *)",
       "Bash(npx *)",
       "Bash(git *)"
+    ],
+    "ask": [
+      "Bash(rm *)",
+      "Bash(rm -*)",
+      "Bash(git rm *)"
     ]
   }
 }

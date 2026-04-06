@@ -70,14 +70,18 @@ Before marking anything complete, verify:
 ## MCP Tools Needed
 
 Standard agent tools plus delegation:
-- `create_todo`, `complete_todo`, `list_todos`
-- `create_item`, `update_item`, `move_item`, `get_item`, `list_items`
-- `save_fact`, `recall_facts`
+- `create_task`, `complete_task`, `list_tasks`
+- `create_item`, `update_item`, `move_item`, `get_item`, `list_items`, `archive_item`
+- `link_items`, `unlink_items`, `get_linked_items`
+- `save_fact`, `recall_facts`, `update_fact`, `delete_fact`
 - `save_rule`, `confirm_rule`, `override_rule`, `list_rules`
 - `read_document`, `list_documents`, `create_document`
-- `get_board_state`, `get_todo_state`
+- `read_drive_file`, `list_drive_files`, `create_drive_file`
+- `get_board_state`, `get_task_state`, `search`, `search_items`
 - `get_conversation_summaries`, `search_conversations`, `get_conversation_messages`
-- `delegate_task`
+- `delegate_task`, `update_task_progress`, `check_delegated_tasks`, `cancel_delegated_task`
+- `get_space_layout`, `add_widget`, `update_widget`, `remove_widget`, `set_space_layout`
+- `queue_approval`, `update_task_list`
 
 Plus Claude Code tools: `Read`, `Write`, `Edit`, `Glob`, `Grep`, `Bash`
 

@@ -848,6 +848,33 @@ Full re-review after Round 1 fixes. 6 review agents (backend fresh eyes, fronten
 
 ---
 
+## Agent Skill Consolidation — 2026-04-05
+
+Merged overlapping agent-builder and skill-creator skills. Built out all 7 skills as full OpenLoop agents.
+
+**Agent-builder + skill-creator merge:**
+- Moved skill-creator's evaluation infrastructure (8 scripts, eval-viewer, grader/analyzer/comparator subagents, schemas, assets) into `agents/skills/agent-builder/`
+- Wrote new unified SKILL.md (295 lines) combining agent-builder's OpenLoop registration workflow with skill-creator's skill-writing methodology and evaluation rigor
+- Two-track testing: quick track (MCP `test_agent()` tool) by default, deep evaluation (benchmarks + eval viewer) as opt-in
+- Deleted `agents/skills/skill-creator/` directory
+
+**Skill rewrites for OpenLoop awareness:**
+- `file-editor` — removed false "no Bash/web" restriction, added OpenLoop tool guidance (create_document vs Write, save_fact, create_item), space context awareness
+- `frontend-design` — added agents.md reference, OpenLoop context section (board/facts/history), work delivery guidance, space layout tool guidance. Kept full design aesthetics section
+- `research-web` — added "before you search" section (check existing facts/content first), results delivery via create_document + save_fact + create_item
+- `webapp-testing` — added agents.md reference, OpenLoop context (board/facts), results reporting (create_item for bugs, save_fact for env knowledge), OpenLoop-specific dev server details
+
+**Stale reference cleanup:**
+- `agents/agents.md` — updated MCP tool list from old names (create_todo, etc.) to current (create_task, etc.), added all missing tool categories
+- `agents/CLAUDE.md` — fixed stale `create_todo` reference
+- `agents/skills/eng-manager/references/agent-config.md` — updated tool list to match current registry
+
+**Registration:** `scripts/register_skills.py` (pre-existing) scans `agents/skills/`, parses SKILL.md frontmatter, creates/updates agent DB records. Run `python -m scripts.register_skills` after starting the backend.
+
+**No backend code changes** — mcp_tools.py and agent_runner.py already handle agent-builder and integration-builder routing correctly. All standard agents get the same ~48 MCP tools from `_STANDARD_TOOLS` registry. Agents also have Claude Code built-in tools (Read, Write, Edit, Bash, WebSearch, WebFetch) via the SDK runtime.
+
+---
+
 ## Key Decisions Made During Build
 
 1. **Schemas split into per-domain files** (`backend/openloop/api/schemas/`) — prevents merge conflicts during parallel agent work.
