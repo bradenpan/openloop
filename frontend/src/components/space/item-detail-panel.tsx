@@ -86,6 +86,16 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
     },
   });
 
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const archiveItem = $api.useMutation('post', '/api/v1/items/{item_id}/archive', {
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/items'] });
+      queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/home/dashboard'] });
+      setConfirmArchive(false);
+      onClose();
+    },
+  });
+
   const updateItem = $api.useMutation('patch', '/api/v1/items/{item_id}', {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/items'] });
@@ -257,15 +267,40 @@ export function ItemDetailPanel({ itemId, open, onClose, boardColumns }: ItemDet
             {item.archived && <Badge variant="warning">Archived</Badge>}
           </div>
 
-          {/* Save button */}
-          <Button
-            onClick={handleSave}
-            disabled={!dirty}
-            loading={updateItem.isPending || moveItem.isPending}
-            className="self-end"
-          >
-            Save Changes
-          </Button>
+          {/* Actions */}
+          <div className="flex items-center justify-between">
+            <button
+              onClick={() => {
+                if (confirmArchive) {
+                  archiveItem.mutate({ params: { path: { item_id: itemId } } });
+                } else {
+                  setConfirmArchive(true);
+                }
+              }}
+              onBlur={() => setConfirmArchive(false)}
+              disabled={archiveItem.isPending}
+              className={`flex items-center gap-1.5 text-xs px-2 py-1 rounded transition-colors cursor-pointer ${
+                confirmArchive
+                  ? 'text-destructive hover:text-destructive'
+                  : 'text-muted hover:text-foreground'
+              }`}
+            >
+              <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="1" y="2" width="14" height="4" rx="1" />
+                <path d="M2 6v7a1 1 0 001 1h10a1 1 0 001-1V6" />
+                <path d="M6 9h4" />
+              </svg>
+              {archiveItem.isPending ? 'Archiving...' : confirmArchive ? 'Confirm archive?' : 'Archive'}
+            </button>
+
+            <Button
+              onClick={handleSave}
+              disabled={!dirty}
+              loading={updateItem.isPending || moveItem.isPending}
+            >
+              Save Changes
+            </Button>
+          </div>
 
           {/* Events history */}
           {events.length > 0 && (

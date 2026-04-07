@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
 import { Button } from '../ui';
 
@@ -14,21 +15,36 @@ const MODEL_OPTIONS = [
 ] as const;
 
 export function ConversationHeader({ conversationId, onClose }: ConversationHeaderProps) {
+  const queryClient = useQueryClient();
+
   const { data: conversation } = $api.useQuery('get', '/api/v1/conversations/{conversation_id}', {
     params: { path: { conversation_id: conversationId } },
   });
 
   const closeConversation = $api.useMutation('post', '/api/v1/conversations/{conversation_id}/close');
 
-  // Local state for name editing — no PATCH endpoint exists yet
+  const updateConversation = $api.useMutation(
+    'patch',
+    '/api/v1/conversations/{conversation_id}',
+    {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/conversations'] });
+      },
+      onError: () => {
+        queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/conversations'] });
+      },
+    },
+  );
+
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
 
-  // Local model override — no PATCH endpoint exists yet
-  const [localModel, setLocalModel] = useState<string | null>(null);
+  // Fetch agents for agent selector
+  const { data: agentsData } = $api.useQuery('get', '/api/v1/agents');
+  const agents = agentsData ?? [];
 
   const displayName = conversation?.name ?? 'Conversation';
-  const currentModel = localModel ?? conversation?.model_override ?? 'sonnet';
+  const currentModel = conversation?.model_override ?? 'sonnet';
   const isClosed = conversation?.status === 'closed';
 
   const handleNameClick = () => {
@@ -40,15 +56,25 @@ export function ConversationHeader({ conversationId, onClose }: ConversationHead
   const handleNameBlur = () => {
     setEditingName(false);
     if (nameValue.trim() && nameValue.trim() !== displayName) {
-      // TODO: Needs PATCH /api/v1/conversations/{conversation_id} endpoint to persist name changes
-      console.warn('Conversation name editing requires a PATCH endpoint that does not exist yet.');
+      updateConversation.mutate({
+        params: { path: { conversation_id: conversationId } },
+        body: { name: nameValue.trim() },
+      });
     }
   };
 
   const handleModelChange = (value: string) => {
-    setLocalModel(value);
-    // TODO: Needs PATCH /api/v1/conversations/{conversation_id} endpoint to persist model override
-    console.warn('Model override requires a PATCH endpoint that does not exist yet.');
+    updateConversation.mutate({
+      params: { path: { conversation_id: conversationId } },
+      body: { model_override: value },
+    });
+  };
+
+  const handleAgentChange = (agentId: string) => {
+    updateConversation.mutate({
+      params: { path: { conversation_id: conversationId } },
+      body: { agent_id: agentId },
+    });
   };
 
   const handleClose = () => {
@@ -89,6 +115,21 @@ export function ConversationHeader({ conversationId, onClose }: ConversationHead
           <span className="text-xs text-muted ml-2">(closed)</span>
         )}
       </div>
+
+      {/* Agent selector */}
+      <select
+        value={conversation?.agent_id ?? ''}
+        onChange={(e) => handleAgentChange(e.target.value)}
+        disabled={isClosed}
+        aria-label="Agent"
+        className="bg-raised text-foreground text-xs border border-border rounded px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+      >
+        {agents.map((agent) => (
+          <option key={agent.id} value={agent.id}>
+            {agent.name}
+          </option>
+        ))}
+      </select>
 
       {/* Model selector */}
       <select

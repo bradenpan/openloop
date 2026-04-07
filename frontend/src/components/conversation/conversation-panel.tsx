@@ -102,6 +102,10 @@ export function ConversationPanel({
     queryClient.invalidateQueries({
       queryKey: ['get', '/api/v1/conversations/{conversation_id}/messages'],
     });
+    // Refetch conversations list to pick up auto-generated title
+    queryClient.invalidateQueries({
+      queryKey: ['get', '/api/v1/conversations'],
+    });
   }, [queryClient]);
 
   // Handle SSE events scoped to this conversation

@@ -1,17 +1,21 @@
-import { useEffect, useState, useMemo } from 'react';
+import { Component, useEffect, useState, useMemo, type ReactNode, type ErrorInfo } from 'react';
 import { useParams } from 'react-router-dom';
 import { $api } from '../api/hooks';
 import { Badge, Skeleton } from '../components/ui';
+import { KanbanBoard } from '../components/space/kanban-board';
+import { TableView } from '../components/space/table-view';
+import { ChatTab } from '../components/space/chat-tab';
+import { DocumentPanel } from '../components/space/document-panel';
 import { DocumentViewer } from '../components/space/document-viewer';
 import { SpaceSettings } from '../components/space/space-settings';
-import { getWidgetComponent, sizeToTrack } from '../components/space/widget-registry';
+import { getWidgetComponent, DEFAULT_COLUMNS } from '../components/space/widget-registry';
 import type { components } from '../api/types';
 
 type WidgetResponse = components['schemas']['WidgetResponse'];
 
-// --- View toggle helpers (board/table switching) ---
+// --- View toggle helpers ---
 
-type CenterView = 'board' | 'table';
+type CenterView = 'board' | 'table' | 'files' | 'chat' | 'sheet';
 
 function getViewStorageKey(spaceId: string) {
   return `openloop:space-view:${spaceId}`;
@@ -20,7 +24,7 @@ function getViewStorageKey(spaceId: string) {
 function loadSavedView(spaceId: string): CenterView {
   try {
     const saved = localStorage.getItem(getViewStorageKey(spaceId));
-    if (saved === 'board' || saved === 'table') return saved;
+    if (saved === 'board' || saved === 'table' || saved === 'files' || saved === 'chat' || saved === 'sheet') return saved;
   } catch {
     // ignore
   }
@@ -35,37 +39,50 @@ function saveView(spaceId: string, view: CenterView) {
   }
 }
 
-// --- Widget grid helpers ---
+// --- Widget layout helpers ---
 
-/** Widgets with size "full" get their own row; everything else shares one row. */
-function buildGridRows(widgets: WidgetResponse[]): WidgetResponse[][] {
-  const rows: WidgetResponse[][] = [];
-  let currentRow: WidgetResponse[] = [];
+/** Widget types that render as sidebars (outside the content grid). */
+const SIDEBAR_LEFT = new Set(['todo_panel']);
+const SIDEBAR_RIGHT = new Set(['conversations']);
 
-  for (const w of widgets) {
-    if (w.size === 'full') {
-      if (currentRow.length > 0) {
-        rows.push(currentRow);
-        currentRow = [];
-      }
-      rows.push([w]);
-    } else {
-      currentRow.push(w);
+// --- Error boundary for widget area ---
+
+class WidgetErrorBoundary extends Component<
+  { children: ReactNode; onReset: () => void },
+  { hasError: boolean; error: Error | null }
+> {
+  state = { hasError: false, error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error('Widget error:', error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <p className="text-destructive font-medium mb-2">Something went wrong</p>
+            <p className="text-sm text-muted mb-4">{this.state.error?.message}</p>
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                this.props.onReset();
+              }}
+              className="px-4 py-2 text-sm font-medium rounded-md bg-primary text-white hover:bg-primary/90 cursor-pointer"
+            >
+              Try Again
+            </button>
+          </div>
+        </div>
+      );
     }
+    return this.props.children;
   }
-
-  if (currentRow.length > 0) {
-    rows.push(currentRow);
-  }
-
-  return rows;
-}
-
-function gridTemplateForRow(row: WidgetResponse[]): string {
-  if (row.length === 1 && row[0].size === 'full') {
-    return '1fr';
-  }
-  return row.map((w) => sizeToTrack(w.size)).join(' ');
 }
 
 // --- Main component ---
@@ -100,6 +117,20 @@ export default function Space() {
     { enabled: !!spaceId },
   );
 
+  // When space loads, apply DB default_view if no localStorage override exists
+  useEffect(() => {
+    if (space && spaceId) {
+      const saved = localStorage.getItem(getViewStorageKey(spaceId));
+      if (!saved && space.default_view) {
+        const mapped: CenterView =
+          space.default_view === 'table' ? 'table'
+          : space.default_view === 'board' ? 'board'
+          : 'table'; // 'list' and others default to table
+        setCenterViewState(mapped);
+      }
+    }
+  }, [space, spaceId]);
+
   // Fetch layout
   const { data: layoutData, isLoading: layoutLoading } = $api.useQuery(
     'get',
@@ -113,22 +144,28 @@ export default function Space() {
     return [...layoutData.widgets].sort((a, b) => a.position - b.position);
   }, [layoutData]);
 
-  // Determine if we need the board/table view toggle
-  const hasKanban = widgets.some((w) => w.widget_type === 'kanban_board');
-  const hasTable = widgets.some((w) => w.widget_type === 'data_table');
-  const showViewToggle = hasKanban && hasTable;
+  // Core views (board/table/files) are always available — not dependent on widgets.
+  // Google Sheet gets a "Sheet" tab when a google_sheet widget exists.
+  const hasSheet = widgets.some((w) => w.widget_type === 'google_sheet');
+  const sheetWidget = widgets.find((w) => w.widget_type === 'google_sheet');
 
-  // Filter widgets: if both kanban and table exist, only show the active one
-  const visibleWidgets = useMemo(() => {
-    if (!hasKanban || !hasTable) return widgets;
-    return widgets.filter((w) => {
-      if (w.widget_type === 'kanban_board') return centerView === 'board';
-      if (w.widget_type === 'data_table') return centerView === 'table';
-      return true;
-    });
-  }, [widgets, hasKanban, hasTable, centerView]);
+  // Fall back if saved view is 'sheet' but no sheet widget exists
+  useEffect(() => {
+    if (centerView === 'sheet' && !hasSheet) {
+      setCenterView('table');
+    }
+  }, [hasSheet, centerView]);
 
-  const gridRows = useMemo(() => buildGridRows(visibleWidgets), [visibleWidgets]);
+  // Space data for board/table components
+  const boardColumns = space?.board_columns ?? DEFAULT_COLUMNS;
+  const boardEnabled = space?.board_enabled ?? false;
+
+  // Sidebar widgets rendered alongside the center view
+  const sidebarWidgets = useMemo(() => {
+    const left = widgets.filter((w) => SIDEBAR_LEFT.has(w.widget_type));
+    const right = widgets.filter((w) => SIDEBAR_RIGHT.has(w.widget_type));
+    return { left, right };
+  }, [widgets]);
 
   if (!spaceId) {
     return <p className="text-muted">No space selected.</p>;
@@ -183,63 +220,89 @@ export default function Space() {
           </svg>
         </button>
 
-        {/* View tabs — only shown when both kanban_board and data_table widgets exist */}
-        {showViewToggle && (
-          <div className="flex items-center gap-1 bg-raised rounded-md p-0.5">
+        {/* View tabs — Board, Table, Chat, Files always present; Sheet shown when configured */}
+        <div className="flex items-center gap-1 bg-raised rounded-md p-0.5">
+          {(['board', 'table', 'chat', 'files'] as const).map((view) => (
             <button
-              onClick={() => setCenterView('board')}
+              key={view}
+              onClick={() => setCenterView(view)}
               className={`px-3 py-1 text-xs font-medium rounded cursor-pointer transition-colors ${
-                centerView === 'board'
+                centerView === view
                   ? 'bg-surface text-foreground shadow-sm'
                   : 'text-muted hover:text-foreground'
               }`}
             >
-              Board
+              {view === 'board' ? 'Board' : view === 'table' ? 'Table' : view === 'chat' ? 'Chat' : 'Files'}
             </button>
+          ))}
+          {hasSheet && (
             <button
-              onClick={() => setCenterView('table')}
+              onClick={() => setCenterView('sheet')}
               className={`px-3 py-1 text-xs font-medium rounded cursor-pointer transition-colors ${
-                centerView === 'table'
+                centerView === 'sheet'
                   ? 'bg-surface text-foreground shadow-sm'
                   : 'text-muted hover:text-foreground'
               }`}
             >
-              Table
+              Sheet
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Widget grid */}
-      {widgets.length === 0 ? (
-        <div className="flex-1 flex items-center justify-center">
-          <p className="text-muted text-sm">
-            No widgets configured. Open layout settings to add widgets.
-          </p>
-        </div>
-      ) : (
-        <div className="flex-1 min-h-0 flex flex-col">
-          {gridRows.map((row) => (
-            <div
-              key={row.map((w) => w.id).join('-')}
-              className="flex-1 min-h-0"
-              style={{
-                display: 'grid',
-                gridTemplateColumns: gridTemplateForRow(row),
-              }}
-            >
-              {row.map((widget) => (
+      {/* Main content area */}
+      <WidgetErrorBoundary key={centerView} onReset={() => window.location.reload()}>
+        {centerView === 'chat' ? (
+          /* Chat tab manages its own layout (sidebar + tabs + widgets) */
+          <div className="flex-1 min-h-0">
+            <ChatTab spaceId={spaceId} widgets={widgets} onSelectDocument={(id) => setSelectedDocId(id)} />
+          </div>
+        ) : (
+          <div className="flex-1 min-h-0 flex">
+            {/* Left sidebars */}
+            {sidebarWidgets.left.map((widget) => (
+              <div key={widget.id} className="shrink-0 h-full">
                 <WidgetRenderer
-                  key={widget.id}
                   widget={widget}
                   spaceId={spaceId}
                   onSelectDocument={(id) => setSelectedDocId(id)}
                 />
-              ))}
+              </div>
+            ))}
+
+            {/* Center view — rendered directly, not from widget grid */}
+            <div className="flex-1 min-w-0 min-h-0">
+              {centerView === 'board' && (
+                <KanbanBoard spaceId={spaceId} boardColumns={boardColumns} boardEnabled={boardEnabled} />
+              )}
+              {centerView === 'table' && (
+                <TableView spaceId={spaceId} boardColumns={boardColumns} boardEnabled={boardEnabled} />
+              )}
+              {centerView === 'files' && (
+                <DocumentPanel spaceId={spaceId} onSelectDocument={(id) => setSelectedDocId(id)} />
+              )}
+              {centerView === 'sheet' && sheetWidget && (
+                <WidgetRenderer
+                  widget={sheetWidget}
+                  spaceId={spaceId}
+                  onSelectDocument={(id) => setSelectedDocId(id)}
+                />
+              )}
             </div>
-          ))}
-        </div>
-      )}
+
+            {/* Right sidebars */}
+            {sidebarWidgets.right.map((widget) => (
+              <div key={widget.id} className="shrink-0 h-full">
+                <WidgetRenderer
+                  widget={widget}
+                  spaceId={spaceId}
+                  onSelectDocument={(id) => setSelectedDocId(id)}
+                />
+              </div>
+            ))}
+          </div>
+        )}
+      </WidgetErrorBoundary>
 
       {/* Document viewer slide-over */}
       <DocumentViewer

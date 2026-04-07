@@ -69,7 +69,7 @@ export default function Home() {
   const dashboard = $api.useQuery('get', '/api/v1/home/dashboard');
   const spaces = $api.useQuery('get', '/api/v1/spaces');
   const tasks = $api.useQuery('get', '/api/v1/items', {
-    params: { query: { item_type: 'task', is_done: false, archived: false } },
+    params: { query: { is_done: false, archived: false } },
   });
   const conversations = $api.useQuery('get', '/api/v1/conversations');
   const agents = $api.useQuery('get', '/api/v1/agents');

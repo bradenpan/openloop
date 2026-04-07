@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
 import { useSSEEvent, type SSEEvent } from '../../hooks/use-sse';
 import { useUIStore } from '../../stores/ui-store';
@@ -17,6 +18,12 @@ function msgId(): string {
 export function OdinBar() {
   const expanded = useUIStore((s) => s.odinExpanded);
   const toggle = useUIStore((s) => s.toggleOdin);
+  const queryClient = useQueryClient();
+
+  // Query agents to find Odin's default model
+  const { data: agents } = $api.useQuery('get', '/api/v1/agents');
+  const odinAgent = agents?.find((a: any) => a.name?.toLowerCase() === 'odin');
+  const displayModel = odinAgent?.default_model ?? 'sonnet';
 
   const [input, setInput] = useState('');
   const [messages, setMessages] = useState<OdinMessage[]>([]);
@@ -27,6 +34,22 @@ export function OdinBar() {
   const pendingSendRef = useRef(false);
 
   const sendToOdin = $api.useMutation('post', '/api/v1/odin/message');
+  const closeConversation = $api.useMutation('post', '/api/v1/conversations/{conversation_id}/close');
+
+  function handleReset() {
+    if (conversationId) {
+      closeConversation.mutate(
+        { params: { path: { conversation_id: conversationId } } },
+        {
+          onSettled: () => {
+            setMessages([]);
+            setStreamingContent(null);
+            setConversationId(null);
+          },
+        },
+      );
+    }
+  }
 
   // Auto-scroll on new messages
   useEffect(() => {
@@ -54,13 +77,17 @@ export function OdinBar() {
             return null;
           });
           setIsStreaming(false);
+          // Refetch conversations list to pick up auto-generated title
+          queryClient.invalidateQueries({
+            queryKey: ['get', '/api/v1/conversations'],
+          });
         }
         if (event.type === 'error') {
           setIsStreaming(false);
           setStreamingContent(null);
         }
       },
-      [conversationId],
+      [conversationId, queryClient],
     ),
   );
 
@@ -178,8 +205,22 @@ export function OdinBar() {
           />
         )}
 
+        {conversationId && (
+          <button
+            onClick={handleReset}
+            className="text-muted hover:text-foreground transition-colors p-1 rounded-md hover:bg-raised cursor-pointer"
+            aria-label="New conversation"
+            title="Start new conversation"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M1.5 7a5.5 5.5 0 0 1 9.9-3.3M12.5 7a5.5 5.5 0 0 1-9.9 3.3" />
+              <path d="M11.4 1v2.7h-2.7M2.6 13v-2.7h2.7" />
+            </svg>
+          </button>
+        )}
+
         <button className="text-xs font-semibold px-3 py-1.5 rounded-md border border-border text-muted hover:text-primary hover:border-primary transition-colors cursor-pointer whitespace-nowrap">
-          Opus &#9889;
+          {displayModel.charAt(0).toUpperCase() + displayModel.slice(1)} &#9889;
         </button>
       </div>
     </div>

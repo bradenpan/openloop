@@ -6,6 +6,7 @@ from contract.enums import ConversationStatus
 
 __all__ = [
     "ConversationCreate",
+    "ConversationUpdate",
     "ConversationResponse",
     "MessageCreate",
     "MessageResponse",
@@ -21,6 +22,12 @@ class ConversationCreate(BaseModel):
     name: str
     space_id: str | None = None
     model_override: str | None = None
+
+
+class ConversationUpdate(BaseModel):
+    name: str | None = None
+    model_override: str | None = None
+    agent_id: str | None = None
 
 
 class ConversationResponse(BaseModel):

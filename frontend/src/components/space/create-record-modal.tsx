@@ -67,7 +67,7 @@ export function CreateRecordModal({
       body: {
         space_id: spaceId,
         title: title.trim(),
-        item_type: 'record',
+        item_type: 'task',
         stage,
         due_date: dueDate ? `${dueDate}T00:00:00` : null,
         custom_fields: Object.keys(cf).length > 0 ? cf : null,

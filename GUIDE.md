@@ -1,8 +1,8 @@
 # OpenLoop User Guide
 
-*Last updated: 2026-04-03*
+*Last updated: 2026-04-06*
 
-OpenLoop is a personal AI command center. You manage all your work — tasks, CRM pipelines, knowledge bases, and AI agent conversations — from one interface. Agents work for you: they track your projects, manage your data, handle research, and run on schedules while you focus on what matters.
+OpenLoop is a personal AI command center. You manage all your work — tasks, database pipelines, knowledge bases, and AI agent conversations — from one interface. Agents work for you: they track your projects, manage your data, handle research, and run on schedules while you focus on what matters.
 
 This guide has two parts. **Part 1** gets you working in the system in 10 minutes. **Part 2** explains how everything works under the hood.
 
@@ -56,7 +56,7 @@ Home is your morning dashboard. From top to bottom:
 2. **Attention items** — things that need you right now: pending approvals, overdue tasks, automation failures.
 3. **Active agents** — background tasks currently running, with live status.
 4. **Space list** — all your spaces with quick access.
-5. **Cross-space tasks** — every open task across all spaces.
+5. **Open Tasks** — every open task across all spaces. Click the checkbox to mark a task done. Click the task text to open its detail panel, where you can edit all fields, change stage, or archive it.
 
 If there are pending approvals or unread notifications, you'll see a count in the browser tab title: `(3) OpenLoop`.
 
@@ -64,45 +64,62 @@ If there are pending approvals or unread notifications, you'll see a count in th
 
 A space is a container for related work. Think of it as a workspace for a specific domain — a project, a set of clients, a knowledge base, or just a personal task list.
 
-Create a space from the Home screen. Pick a template:
+Create a space from the Home screen, or click the **+** button next to "Spaces" in the sidebar. Pick a template:
 
-| Template | Best for | Default view | Has board? |
-|----------|----------|-------------|------------|
-| **Project** | Work with stages (Idea → Done) | Kanban | Yes |
-| **CRM** | Tracking people, leads, records | Table | Yes |
-| **Knowledge Base** | Documents, notes, research | Documents | No |
-| **Simple** | Personal tasks, checklists | List | No |
+| Template | Best for | Default view |
+|----------|----------|-------------|
+| **Project** | Work with stages (Idea → Done) | Kanban |
+| **Database** | Tracking people, leads, records | Table |
+| **Knowledge Base** | Documents, notes, research | Documents |
+| **Simple** | Personal tasks, checklists | List |
 
-Templates are starting points — you can add or remove features later through the Space Settings panel (gear icon in the space header).
+All templates provide the same views — Board, Table, Chat, Files — always available on every space. Templates differ in their default view and stage column names. Templates are starting points — you can add or remove features later through the Space Settings panel (gear icon in the space header).
+
+To delete a space, open its settings (gear icon) and scroll to the Danger Zone at the bottom. Type the space name to confirm. This permanently deletes the space and everything in it (items, conversations, documents).
+
+Space Settings has five tabs — **Layout**, **Stages**, **Fields**, **Memory**, **History** — plus the Danger Zone at the bottom.
 
 ### What's inside a space
 
-- **Items** — all tracked work. Tasks (things to do) and records (things to track, like contacts or leads). Viewable as a list, kanban board, or table.
+- **Items** — all tracked work. Tasks (things to do) and records (things to track, like contacts or leads). Both types appear in all views.
 - **Conversations** — persistent chat threads with AI agents. This is where most work actually happens.
 - **Documents** — files, uploaded or linked from Google Drive.
 - **Memory** — facts and knowledge the agents have learned about this space.
 
 ## Items: Tasks and Records
 
-Everything you track is an **item**. There are two types:
+Everything you track is an **item**. Items come in two flavors:
 
 **Tasks** are work to be done. They can be as simple as "Call dentist" (just a title and a checkbox) or as structured as a multi-stage deliverable with description, priority, due date, and agent assignment.
 
 **Records** are entities you track — a person, a company, a lead, a bug. Records have custom fields and can be linked to tasks.
 
+Both tasks and records appear in all views (board, table, chat, files). The distinction is behavioral — tasks have done/not-done semantics, records don't — not structural.
+
 ### Views
 
-The same data, shown differently:
+Every space has all four views available regardless of template. Switch between them using the tabs in the space header.
 
-- **List view** — checklist. Checkbox, title, stage dropdown. Done items hidden by default (toggle to show). This is the default for Simple spaces.
-- **Kanban view** — drag items through stage columns. Default for Project spaces.
-- **Table view** — sortable/filterable columns. Default for CRM spaces.
+- **Board view** — drag items through stage columns. Default for Project spaces.
+- **Table view** — sortable/filterable columns. Default for Database spaces.
+- **Chat** — a conversation workspace within the space. The left sidebar lists all conversations for this space (collapsible). The center area shows tabbed conversations — open multiple chats at once, switch between them, close tabs. An optional widget column on the right shows any extra widgets. Tab state is remembered between sessions.
+- **Files** — upload files, search documents, filter by tags, or link a Google Drive folder.
 
-You can switch views using the toggle in the space header.
+### Archive items
+
+To archive an item, open its detail panel and click "Archive" (confirm on second click). You can also hover over a task in the task panel or a card on the board to reveal the archive icon. Archived items are hidden from all views but not deleted.
 
 ### Done/stage sync
 
 Checking a task "done" in list view automatically moves it to the Done stage on the kanban. Dragging to Done on the kanban checks the box. Moving out of Done unchecks it. This sync only applies to tasks — records use stages for pipeline tracking without done/not-done semantics.
+
+### Stage editor
+
+To rename, reorder, add, or remove stage columns, open Space Settings → Stages tab. Changes apply immediately to the kanban board and table view.
+
+### Field editor
+
+To manage custom fields, open Space Settings → Fields tab. Add new fields (text, number, date, or select type), rename them, or remove them. For select fields, enter comma-separated options.
 
 ### Item linking
 
@@ -120,16 +137,22 @@ Each space can hold documents — files you upload, scan from a local directory,
 
 Documents can be linked to items (a spec document attached to a task, a resume attached to a candidate record). Agents can read, list, and create documents through their tools.
 
+### Google Sheets
+
+You can embed a Google Sheet as a widget in any space. Open Space Settings → Layout → Add Widget → Google Sheet. Paste a Google Sheets URL and the sheet renders inline with full editing (if you have edit permissions on the sheet). Only docs.google.com URLs are accepted.
+
 ## Agents and Conversations
 
 An agent is a configured AI with a specific role. Think of agents as specialized assistants — one knows how to manage your hiring pipeline, another knows how to research companies, another knows how to review your codebase. Each agent has its own prompt, tools, permissions, and memory.
 
 ### Starting a conversation
 
-1. Click "New Conversation" in a space
-2. Pick an agent
-3. Pick a model (Sonnet is default — use Opus for complex planning, Haiku for quick lookups)
-4. Start chatting
+1. Click "New Conversation" in a space (or use the Chat tab)
+2. Start chatting — all new conversations default to Odin on Sonnet
+
+New conversations start with a timestamp name but are automatically renamed based on your first message. You can rename a conversation anytime by clicking the name in the header.
+
+You can change the agent and model during a conversation using the dropdowns in the conversation header. Switching agents starts a fresh session with the new agent's tools and personality. Use Opus for complex planning, Haiku for quick lookups.
 
 Conversations are persistent. You can close them when done (the system saves a summary), and start new ones later. The agent in the new conversation gets the summaries from prior conversations, so context carries over.
 
@@ -143,9 +166,11 @@ If a background agent is going down the wrong path, you can send it a correction
 
 ### Odin
 
-Odin is the system-level AI. Always available at the bottom of the screen. It runs on Haiku for fast responses (~1-2 seconds).
+Odin is the system-level AI. Always available at the bottom of the screen. The Odin bar runs on Haiku for fast responses (~1-2 seconds). Space conversations default to Odin on Sonnet. Both are changeable.
 
 When Odin routes you to an agent, it considers task complexity and selects the appropriate model: Haiku for simple lookups, the agent's default (Sonnet) for standard work, or Opus for complex planning and deep analysis. You can also request a specific model ("open a conversation with the Recruiting Agent using Opus").
+
+To start a fresh conversation with Odin, click the reset button (refresh icon) in the Odin bar. This closes the current conversation and clears the chat.
 
 Use Odin for:
 - Quick actions: "Add a task: call dentist"
@@ -157,7 +182,7 @@ Use Odin for:
 
 Here's what using OpenLoop looks like for managing a job search:
 
-1. **Create a space.** Pick the CRM template — it gives you a table view with custom fields, perfect for tracking companies and contacts.
+1. **Create a space.** Pick the Database template — it gives you a table view with custom fields, perfect for tracking companies and contacts.
 2. **Set up custom fields.** In Space Settings, define fields like "Role," "Status," "Salary Range," "Next Follow-up."
 3. **Create an agent.** Tell Odin: "I need an agent that can manage my job search." Odin routes you to the Agent Builder, which interviews you about what you need — including the agent's personality (how it should approach work, its communication style, domain-appropriate traits). The Agent Builder then creates a Recruiting Agent with the right prompt, personality, tools, and permissions.
 4. **Start working.** Open a conversation with your Recruiting Agent in the job search space. Tell it about roles you're interested in. It creates records for each company, sets follow-up dates, and tracks where you are in each pipeline.
@@ -248,7 +273,7 @@ Agents operate under a permission system. Each agent has per-resource, per-opera
 - **Requires approval** — agent pauses and asks. You'll see it in Attention Items on Home.
 - **Never allowed** — blocked entirely
 
-For example, you might set your Research Agent to always be allowed to read documents and search the web, require your approval before creating or editing items, and never allow it to delete anything. A Recruiting Agent might have full always-allowed access to its own CRM space but require approval for cross-space operations.
+For example, you might set your Research Agent to always be allowed to read documents and search the web, require your approval before creating or editing items, and never allow it to delete anything. A Recruiting Agent might have full always-allowed access to its own Database space but require approval for cross-space operations.
 
 Permissions are set during agent creation and editable in the Agents page. There's no timeout on approvals — the agent waits until you respond.
 
@@ -292,7 +317,7 @@ OpenLoop is a coordination layer. It doesn't do AI work — it manages the plumb
 
 ### Spaces
 
-A space is a row in the `spaces` table. Key fields: `name`, `template` (project/crm/knowledge_base/simple), `board_enabled`, `board_columns` (JSON array of stage names), `default_view`, `custom_field_schema` (JSON — defines CRM-style fields for records).
+A space is a row in the `spaces` table. Key fields: `name`, `template` (project/database/knowledge_base/simple), `board_enabled`, `board_columns` (JSON array of stage names), `default_view`, `custom_field_schema` (JSON — defines CRM-style fields for records).
 
 All spaces have `board_columns` — even Simple and Knowledge Base spaces get `["todo", "in_progress", "done"]`. This eliminates null-checking throughout the codebase. The `board_enabled` flag controls whether the kanban view is meaningful.
 

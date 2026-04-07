@@ -20,7 +20,7 @@ const templateVariant: Record<string, 'default' | 'success' | 'warning' | 'dange
 
 const templateLabel: Record<string, string> = {
   project: 'Project',
-  crm: 'CRM',
+  crm: 'Database',
   knowledge_base: 'Knowledge Base',
   simple: 'Simple',
 };

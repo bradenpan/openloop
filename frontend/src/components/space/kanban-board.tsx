@@ -52,6 +52,11 @@ export function KanbanBoard({ spaceId, boardColumns, boardEnabled }: KanbanBoard
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/items'] });
     },
+    onError: (error) => {
+      console.error('Failed to move item:', error);
+      // Invalidate to revert to server state
+      queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/items'] });
+    },
   });
 
   // Group items by column
@@ -228,7 +233,7 @@ export function KanbanBoard({ spaceId, boardColumns, boardEnabled }: KanbanBoard
             ))}
           </div>
 
-          <DragOverlay>
+          <DragOverlay dropAnimation={null}>
             {activeItem ? (
               <div className="bg-surface border border-primary rounded-lg p-3 shadow-lg opacity-90 max-w-[220px]">
                 <p className="text-sm font-medium text-foreground">{activeItem.title}</p>

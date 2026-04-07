@@ -1404,6 +1404,28 @@
               "default": true,
               "title": "Active Only"
             }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 200,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "title": "Offset"
+            }
           }
         ],
         "responses": {
@@ -2708,6 +2730,56 @@
             }
           }
         ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "tags": [
+          "conversations"
+        ],
+        "summary": "Update Conversation",
+        "operationId": "update_conversation_api_v1_conversations__conversation_id__patch",
+        "parameters": [
+          {
+            "name": "conversation_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Conversation Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConversationUpdate"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -6435,12 +6507,10 @@
             "title": "Resource Pattern"
           },
           "operation": {
-            "type": "string",
-            "title": "Operation"
+            "$ref": "#/components/schemas/Operation"
           },
           "grant_level": {
-            "type": "string",
-            "title": "Grant Level"
+            "$ref": "#/components/schemas/GrantLevel"
           }
         },
         "type": "object",
@@ -7150,8 +7220,7 @@
             "title": "Instruction"
           },
           "trigger_type": {
-            "type": "string",
-            "title": "Trigger Type"
+            "$ref": "#/components/schemas/AutomationTriggerType"
           },
           "cron_expression": {
             "anyOf": [
@@ -7217,13 +7286,12 @@
           "last_run_status": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/BackgroundTaskStatus"
               },
               {
                 "type": "null"
               }
-            ],
-            "title": "Last Run Status"
+            ]
           },
           "created_at": {
             "type": "string",
@@ -7287,8 +7355,7 @@
             "title": "Background Task Id"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/BackgroundTaskStatus"
           },
           "result_summary": {
             "anyOf": [
@@ -7518,6 +7585,21 @@
           "task_id"
         ],
         "title": "AutonomousLaunchResponse"
+      },
+      "BackgroundTaskStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "queued",
+          "running",
+          "paused",
+          "completed",
+          "failed",
+          "cancelled",
+          "interrupted",
+          "pending_resume"
+        ],
+        "title": "BackgroundTaskStatus"
       },
       "BackupStatusResponse": {
         "properties": {
@@ -8451,8 +8533,7 @@
             "title": "Name"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/ConversationStatus"
           },
           "model_override": {
             "anyOf": [
@@ -8522,6 +8603,45 @@
           "interrupted"
         ],
         "title": "ConversationStatus"
+      },
+      "ConversationUpdate": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "model_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Model Override"
+          },
+          "agent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Agent Id"
+          }
+        },
+        "type": "object",
+        "title": "ConversationUpdate"
       },
       "DailyTokenBucket": {
         "properties": {
@@ -10732,8 +10852,7 @@
             "title": "Resource"
           },
           "operation": {
-            "type": "string",
-            "title": "Operation"
+            "$ref": "#/components/schemas/Operation"
           },
           "tool_input": {
             "anyOf": [
@@ -10748,8 +10867,7 @@
             "title": "Tool Input"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/PermissionRequestStatus"
           },
           "resolved_by": {
             "anyOf": [
@@ -11821,7 +11939,8 @@
           "chart",
           "stat_card",
           "markdown",
-          "data_feed"
+          "data_feed",
+          "google_sheet"
         ],
         "title": "WidgetType"
       },

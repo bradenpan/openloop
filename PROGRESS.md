@@ -910,6 +910,101 @@ Comprehensive review and fix of how agents receive instructions and behavioral r
 
 ---
 
+## UX Polish + Feature Batch (2026-04-06) — COMPLETE
+
+9 features built, code reviewed (5 review agents, 15 must-fix + should-fix items resolved), webapp tested (10/10 pass).
+
+**Features built:**
+
+1. **Space deletion UI** — Danger Zone section in Space Settings with name-typed confirmation. Calls existing `DELETE /api/v1/spaces/{id}`, navigates to home. Resets on panel close/reopen.
+
+2. **Home page task click behavior** — Checkbox toggles done (with `stopPropagation`), clicking task text opens `ItemDetailPanel` sidebar. Ported pattern from `todo-panel.tsx`. Added `aria-label` for accessibility.
+
+3. **Archive tasks UI** — Archive button on item detail panel (two-click confirm), hover-reveal archive icons on todo panel rows and board cards. Board card archive adds `onPointerDown` stopPropagation to prevent dnd-kit drag interference. All archive mutations invalidate both item and dashboard queries.
+
+4. **Sidebar dynamic resize** — Sidebar widgets (`todo_panel`, `conversations`) pulled out of CSS grid into a flex wrapper alongside the content grid. `shrink-0` sidebars + `flex-1` center = board now expands/contracts when sidebars collapse/expand. Previous bug: sidebar collapsed inside its fixed-size grid cell, leaving dead space.
+
+5. **Files as permanent tab** — "Files" tab always visible in space header alongside Board/Table. Renders `DocumentPanel` full-height. `CenterView` type extended to `'board' | 'table' | 'files'`. View tabs always rendered (not conditional on both kanban+table existing). Persisted to localStorage. View validation: stale saved view falls back to first available.
+
+6. **Stage name editor** — New "Stages" tab in Space Settings. Editable list with rename, reorder (up/down), add, remove. Saves via `PATCH /api/v1/spaces/{id}` with `board_columns`. Validation: no empty names, no duplicates, minimum 1 stage. Stable React keys via `crypto.randomUUID()`.
+
+7. **CRM → Database rename + configurable sort + field editor** — Template display label changed from "CRM" to "Database" in create modal, space list badges. Enum: `DATABASE = "crm"` (Python name changed, wire value preserved). Default table sort changed from `created_at desc` to `title asc`, persisted per-space in localStorage. New "Fields" tab in Space Settings: add/remove/rename custom fields, type selector (text/number/date/select), comma-separated options for select fields. Options preserved in state when switching field type away from select.
+
+8. **Model selector persistence** — New `PATCH /api/v1/conversations/{id}` endpoint with `ConversationUpdate` schema (`name`, `model_override`). Frontend dropdown now calls the mutation. Error handler reverts to server state on failure. Odin already set to `default_model=haiku`.
+
+9. **Google Sheet embed widget** — New `google_sheet` widget type. Renders iframe with `?rm=minimal` for cleaner UI. Setup view for URL entry when no sheet configured. Toolbar with open-in-new-tab and change URL buttons. Security: validates `docs.google.com` hostname, rejects all other URLs. Config note in layout editor. `WidgetType.GOOGLE_SHEET` added to enum.
+
+**Code review fixes (post-build):**
+- Stale `centerView` fallback when saved view references missing widget type
+- Empty-state check uses `centerWidgets.length` instead of `widgets.length`
+- Stable keys (`crypto.randomUUID()`) on reorderable lists in stages + field editors
+- Google Sheet iframe XSS prevention (hostname validation)
+- Board card archive: two-click confirm + pointer event isolation
+- Delete confirmation state resets on panel close/reopen
+- Field editor: options preserved when switching type, trailing comma UX fixed
+- Archive from detail panel invalidates dashboard query
+- Conversation header mutation error handling
+
+**Documentation updates:**
+- CAPABILITIES.md: Google Sheets widget, Database template rename, Files tab, space deletion, archive UI, stage/field editors, sidebar layout
+- ARCHITECTURE-PROPOSAL.md: PATCH conversations endpoint, google_sheet widget type, sidebar flex layout, new settings tabs
+- Guide.md: how to delete spaces, archive items, edit stages, edit fields, use Files tab, embed Google Sheets, home task click behavior
+- README.md: status updated (Phases 0-14 complete), Google Sheets capability
+
+---
+
+## UX Iteration + Conversation System (2026-04-06) — COMPLETE
+
+10 additional issues addressed, Chat tab built, conversation system rearchitected. Multiple code review rounds with fixes.
+
+**Issues fixed:**
+
+1. **Default view uses space.default_view from DB** — `loadSavedView()` no longer hardcodes 'board'. Falls back to the space's `default_view` (e.g., 'table' for Database spaces) when no localStorage override exists.
+
+2. **All spaces get board+table+files tabs** — Core views (Board, Table, Files) render directly via component imports, not dependent on widget existence. Templates only control `default_view` and `board_columns`. All templates create the same widget set.
+
+3. **Task/record distinction collapsed** — `item_type='task'` filter removed from todo panel and home page. Records created from table now use `item_type='task'` for done/stage sync. All items visible in all views.
+
+4. **Kanban drag-and-drop fixes** — `dropAnimation={null}` on DragOverlay fixes preview position. `onError` handler on move mutation prevents blank screen. `WidgetErrorBoundary` added to Space.tsx catches and displays widget crashes gracefully (keyed on `centerView` to reset on tab switch).
+
+5. **Odin bar model display** — Replaced hardcoded "Opus" with dynamic query of Odin's `default_model`. Shows actual model (Haiku).
+
+6. **Create space from sidebar** — "+" button next to "Spaces" heading opens CreateSpaceModal.
+
+7. **Simplified conversation creation** — Removed NewConversationModal. "+ New" auto-creates with Odin + Sonnet (space conversations) or Odin + Haiku (Odin bar). Agent and model selectors in conversation header allow switching mid-conversation.
+
+8. **Odin permission fix** — System-agent bypass in permission enforcer: agents with no `agent_spaces` rows get auto-allowed (after system guardrails). Audit logs distinguish bypass via `"allow_system_bypass"` return value, normalized to `"allow"` for audit records.
+
+9. **Odin bar reset button** — Refresh icon closes current conversation and clears state. Next message creates fresh conversation.
+
+10. **Conversation auto-titling** — Heuristic: first sentence of user's first message, word-boundary truncated at 60 chars. Only renames if name starts with "Chat " (doesn't overwrite user renames). Follows Claude CLI pattern (heuristic first, no LLM call). Frontend picks up new title via conversations query invalidation on `stream_end`.
+
+**Chat tab:**
+- New "Chat" tab in space header alongside Board/Table/Files
+- Layout: collapsible conversation list sidebar (left) + browser-style tabbed conversation area (center) + optional widget column (right)
+- Conversation tabs: unlimited, overflow scroll, close X, "+" button for new
+- Tab state (open tabs, active tab, sidebar collapsed) persisted to localStorage per space
+- useReducer for tab state management (eliminates nested setState patterns)
+- ARIA roles: `tablist`, `tab` (div with role + keyboard handler), `tabpanel`
+- Widget column shows non-core widgets (google_sheet, calendar_events, etc.)
+
+**Agent switching mid-conversation:**
+- `agent_id` added to `ConversationUpdate` schema
+- Changing agent via header dropdown clears `sdk_session_id`, forcing fresh context assembly on next message
+- New agent gets its own system prompt, tools, personality
+- `agent_id=None` rejected with 422 to prevent orphaned conversations
+
+**Code review fixes (3 rounds):**
+- Nested `<button>` in tab bar → `<div role="tab">` with keyboard handler
+- Persist effect race condition on space switch → `skipPersistRef`
+- Permission enforcer tests broken (agents hit bypass) → `_scope_agent_to_space` helper
+- `DEFAULT_COLUMNS` deduplicated (exported from widget-registry)
+- Orphaned code/comments cleaned up
+- `WidgetErrorBoundary` keyed on `centerView` to reset on tab switch
+- `google_sheet` added to ChatTab `EXCLUDED_TYPES`
+
+---
+
 ## Key Decisions Made During Build
 
 1. **Schemas split into per-domain files** (`backend/openloop/api/schemas/`) — prevents merge conflicts during parallel agent work.
@@ -941,3 +1036,16 @@ Comprehensive review and fix of how agents receive instructions and behavioral r
 27. **Email bodies not cached** — Only headers + snippet cached in `email_cache` table. Full email bodies fetched live from Gmail API via `get_email()` MCP tool. Avoids storing sensitive email content in SQLite.
 28. **Email send requires approval** — `send_email` and `send_reply` mapped to `("gmail", "execute")` permission. Default: requires approval. Users can upgrade to "always allowed" per-agent as trust builds. Drafts don't require approval.
 29. **Integration Builder uses existing primitives** — No dynamic code execution, no runtime plugin loading. Configures DataSource + Automation + WebFetch + Items/Memory. SSRF protection blocks private IPs, localhost, and metadata endpoints in `test_api_connection`.
+30. **Sidebar widgets are flex peers, not grid children** — `todo_panel` and `conversations` widgets are classified as sidebars and rendered in a flex row alongside the content grid (not inside it). This ensures collapsing a sidebar releases its width to the center content. Previous approach (all widgets in CSS grid) left dead space when sidebars collapsed.
+31. **Files tab is permanent, DocumentPanel widget remains optional** — Files tab always appears in the space header. DocumentPanel stays in the widget registry for users who want it as an in-grid widget too. No mutual exclusion.
+32. **CRM enum value preserved as "crm"** — `SpaceTemplate.DATABASE = "crm"` keeps the wire value for backward compatibility with existing DB rows. Only the Python attribute name and frontend display labels changed. No migration needed.
+33. **Google Sheet iframe restricted to docs.google.com** — `toEmbedUrl` validates the URL hostname before rendering. Non-Google URLs return null and show an error. This prevents XSS via arbitrary iframe URLs stored in widget config.
+34. **Stage and field editors use stable keys** — Reorderable lists use `crypto.randomUUID()` as React keys instead of array indices. IDs are local-only (not sent to backend). Prevents focus jumps and incorrect DOM reuse when reordering.
+35. **Sort preference persisted per-space in localStorage** — Table view default sort changed from `created_at desc` to `title asc`. Saved and loaded from `openloop:table-sort:{spaceId}`. Same pattern as column visibility config.
+36. **Core views are components, not widgets** — Board, Table, Files render directly via component imports in Space.tsx, decoupled from the widget system. The widget grid is no longer used for core views. Sheet tab renders its widget only when a `google_sheet` widget is configured. Templates control `default_view` and `board_columns` but all spaces get all tabs.
+37. **Odin is the default conversation agent** — All new conversations (sidebar and Odin bar) default to Odin. Space conversations use Sonnet, Odin bar uses Haiku. Agent/model switchable mid-conversation via header dropdowns.
+38. **Agent switch clears SDK session** — Changing `agent_id` on a conversation sets `sdk_session_id = None` in the same update. Next message starts a fresh session with the new agent's full context (system prompt, tools, personality). Conversation history preserved in DB; new agent gets summaries via context assembly.
+39. **Auto-title uses heuristic, not LLM** — First sentence of user's first message, truncated at word boundary (60 chars). Only overwrites auto-generated names (prefix "Chat "). Claude CLI uses the same hybrid approach (heuristic first). Adding an LLM call was rejected: the Claude Agent SDK spawns a CLI subprocess per call (overkill for titling), and the `anthropic` REST SDK isn't installed (different architecture choice).
+40. **System-agent bypass uses agent_spaces absence** — Agents with no rows in `agent_spaces` get unrestricted tool access (after system guardrails). This is the intended design: most agents are cross-space. Only space-scoped agents (e.g., Recruiting Agent) have rows. Audit logs normalize bypass to `"allow"` for user-facing records.
+41. **Chat tab uses useReducer for tab state** — `openTabs` + `activeTab` consolidated into a single reducer to avoid nested setState patterns and stale closures. `skipPersistRef` prevents persist effect from corrupting state during space switches.
+42. **Tab items are `div[role=tab]`, not `button`** — Avoids invalid nested `<button>` (close X inside tab). Uses `tabIndex={0}` + `onKeyDown` for keyboard accessibility.

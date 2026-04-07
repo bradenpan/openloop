@@ -2124,18 +2124,129 @@ async def get_cross_space_tasks(is_done: str = "", *, _db=None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Google Drive tools (26-28)
+# Google Drive tools (26-31)
 # ---------------------------------------------------------------------------
 
 
+def _get_linked_drive_folder_ids(db: Session, agent_id: str) -> set[str]:
+    """Get the set of Google Drive folder IDs linked to the agent's accessible spaces.
+
+    For system agents (no space restrictions), returns all linked folder IDs.
+    """
+    space_ids = _get_agent_space_ids(db, agent_id)
+    if space_ids is None:
+        # System agent — get all Drive DataSources
+        rows = db.execute(
+            text("SELECT config FROM data_sources WHERE source_type = 'google_drive'")
+        ).fetchall()
+    else:
+        if not space_ids:
+            return set()
+        placeholders = ", ".join(f":s{i}" for i in range(len(space_ids)))
+        params = {f"s{i}": sid for i, sid in enumerate(space_ids)}
+        params["st"] = "google_drive"
+        rows = db.execute(
+            text(
+                f"SELECT config FROM data_sources WHERE source_type = :st"
+                f" AND space_id IN ({placeholders})"
+            ),
+            params,
+        ).fetchall()
+
+    folder_ids: set[str] = set()
+    for (config_json,) in rows:
+        if config_json:
+            cfg = config_json if isinstance(config_json, dict) else json.loads(config_json)
+            fid = cfg.get("folder_id")
+            if fid:
+                folder_ids.add(fid)
+    return folder_ids
+
+
+def _validate_drive_folder_access(
+    db: Session, agent_id: str, folder_id: str
+) -> str | None:
+    """Check that folder_id is linked to one of the agent's accessible spaces.
+
+    Returns None if allowed, or an error JSON string if denied.
+    """
+    allowed = _get_linked_drive_folder_ids(db, agent_id)
+    if folder_id in allowed:
+        return None
+    return _err(
+        f"Access denied: Drive folder {folder_id} is not linked to any of your spaces"
+    )
+
+
+def _validate_drive_file_access(
+    db: Session, agent_id: str, file_id: str
+) -> str | None:
+    """Check that a Drive file belongs to a folder linked to the agent's spaces.
+
+    First checks the documents table (fast, no API call). Falls back to the
+    Google Drive API to get the file's parent folder if not indexed yet.
+    Returns None if allowed, or an error JSON string if denied.
+    """
+    allowed = _get_linked_drive_folder_ids(db, agent_id)
+    if not allowed:
+        return _err("Access denied: no Drive folders are linked to your spaces")
+
+    # Fast path: check documents table
+    doc_row = db.execute(
+        text("SELECT drive_folder_id FROM documents WHERE drive_file_id = :fid LIMIT 1"),
+        {"fid": file_id},
+    ).fetchone()
+    if doc_row and doc_row[0]:
+        if doc_row[0] in allowed:
+            return None
+        return _err(
+            f"Access denied: file is in Drive folder {doc_row[0]} which is not linked to your spaces"
+        )
+
+    # Slow path: walk up the parent chain via Google API until we find a linked
+    # folder or reach the root. This handles files in subfolders of linked folders.
+    from backend.openloop.services import gdrive_client
+
+    service = gdrive_client.get_drive_service()
+    file_meta = service.files().get(fileId=file_id, fields="parents").execute()
+    parents_to_check = list(file_meta.get("parents", []))
+    visited: set[str] = set()
+
+    while parents_to_check:
+        parent_id = parents_to_check.pop(0)
+        if parent_id in visited:
+            continue
+        visited.add(parent_id)
+
+        if parent_id in allowed:
+            return None
+
+        # Walk up: get this folder's parents
+        try:
+            parent_meta = service.files().get(fileId=parent_id, fields="parents").execute()
+            for grandparent in parent_meta.get("parents", []):
+                if grandparent not in visited:
+                    parents_to_check.append(grandparent)
+        except Exception:
+            # Can't traverse further (root, shared drive, or permission error)
+            break
+
+    return _err("Access denied: file is not in a Drive folder linked to your spaces")
+
+
 # 26. read_drive_file
-async def read_drive_file(file_id: str, *, _db=None) -> str:
+async def read_drive_file(file_id: str, *, _db=None, _agent_id: str = "") -> str:
     """Read text content of a Google Drive file by its file ID."""
+    db = _get_db(_db)
     try:
         from backend.openloop.services import gdrive_client
 
         if not gdrive_client.is_authenticated():
             return _err("Google Drive is not authenticated. Link a Drive folder first.")
+
+        denied = _validate_drive_file_access(db, _agent_id, file_id)
+        if denied:
+            return denied
 
         text = gdrive_client.read_file_text(file_id)
         if text is None:
@@ -2146,16 +2257,24 @@ async def read_drive_file(file_id: str, *, _db=None) -> str:
         return _ok({"file_id": file_id, "content": text})
     except Exception as e:
         return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
 
 
 # 27. list_drive_files
-async def list_drive_files(folder_id: str, *, _db=None) -> str:
-    """List files in a Google Drive folder."""
+async def list_drive_files(folder_id: str, *, _db=None, _agent_id: str = "") -> str:
+    """List files in a Google Drive folder. Folder must be linked to one of your spaces."""
+    db = _get_db(_db)
     try:
         from backend.openloop.services import gdrive_client
 
         if not gdrive_client.is_authenticated():
             return _err("Google Drive is not authenticated. Link a Drive folder first.")
+
+        denied = _validate_drive_folder_access(db, _agent_id, folder_id)
+        if denied:
+            return denied
 
         files = gdrive_client.list_files(folder_id)
         return _ok(
@@ -2172,31 +2291,132 @@ async def list_drive_files(folder_id: str, *, _db=None) -> str:
         )
     except Exception as e:
         return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
 
 
 # 28. create_drive_file
 async def create_drive_file(
-    folder_id: str, name: str, content: str, mime_type: str = "text/plain", *, _db=None
+    folder_id: str, name: str, content: str, mime_type: str = "text/plain",
+    *, _db=None, _agent_id: str = "",
 ) -> str:
-    """Create a new file in a Google Drive folder."""
+    """Create a new file in a Google Drive folder. Folder must be linked to one of your spaces."""
+    db = _get_db(_db)
     try:
         from backend.openloop.services import gdrive_client
 
         if not gdrive_client.is_authenticated():
             return _err("Google Drive is not authenticated. Link a Drive folder first.")
 
+        denied = _validate_drive_folder_access(db, _agent_id, folder_id)
+        if denied:
+            return denied
+
         result = gdrive_client.create_file(folder_id, name, content, mime_type)
         return _ok({"id": result["id"], "name": result["name"], "mimeType": result.get("mimeType")})
     except Exception as e:
         return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 29. update_drive_file
+async def update_drive_file(
+    file_id: str, content: str, mime_type: str = "text/plain",
+    *, _db=None, _agent_id: str = "",
+) -> str:
+    """Update the content of an existing Google Drive file. Cannot update native Google Docs."""
+    db = _get_db(_db)
+    try:
+        from backend.openloop.services import gdrive_client
+
+        if not gdrive_client.is_authenticated():
+            return _err("Google Drive is not authenticated. Link a Drive folder first.")
+
+        denied = _validate_drive_file_access(db, _agent_id, file_id)
+        if denied:
+            return denied
+
+        result = gdrive_client.update_file(file_id, content, mime_type)
+        return _ok({"id": result["id"], "name": result["name"], "mimeType": result.get("mimeType")})
+    except Exception as e:
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 30. rename_drive_file
+async def rename_drive_file(
+    file_id: str, new_name: str, *, _db=None, _agent_id: str = "",
+) -> str:
+    """Rename a Google Drive file."""
+    if not new_name or not new_name.strip():
+        return _err("new_name must be a non-empty string")
+    db = _get_db(_db)
+    try:
+        from backend.openloop.services import gdrive_client
+
+        if not gdrive_client.is_authenticated():
+            return _err("Google Drive is not authenticated. Link a Drive folder first.")
+
+        denied = _validate_drive_file_access(db, _agent_id, file_id)
+        if denied:
+            return denied
+
+        result = gdrive_client.rename_file(file_id, new_name.strip())
+        return _ok({"id": result["id"], "name": result["name"], "mimeType": result.get("mimeType")})
+    except Exception as e:
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
+
+
+# 31. move_drive_file
+async def move_drive_file(
+    file_id: str, new_folder_id: str, *, _db=None, _agent_id: str = "",
+) -> str:
+    """Move a Google Drive file to a different folder. Both source and destination must be linked to your spaces."""
+    db = _get_db(_db)
+    try:
+        from backend.openloop.services import gdrive_client
+
+        if not gdrive_client.is_authenticated():
+            return _err("Google Drive is not authenticated. Link a Drive folder first.")
+
+        # Validate source file access
+        denied = _validate_drive_file_access(db, _agent_id, file_id)
+        if denied:
+            return denied
+
+        # Validate destination folder access
+        denied = _validate_drive_folder_access(db, _agent_id, new_folder_id)
+        if denied:
+            return denied
+
+        result = gdrive_client.move_file(file_id, new_folder_id)
+        return _ok({
+            "id": result["id"],
+            "name": result["name"],
+            "mimeType": result.get("mimeType"),
+            "parents": result.get("parents"),
+        })
+    except Exception as e:
+        return _err(str(e))
+    finally:
+        if _db is None:
+            db.close()
 
 
 # ---------------------------------------------------------------------------
-# Layout tools (29-33): available to all agents
+# Layout tools (32-36): available to all agents
 # ---------------------------------------------------------------------------
 
 
-# 29. get_space_layout
+# 32. get_space_layout
 async def get_space_layout(
     space_id: str, *, _db=None, _agent_id: str = "",
 ) -> str:
@@ -3358,6 +3578,9 @@ _STANDARD_TOOLS = {
     "read_drive_file": read_drive_file,
     "list_drive_files": list_drive_files,
     "create_drive_file": create_drive_file,
+    "update_drive_file": update_drive_file,
+    "rename_drive_file": rename_drive_file,
+    "move_drive_file": move_drive_file,
     "get_space_layout": get_space_layout,
     "add_widget": add_widget,
     "update_widget": update_widget,

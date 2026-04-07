@@ -786,7 +786,8 @@ export interface paths {
         delete?: never;
         options?: never;
         head?: never;
-        patch?: never;
+        /** Update Conversation */
+        patch: operations["update_conversation_api_v1_conversations__conversation_id__patch"];
         trace?: never;
     };
     "/api/v1/conversations/{conversation_id}/messages": {
@@ -1861,10 +1862,8 @@ export interface components {
             agent_id: string;
             /** Resource Pattern */
             resource_pattern: string;
-            /** Operation */
-            operation: string;
-            /** Grant Level */
-            grant_level: string;
+            operation: components["schemas"]["Operation"];
+            grant_level: components["schemas"]["GrantLevel"];
         };
         /** AgentPermissionSet */
         AgentPermissionSet: {
@@ -2075,8 +2074,7 @@ export interface components {
             agent_id: string;
             /** Instruction */
             instruction: string;
-            /** Trigger Type */
-            trigger_type: string;
+            trigger_type: components["schemas"]["AutomationTriggerType"];
             /** Cron Expression */
             cron_expression: string | null;
             /** Event Source */
@@ -2091,8 +2089,7 @@ export interface components {
             enabled: boolean;
             /** Last Run At */
             last_run_at: string | null;
-            /** Last Run Status */
-            last_run_status: string | null;
+            last_run_status: components["schemas"]["BackgroundTaskStatus"] | null;
             /**
              * Created At
              * Format: date-time
@@ -2117,8 +2114,7 @@ export interface components {
             automation_id: string;
             /** Background Task Id */
             background_task_id: string | null;
-            /** Status */
-            status: string;
+            status: components["schemas"]["BackgroundTaskStatus"];
             /** Result Summary */
             result_summary: string | null;
             /** Error */
@@ -2174,6 +2170,11 @@ export interface components {
             /** Task Id */
             task_id: string;
         };
+        /**
+         * BackgroundTaskStatus
+         * @enum {string}
+         */
+        BackgroundTaskStatus: "pending" | "queued" | "running" | "paused" | "completed" | "failed" | "cancelled" | "interrupted" | "pending_resume";
         /** BackupStatusResponse */
         BackupStatusResponse: {
             /** Last Backup At */
@@ -2448,8 +2449,7 @@ export interface components {
             agent_id: string;
             /** Name */
             name: string;
-            /** Status */
-            status: string;
+            status: components["schemas"]["ConversationStatus"];
             /** Model Override */
             model_override: string | null;
             /** Sdk Session Id */
@@ -2472,6 +2472,15 @@ export interface components {
          * @enum {string}
          */
         ConversationStatus: "active" | "closed" | "interrupted";
+        /** ConversationUpdate */
+        ConversationUpdate: {
+            /** Name */
+            name?: string | null;
+            /** Model Override */
+            model_override?: string | null;
+            /** Agent Id */
+            agent_id?: string | null;
+        };
         /**
          * DailyTokenBucket
          * @description Token usage for a single day.
@@ -2728,7 +2737,7 @@ export interface components {
             /** Body */
             body?: string | null;
             /** Labels */
-            labels: unknown[] | null;
+            labels: string[] | null;
             /** Is Unread */
             is_unread: boolean;
             /**
@@ -3173,14 +3182,12 @@ export interface components {
             tool_name: string;
             /** Resource */
             resource: string;
-            /** Operation */
-            operation: string;
+            operation: components["schemas"]["Operation"];
             /** Tool Input */
             tool_input: {
                 [key: string]: unknown;
             } | null;
-            /** Status */
-            status: string;
+            status: components["schemas"]["PermissionRequestStatus"];
             /** Resolved By */
             resolved_by: string | null;
             /**
@@ -3531,7 +3538,7 @@ export interface components {
          * WidgetType
          * @enum {string}
          */
-        WidgetType: "todo_panel" | "kanban_board" | "data_table" | "conversations" | "calendar_events" | "chart" | "stat_card" | "markdown" | "data_feed";
+        WidgetType: "todo_panel" | "kanban_board" | "data_table" | "conversations" | "calendar_events" | "email_feed" | "chart" | "stat_card" | "markdown" | "data_feed" | "google_sheet";
         /** WidgetUpdate */
         WidgetUpdate: {
             size?: components["schemas"]["WidgetSize"] | null;
@@ -4419,6 +4426,8 @@ export interface operations {
         parameters: {
             query?: {
                 active_only?: boolean;
+                limit?: number;
+                offset?: number;
             };
             header?: never;
             path: {
@@ -5292,6 +5301,41 @@ export interface operations {
             cookie?: never;
         };
         requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConversationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_conversation_api_v1_conversations__conversation_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConversationUpdate"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
 import type { components } from '../../api/types';
@@ -54,6 +54,12 @@ export function ActivityFeed() {
   const [agentFilter, setAgentFilter] = useState<string>('');
   const [displayLimit, setDisplayLimit] = useState(20);
 
+  // Stable "after" date — only recompute when timeRange changes
+  const [afterDate, setAfterDate] = useState(() => getAfterDate(timeRange));
+  useEffect(() => {
+    setAfterDate(getAfterDate(timeRange));
+  }, [timeRange]);
+
   // Fetch agents for name lookup and filter dropdown
   const agents = $api.useQuery('get', '/api/v1/agents');
 
@@ -62,7 +68,7 @@ export function ActivityFeed() {
     params: {
       query: {
         agent_id: agentFilter || undefined,
-        after: getAfterDate(timeRange),
+        after: afterDate,
         limit: 50,
         offset: 0,
       },

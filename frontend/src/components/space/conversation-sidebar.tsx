@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { $api } from '../../api/hooks';
 import { Badge, Button, Panel } from '../ui';
 import { formatDate } from '../../utils/dates';
-import { NewConversationModal } from './new-conversation-modal';
 import { ConversationPanel } from '../conversation';
 
 interface ConversationSidebarProps {
@@ -26,13 +26,36 @@ interface RunningSession {
 }
 
 export function ConversationSidebar({ spaceId, collapsed, onToggle }: ConversationSidebarProps) {
-  const [modalOpen, setModalOpen] = useState(false);
+  const queryClient = useQueryClient();
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 
   const { data: convsData, isLoading } = $api.useQuery('get', '/api/v1/conversations', {
     params: { query: { space_id: spaceId } },
   });
   const conversations = convsData ?? [];
+
+  // Fetch agents to find Odin for auto-create
+  const { data: agentsData } = $api.useQuery('get', '/api/v1/agents');
+  const odinAgent = agentsData?.find((a) => a.name?.toLowerCase() === 'odin');
+
+  const createConversation = $api.useMutation('post', '/api/v1/conversations', {
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/conversations'] });
+      setActiveConversationId(data.id);
+    },
+  });
+
+  function handleNewConversation() {
+    if (!odinAgent) return;
+    createConversation.mutate({
+      body: {
+        agent_id: odinAgent.id,
+        name: `Chat ${new Date().toLocaleDateString()}`,
+        space_id: spaceId,
+        model_override: 'sonnet',
+      },
+    });
+  }
 
   // Fetch running sessions to detect autonomous runs linked to conversations
   const runningSessions = $api.useQuery('get', '/api/v1/agents/running', {}, {
@@ -84,7 +107,12 @@ export function ConversationSidebar({ spaceId, collapsed, onToggle }: Conversati
       <div className="px-3 py-2.5 border-b border-border flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">Conversations</h3>
         <div className="flex items-center gap-1">
-          <Button size="sm" variant="ghost" onClick={() => setModalOpen(true)}>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleNewConversation}
+            disabled={!odinAgent || createConversation.isPending}
+          >
             + New
           </Button>
           <button
@@ -139,8 +167,6 @@ export function ConversationSidebar({ spaceId, collapsed, onToggle }: Conversati
           );
         })}
       </div>
-
-      <NewConversationModal open={modalOpen} onClose={() => setModalOpen(false)} spaceId={spaceId} />
 
       {/* Active conversation panel rendered alongside the sidebar */}
       <Panel

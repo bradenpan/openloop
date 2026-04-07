@@ -4,7 +4,7 @@ Personal AI command center. Manage work across multiple spaces, interact with AI
 
 ## Status
 
-**Phases 0–11 complete.** Core backend, agent system, frontend, memory architecture, records/documents/search, space layouts, unified item model, agent builder, sub-agent delegation, steering, automations, autonomous agent operations (kill switch, compaction, approval queues, fan-out, crash recovery), polish, backup, and E2E tests all built and reviewed. **Phase 12–14 (Integrations: Google Calendar, Gmail, Integration Builder) next** — see [INTEGRATION-CAPABILITIES.md](INTEGRATION-CAPABILITIES.md) and [IMPLEMENTATION-PLAN-PHASE12.md](IMPLEMENTATION-PLAN-PHASE12.md).
+**Phases 0–14 complete.** Core backend, agent system, frontend, memory architecture, records/documents/search, space layouts, unified item model, agent builder, sub-agent delegation, steering, automations, autonomous agent operations (kill switch, compaction, approval queues, fan-out, crash recovery), polish, backup, E2E tests, and integrations (Google Calendar, Gmail, Integration Builder) all built and running. See [INTEGRATION-CAPABILITIES.md](INTEGRATION-CAPABILITIES.md) and [IMPLEMENTATION-PLAN-PHASE12.md](IMPLEMENTATION-PLAN-PHASE12.md).
 
 See [PROGRESS.md](PROGRESS.md) for detailed build status. See [guide.md](guide.md) for usage documentation.
 
@@ -18,16 +18,16 @@ See [PROGRESS.md](PROGRESS.md) for detailed build status. See [guide.md](guide.m
 - **[IMPLEMENTATION-PLAN-PHASE8.md](IMPLEMENTATION-PLAN-PHASE8.md)** — Phases 8–11 (autonomous agent operations)
 - **[AUTONOMOUS-AGENTS.md](AUTONOMOUS-AGENTS.md)** — autonomous agent operations design
 - **[INTEGRATION-CAPABILITIES.md](INTEGRATION-CAPABILITIES.md)** — Google Calendar, Gmail, and Integration Builder capability spec
-- **[IMPLEMENTATION-PLAN-PHASE12.md](IMPLEMENTATION-PLAN-PHASE12.md)** — Phases 12–14 (integrations)
+- **[IMPLEMENTATION-PLAN-PHASE12.md](IMPLEMENTATION-PLAN-PHASE12.md)** — Phases 12–14 (integrations, complete)
 - **[FUTURE-CAPABILITIES.md](FUTURE-CAPABILITIES.md)** — long-term roadmap (external task sources, model adapters)
 
 ## Key Concepts
 
-- **Spaces** — containers for related work. Can be a project, knowledge base, CRM, or simple task list.
-- **Items** — all tracked work. Tasks (things to do, with done/not-done) and records (entities to track, like contacts or leads). Viewable as list, kanban, or table.
-- **Odin** — always-visible AI front door (Haiku). Routes you to the right agent (selecting the appropriate model based on task complexity) and handles simple actions.
+- **Spaces** — containers for related work. Can be a project, knowledge base, CRM-style pipeline, or simple task list. Every space has a permanent Files tab for document management. Embed Google Sheets for inline viewing and editing.
+- **Items** — all tracked work. Tasks (things to do, with done/not-done) and records (entities to track, like contacts or leads). Viewable as board, table, chat, or files. All views available on every space regardless of template.
+- **Odin** — the default conversation agent. Sonnet for space chats, Haiku for the quick-access bar. Routes you to the right agent (selecting the appropriate model based on task complexity) and handles simple actions.
 - **Agents** — configured AIs with specific roles, tools, and permissions scoped to spaces. Each agent is a domain specialist (Recruiting Agent, Code Agent, Research Agent, etc.). Created through the Agent Builder.
-- **Conversations** — persistent chat threads with agents. Context survives across sessions via four-tier memory and conversation summaries.
+- **Conversations** — persistent chat threads with agents. Conversations auto-titled from first message. Chat tab with tabbed conversations, sidebar, and optional widget column. Context survives across sessions via four-tier memory and conversation summaries.
 - **Documents** — uploaded files, scanned directories, or synced Google Drive folders. Text extracted and indexed for search.
 - **Automations** — scheduled or event-triggered agent runs (daily briefing, stale work check, follow-up reminders, etc.).
 - **Autonomous Agents** — Agents can pursue goals independently over hours. Give an agent an objective, it builds a task list, works through items, adapts its plan, and reports back. Built on three autonomy tiers (interactive, supervised, autonomous) with permission inheritance (sub-agents inherit parent scope, never exceed it), compaction for indefinite sessions, and safety controls (kill switch, audit logging, approval queues).

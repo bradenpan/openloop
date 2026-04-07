@@ -28,7 +28,6 @@ export function TaskListPanel({ spaceId, collapsed, onToggle }: TaskListPanelPro
   // Fetch tasks — when showDone is false, only fetch open tasks; when true, fetch all
   const queryParams: Record<string, unknown> = {
     space_id: spaceId,
-    item_type: 'task',
     archived: false,
   };
   if (!showDone) {
@@ -62,6 +61,12 @@ export function TaskListPanel({ spaceId, collapsed, onToggle }: TaskListPanelPro
     },
   });
 
+  const archiveItem = $api.useMutation('post', '/api/v1/items/{item_id}/archive', {
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/items'] });
+    },
+  });
+
   function handleAdd(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter' || !newTitle.trim()) return;
     createItem.mutate({
@@ -81,6 +86,10 @@ export function TaskListPanel({ spaceId, collapsed, onToggle }: TaskListPanelPro
       params: { path: { item_id: itemId } },
       body: { stage: newStage },
     });
+  }
+
+  function handleArchive(itemId: string) {
+    archiveItem.mutate({ params: { path: { item_id: itemId } } });
   }
 
   if (collapsed) {
@@ -162,6 +171,7 @@ export function TaskListPanel({ spaceId, collapsed, onToggle }: TaskListPanelPro
             boardColumns={boardColumns}
             onToggleDone={() => handleToggleDone(item.id, item.is_done)}
             onStageChange={(stage) => handleStageChange(item.id, stage)}
+            onArchive={() => handleArchive(item.id)}
             onClick={() => setSelectedItemId(item.id)}
           />
         ))}
@@ -181,6 +191,7 @@ export function TaskListPanel({ spaceId, collapsed, onToggle }: TaskListPanelPro
                 boardColumns={boardColumns}
                 onToggleDone={() => handleToggleDone(item.id, item.is_done)}
                 onStageChange={(stage) => handleStageChange(item.id, stage)}
+                onArchive={() => handleArchive(item.id)}
                 onClick={() => setSelectedItemId(item.id)}
               />
             ))}
@@ -204,10 +215,11 @@ interface TaskRowProps {
   boardColumns: string[];
   onToggleDone: () => void;
   onStageChange: (stage: string) => void;
+  onArchive: () => void;
   onClick: () => void;
 }
 
-function TaskRow({ item, boardColumns, onToggleDone, onStageChange, onClick }: TaskRowProps) {
+function TaskRow({ item, boardColumns, onToggleDone, onStageChange, onArchive, onClick }: TaskRowProps) {
   return (
     <div
       className="group flex items-start gap-2 px-3 py-2 hover:bg-raised/50 transition-colors cursor-pointer"
@@ -258,6 +270,22 @@ function TaskRow({ item, boardColumns, onToggleDone, onStageChange, onClick }: T
           </select>
         </div>
       </div>
+
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onArchive();
+        }}
+        className="mt-0.5 opacity-0 group-hover:opacity-100 text-muted hover:text-foreground transition-all cursor-pointer p-0.5 rounded hover:bg-raised shrink-0"
+        aria-label="Archive task"
+        title="Archive"
+      >
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+          <rect x="1" y="2" width="14" height="4" rx="1" />
+          <path d="M2 6v7a1 1 0 001 1h10a1 1 0 001-1V6" />
+          <path d="M6 9h4" />
+        </svg>
+      </button>
     </div>
   );
 }

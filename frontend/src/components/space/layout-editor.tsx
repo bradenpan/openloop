@@ -22,7 +22,8 @@ const WIDGET_CATALOG: WidgetMeta[] = [
   { type: 'kanban_board', label: 'Kanban Board', description: 'Drag-and-drop stage board', icon: '▦' },
   { type: 'data_table', label: 'Data Table', description: 'Sortable, filterable data grid', icon: '⊞' },
   { type: 'conversations', label: 'Conversations', description: 'Chat sidebar with agents', icon: '💬' },
-  { type: 'chart', label: 'Chart', description: 'Data visualization (coming soon)', icon: '📊' },
+  { type: 'google_sheet', label: 'Google Sheet', description: 'Embed and edit a Google Sheet', icon: '📊' },
+  { type: 'chart', label: 'Chart', description: 'Data visualization (coming soon)', icon: '📈' },
   { type: 'stat_card', label: 'Stat Card', description: 'Key metrics at a glance (coming soon)', icon: '🔢' },
   { type: 'markdown', label: 'Notes', description: 'Markdown text panel (coming soon)', icon: '📝' },
   { type: 'data_feed', label: 'Data Feed', description: 'Live data stream (coming soon)', icon: '📡' },
@@ -51,6 +52,8 @@ function getConfigNote(widgetType: string): string | null {
       return 'Board columns are managed in space settings.';
     case 'data_table':
       return 'Table fields are configured in the table view.';
+    case 'google_sheet':
+      return 'Sheet URL is configured from the widget in the space view.';
     default:
       return null;
   }

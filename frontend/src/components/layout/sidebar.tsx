@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useUIStore } from '../../stores/ui-store';
 import { $api } from '../../api/hooks';
 import { SearchButton } from '../search-modal';
+import { CreateSpaceModal } from '../home/create-space-modal';
 
 function EmailIcon() {
   return (
@@ -51,6 +53,7 @@ export function Sidebar() {
   const calendarConnected = calendarAuth.data?.authenticated === true;
   const emailAuth = $api.useQuery('get', '/api/v1/email/auth-status');
   const emailConnected = emailAuth.data?.authenticated === true;
+  const [createModalOpen, setCreateModalOpen] = useState(false);
 
   if (collapsed) {
     return (
@@ -119,8 +122,18 @@ export function Sidebar() {
           </NavLink>
         )}
 
-        <div className="mt-4 mb-1 px-3 text-[11px] font-semibold text-muted uppercase tracking-wider">
-          Spaces
+        <div className="mt-4 mb-1 px-3 flex items-center justify-between">
+          <span className="text-[11px] font-semibold text-muted uppercase tracking-wider">Spaces</span>
+          <button
+            onClick={() => setCreateModalOpen(true)}
+            className="text-muted hover:text-foreground transition-colors p-0.5 rounded hover:bg-raised cursor-pointer"
+            aria-label="Create space"
+            title="New space"
+          >
+            <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+              <path d="M7 3v8M3 7h8" />
+            </svg>
+          </button>
         </div>
 
         {spaces.length === 0 && (
@@ -166,6 +179,8 @@ export function Sidebar() {
           Settings
         </NavLink>
       </div>
+
+      <CreateSpaceModal open={createModalOpen} onClose={() => setCreateModalOpen(false)} />
     </aside>
   );
 }

@@ -55,10 +55,32 @@ function saveColumnConfig(spaceId: string, config: Record<string, boolean>) {
   }
 }
 
-// --- Sort state ---
+// --- Sort config persistence ---
 
 type SortField = string;
 type SortOrder = 'asc' | 'desc';
+
+function getSortStorageKey(spaceId: string) {
+  return `openloop:table-sort:${spaceId}`;
+}
+
+function loadSortConfig(spaceId: string): { sortBy: string; sortOrder: string } | null {
+  try {
+    const raw = localStorage.getItem(getSortStorageKey(spaceId));
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function saveSortConfig(spaceId: string, sortBy: string, sortOrder: string) {
+  try {
+    localStorage.setItem(getSortStorageKey(spaceId), JSON.stringify({ sortBy, sortOrder }));
+  } catch {
+    // ignore
+  }
+}
 
 // --- Component ---
 
@@ -70,14 +92,30 @@ interface TableViewProps {
 
 export function TableView({ spaceId, boardColumns, boardEnabled }: TableViewProps) {
   const queryClient = useQueryClient();
-  const [sortBy, setSortBy] = useState<SortField>('created_at');
-  const [sortOrder, setSortOrder] = useState<SortOrder>('desc');
+  const [sortBy, setSortBy] = useState<SortField>(() => loadSortConfig(spaceId)?.sortBy ?? 'title');
+  const [sortOrder, setSortOrder] = useState<SortOrder>(() => (loadSortConfig(spaceId)?.sortOrder as SortOrder) ?? 'asc');
   const [stageFilter, setStageFilter] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [columnsPopoverOpen, setColumnsPopoverOpen] = useState(false);
   const [configVersion, setConfigVersion] = useState(0);
+
+  // Reset sort state when space changes
+  const spaceIdRef = useRef(spaceId);
+  useEffect(() => {
+    if (spaceIdRef.current !== spaceId) {
+      spaceIdRef.current = spaceId;
+      const saved = loadSortConfig(spaceId);
+      setSortBy(saved?.sortBy ?? 'title');
+      setSortOrder((saved?.sortOrder as SortOrder) ?? 'asc');
+    }
+  }, [spaceId]);
+
+  // Persist sort preference
+  useEffect(() => {
+    saveSortConfig(spaceId, sortBy, sortOrder);
+  }, [spaceId, sortBy, sortOrder]);
 
   // Fetch items with server-side sorting
   const serverSortable = ['title', 'created_at', 'updated_at', 'sort_position', 'priority', 'due_date', 'stage'];

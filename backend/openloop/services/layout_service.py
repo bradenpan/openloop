@@ -3,25 +3,20 @@ from sqlalchemy.orm import Session
 
 from backend.openloop.db.models import Space, SpaceWidget
 
-# Default widgets per space template: list of (widget_type, size) tuples
+# Default widgets — every space gets the same core set.
+# Templates control default_view and board_columns (via space_service), not widget availability.
+_CORE_WIDGETS: list[tuple[str, str]] = [
+    ("todo_panel", "small"),
+    ("kanban_board", "large"),
+    ("data_table", "large"),
+    ("conversations", "small"),
+]
+
 _TEMPLATE_WIDGETS: dict[str, list[tuple[str, str]]] = {
-    "project": [
-        ("todo_panel", "small"),
-        ("kanban_board", "large"),
-        ("conversations", "small"),
-    ],
-    "crm": [
-        ("todo_panel", "small"),
-        ("data_table", "large"),
-        ("conversations", "small"),
-    ],
-    "knowledge_base": [
-        ("conversations", "large"),
-    ],
-    "simple": [
-        ("todo_panel", "large"),
-        ("conversations", "medium"),
-    ],
+    "project": _CORE_WIDGETS,
+    "crm": _CORE_WIDGETS,
+    "knowledge_base": _CORE_WIDGETS,
+    "simple": _CORE_WIDGETS,
 }
 
 

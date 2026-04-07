@@ -3,7 +3,7 @@ from enum import StrEnum
 
 class SpaceTemplate(StrEnum):
     PROJECT = "project"
-    CRM = "crm"
+    DATABASE = "crm"
     KNOWLEDGE_BASE = "knowledge_base"
     SIMPLE = "simple"
 
@@ -160,6 +160,7 @@ class WidgetType(StrEnum):
     STAT_CARD = "stat_card"
     MARKDOWN = "markdown"
     DATA_FEED = "data_feed"
+    GOOGLE_SHEET = "google_sheet"
 
 
 class WidgetSize(StrEnum):

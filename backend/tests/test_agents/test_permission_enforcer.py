@@ -7,13 +7,28 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from contract.enums import GrantLevel, Operation, PermissionRequestStatus
 
+from sqlalchemy import text
+
 from backend.openloop.agents.permission_enforcer import (
     check_permission,
     is_system_blocked,
     map_tool_to_resource,
     match_permission,
 )
-from backend.openloop.db.models import Agent, AgentPermission, PermissionRequest
+from backend.openloop.db.models import Agent, AgentPermission, PermissionRequest, Space
+
+
+def _scope_agent_to_space(db, agent):
+    """Create a space and assign the agent to it so it is treated as a scoped
+    agent (not a system agent) by the permission enforcer."""
+    space = Space(name=f"test-space-{agent.id[:8]}", template="project")
+    db.add(space)
+    db.flush()
+    db.execute(
+        text("INSERT INTO agent_spaces (agent_id, space_id) VALUES (:aid, :sid)"),
+        {"aid": agent.id, "sid": space.id},
+    )
+    return space
 
 # ---------------------------------------------------------------------------
 # map_tool_to_resource
@@ -265,6 +280,7 @@ class TestCheckPermission:
         agent = Agent(name="test-agent", default_model="sonnet")
         db_session.add(agent)
         db_session.flush()
+        _scope_agent_to_space(db_session, agent)
 
         perm = AgentPermission(
             agent_id=agent.id,
@@ -288,6 +304,7 @@ class TestCheckPermission:
         agent = Agent(name="test-agent-deny", default_model="sonnet")
         db_session.add(agent)
         db_session.flush()
+        _scope_agent_to_space(db_session, agent)
 
         perm = AgentPermission(
             agent_id=agent.id,
@@ -310,6 +327,8 @@ class TestCheckPermission:
     async def test_no_matching_permission_returns_deny(self, db_session):
         agent = Agent(name="test-agent-nomatch", default_model="sonnet")
         db_session.add(agent)
+        db_session.flush()
+        _scope_agent_to_space(db_session, agent)
         db_session.commit()
 
         result = await check_permission(
@@ -325,6 +344,7 @@ class TestCheckPermission:
         agent = Agent(name="test-agent-env", default_model="sonnet")
         db_session.add(agent)
         db_session.flush()
+        _scope_agent_to_space(db_session, agent)
 
         # Even with "always" permission, system guardrails take precedence
         perm = AgentPermission(
@@ -348,6 +368,8 @@ class TestCheckPermission:
     async def test_system_guardrail_denies_openloop_db(self, db_session):
         agent = Agent(name="test-agent-db", default_model="sonnet")
         db_session.add(agent)
+        db_session.flush()
+        _scope_agent_to_space(db_session, agent)
         db_session.commit()
 
         result = await check_permission(
@@ -362,6 +384,8 @@ class TestCheckPermission:
     async def test_system_guardrail_denies_ssh(self, db_session):
         agent = Agent(name="test-agent-ssh", default_model="sonnet")
         db_session.add(agent)
+        db_session.flush()
+        _scope_agent_to_space(db_session, agent)
         db_session.commit()
 
         result = await check_permission(
@@ -377,6 +401,7 @@ class TestCheckPermission:
         agent = Agent(name="test-agent-glob", default_model="sonnet")
         db_session.add(agent)
         db_session.flush()
+        _scope_agent_to_space(db_session, agent)
 
         perm = AgentPermission(
             agent_id=agent.id,
@@ -409,6 +434,7 @@ class TestCheckPermissionApproval:
         agent = Agent(name="test-agent-approval", default_model="sonnet")
         db_session.add(agent)
         db_session.flush()
+        _scope_agent_to_space(db_session, agent)
 
         perm = AgentPermission(
             agent_id=agent.id,
@@ -449,6 +475,7 @@ class TestCheckPermissionApproval:
         agent = Agent(name="test-agent-approval-deny", default_model="sonnet")
         db_session.add(agent)
         db_session.flush()
+        _scope_agent_to_space(db_session, agent)
 
         perm = AgentPermission(
             agent_id=agent.id,
@@ -479,6 +506,7 @@ class TestCheckPermissionApproval:
         agent = Agent(name="test-agent-event", default_model="sonnet")
         db_session.add(agent)
         db_session.flush()
+        _scope_agent_to_space(db_session, agent)
 
         perm = AgentPermission(
             agent_id=agent.id,

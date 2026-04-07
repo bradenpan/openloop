@@ -8,6 +8,7 @@ from contract.enums import ConversationStatus
 
 from backend.openloop.api.schemas import (
     ConversationCreate,
+    ConversationUpdate,
     ConversationResponse,
     MessageCreate,
     MessageResponse,
@@ -54,6 +55,18 @@ def list_conversations(
 @router.get("/{conversation_id}", response_model=ConversationResponse)
 def get_conversation(conversation_id: str, db: Session = Depends(get_db)) -> ConversationResponse:
     conv = conversation_service.get_conversation(db, conversation_id)
+    return ConversationResponse.model_validate(conv)
+
+
+@router.patch("/{conversation_id}", response_model=ConversationResponse)
+def update_conversation(
+    conversation_id: str,
+    body: ConversationUpdate,
+    db: Session = Depends(get_db),
+) -> ConversationResponse:
+    conv = conversation_service.update_conversation(
+        db, conversation_id, **body.model_dump(exclude_unset=True)
+    )
     return ConversationResponse.model_validate(conv)
 
 

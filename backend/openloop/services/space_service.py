@@ -19,12 +19,12 @@ _TEMPLATE_DEFAULTS: dict[str, dict] = {
     },
     "knowledge_base": {
         "board_enabled": True,
-        "default_view": "list",
+        "default_view": "table",
         "board_columns": ["todo", "in_progress", "done"],
     },
     "simple": {
         "board_enabled": True,
-        "default_view": "list",
+        "default_view": "table",
         "board_columns": ["todo", "in_progress", "done"],
     },
 }

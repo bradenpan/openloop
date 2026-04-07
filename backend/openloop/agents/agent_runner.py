@@ -819,6 +819,10 @@ async def _run_interactive_inner(
             output_tokens=output_tokens,
         )
 
+    # Auto-title the conversation after the first exchange (heuristic: first sentence)
+    if is_first_message and full_response:
+        _auto_title_conversation(db, conversation_id, user_message=message)
+
     # Signal stream completion to frontend
     from backend.openloop.agents.event_bus import event_bus
 
@@ -830,6 +834,47 @@ async def _run_interactive_inner(
     # Monitor context usage after each response
     if result_message and hasattr(result_message, "usage") and result_message.usage:
         await monitor_context_usage(db, conversation_id=conversation_id, usage=result_message.usage)
+
+
+# ---------------------------------------------------------------------------
+# Auto-title conversation (heuristic — no LLM call)
+# ---------------------------------------------------------------------------
+
+
+def _auto_title_conversation(
+    db: Session,
+    conversation_id: str,
+    user_message: str,
+) -> None:
+    """Generate a title from the first sentence of the user's first message.
+
+    Only renames if the conversation still has the auto-generated timestamp
+    name (starts with "Chat "). If the user already renamed it, this is a no-op.
+    """
+    import re
+
+    try:
+        conversation = conversation_service.get_conversation(db, conversation_id)
+
+        # Don't overwrite user-set names
+        if not conversation.name or not conversation.name.startswith("Chat "):
+            return
+
+        # Extract first sentence (split on . ? ! or newline)
+        first_sentence = re.split(r'[.?!\n]', user_message.strip(), maxsplit=1)[0].strip()
+
+        if not first_sentence:
+            return
+
+        # Truncate at word boundary, cap at 60 chars
+        if len(first_sentence) > 60:
+            truncated = first_sentence[:60].rsplit(" ", 1)[0]
+            first_sentence = truncated or first_sentence[:60]
+
+        conversation_service.update_conversation(db, conversation_id, name=first_sentence)
+        logger.info("Auto-titled conversation %s: %s", conversation_id, first_sentence)
+    except Exception:
+        logger.warning("Failed to auto-title conversation %s", conversation_id, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

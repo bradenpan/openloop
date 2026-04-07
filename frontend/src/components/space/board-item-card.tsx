@@ -1,4 +1,7 @@
+import { useState, useEffect, useRef } from 'react';
 import { useSortable } from '@dnd-kit/sortable';
+import { useQueryClient } from '@tanstack/react-query';
+import { $api } from '../../api/hooks';
 import { Badge } from '../ui';
 import type { components } from '../../api/types';
 
@@ -15,6 +18,7 @@ interface BoardItemCardProps {
 }
 
 export function BoardItemCard({ item, onClick }: BoardItemCardProps) {
+  const queryClient = useQueryClient();
   const {
     attributes,
     listeners,
@@ -23,6 +27,23 @@ export function BoardItemCard({ item, onClick }: BoardItemCardProps) {
     transition,
     isDragging,
   } = useSortable({ id: item.id, data: { item } });
+
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const confirmTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset confirm state after 3 seconds
+  useEffect(() => {
+    if (confirmArchive) {
+      confirmTimer.current = setTimeout(() => setConfirmArchive(false), 3000);
+      return () => { if (confirmTimer.current) clearTimeout(confirmTimer.current); };
+    }
+  }, [confirmArchive]);
+
+  const archiveItem = $api.useMutation('post', '/api/v1/items/{item_id}/archive', {
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['get', '/api/v1/items'] });
+    },
+  });
 
   const style = {
     transform: toTransformString(transform),
@@ -37,8 +58,41 @@ export function BoardItemCard({ item, onClick }: BoardItemCardProps) {
       {...attributes}
       {...listeners}
       onClick={onClick}
-      className="bg-surface border border-border rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-primary/40 transition-colors group"
+      className="bg-surface border border-border rounded-lg p-3 cursor-grab active:cursor-grabbing hover:border-primary/40 transition-colors group relative"
     >
+      <button
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (confirmArchive) {
+            archiveItem.mutate({ params: { path: { item_id: item.id } } });
+            setConfirmArchive(false);
+          } else {
+            setConfirmArchive(true);
+          }
+        }}
+        onBlur={() => setConfirmArchive(false)}
+        className={`absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-all cursor-pointer p-1 rounded ${
+          confirmArchive
+            ? 'text-destructive bg-destructive/10 opacity-100'
+            : 'text-muted hover:text-foreground hover:bg-raised'
+        }`}
+        aria-label={confirmArchive ? 'Confirm archive' : 'Archive item'}
+        title={confirmArchive ? 'Click again to confirm' : 'Archive'}
+      >
+        {confirmArchive ? (
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M11.5 3.5L5.5 10l-3-3" />
+          </svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+            <rect x="1" y="2" width="14" height="4" rx="1" />
+            <path d="M2 6v7a1 1 0 001 1h10a1 1 0 001-1V6" />
+            <path d="M6 9h4" />
+          </svg>
+        )}
+      </button>
+
       <p className="text-sm font-medium text-foreground leading-snug mb-2 group-hover:text-primary transition-colors">
         {item.title}
       </p>

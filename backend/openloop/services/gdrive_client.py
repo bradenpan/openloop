@@ -19,13 +19,13 @@ from backend.openloop.services import google_auth
 
 logger = logging.getLogger(__name__)
 
-# Least-privilege scopes:
-#   drive.readonly — list/read/export files in linked folders (files the user owns)
-#   drive.file     — create files in specific folders (only files this app created)
+# Scopes:
+#   drive — full read/write access to files. OpenLoop enforces folder-level
+#   restrictions at the application layer (agents can only access files in
+#   Drive folders linked to their spaces via DataSources).
 # Changing scopes requires re-authentication: delete token.json and re-authorize.
 SCOPES = [
-    "https://www.googleapis.com/auth/drive.readonly",
-    "https://www.googleapis.com/auth/drive.file",
+    "https://www.googleapis.com/auth/drive",
 ]
 
 # Register Drive scopes with the shared OAuth infrastructure
@@ -179,4 +179,78 @@ def create_file(
         .create(body=file_metadata, media_body=media, fields="id, name, mimeType")
         .execute()
     )
+    return file
+
+
+def update_file(
+    file_id: str,
+    content: str,
+    mime_type: str = "text/plain",
+) -> dict:
+    """Update the content of an existing Drive file.
+
+    Cannot update native Google Docs/Sheets/Slides — the API rejects
+    media uploads on native formats. Use the Google Docs editor instead.
+
+    Returns file metadata dict with id, name, mimeType.
+    """
+    service = get_drive_service()
+
+    # Check if file is a native Google format (cannot accept media upload)
+    file_meta = service.files().get(fileId=file_id, fields="mimeType").execute()
+    if file_meta.get("mimeType") in _GOOGLE_EXPORT_MAP:
+        raise ValueError(
+            f"Cannot update native Google format ({file_meta['mimeType']}). "
+            "Use the Google Docs/Sheets/Slides editor instead."
+        )
+
+    media = MediaIoBaseUpload(
+        io.BytesIO(content.encode("utf-8")),
+        mimetype=mime_type,
+        resumable=False,
+    )
+
+    file = (
+        service.files()
+        .update(fileId=file_id, media_body=media, fields="id, name, mimeType")
+        .execute()
+    )
+    return file
+
+
+def rename_file(file_id: str, new_name: str) -> dict:
+    """Rename a Drive file.
+
+    Returns file metadata dict with id, name, mimeType.
+    """
+    service = get_drive_service()
+
+    file = (
+        service.files()
+        .update(fileId=file_id, body={"name": new_name}, fields="id, name, mimeType")
+        .execute()
+    )
+    return file
+
+
+def move_file(file_id: str, new_folder_id: str) -> dict:
+    """Move a Drive file to a different folder.
+
+    Returns file metadata dict with id, name, mimeType, parents.
+    """
+    service = get_drive_service()
+
+    # Get current parents to remove
+    current = service.files().get(fileId=file_id, fields="parents").execute()
+    previous_parents = ",".join(current.get("parents", []))
+
+    update_kwargs: dict = {
+        "fileId": file_id,
+        "addParents": new_folder_id,
+        "fields": "id, name, mimeType, parents",
+    }
+    if previous_parents:
+        update_kwargs["removeParents"] = previous_parents
+
+    file = service.files().update(**update_kwargs).execute()
     return file

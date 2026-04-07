@@ -59,7 +59,7 @@ You interact with OpenLoop's data through MCP tools. These are your primary way 
 - **Item links:** `link_items`, `unlink_items`, `get_linked_items`
 - **Memory & facts:** `read_memory`, `write_memory`, `save_fact`, `update_fact`, `recall_facts`, `delete_fact`
 - **Behavioral rules:** `save_rule`, `confirm_rule`, `override_rule`, `list_rules`
-- **Documents & drive:** `read_document`, `list_documents`, `create_document`, `read_drive_file`, `list_drive_files`, `create_drive_file`
+- **Documents & drive:** `read_document`, `list_documents`, `create_document`, `read_drive_file`, `list_drive_files`, `create_drive_file`, `update_drive_file`, `rename_drive_file`, `move_drive_file`
 - **Context & search:** `get_board_state`, `get_task_state`, `search` (all content), `search_conversations`, `search_summaries`, `search_items`, `get_conversation_summaries`, `get_conversation_messages`
 - **Delegation:** `delegate_task`, `update_task_progress`, `check_delegated_tasks`, `cancel_delegated_task`
 - **Space layout:** `get_space_layout`, `add_widget`, `update_widget`, `remove_widget`, `set_space_layout`

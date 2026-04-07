@@ -9,7 +9,7 @@
 
 OpenLoop is a coordination layer between a human, a web UI, and multiple Claude Max sessions. It doesn't do AI work — it manages the plumbing: routing messages, storing state, assembling context, enforcing permissions, and tracking what agents are doing.
 
-**Key terminology change:** "Projects" are now **Spaces** — a broader abstraction that can be a project, a knowledge base, a CRM, or a simple task list. All tracked work is an **item** (task or record) in a single unified model — views (list, kanban, table) are presentation, not data model. **Odin** is the always-visible AI front door at the bottom of the screen (Haiku-powered), replacing the separate command bar.
+**Key terminology change:** "Projects" are now **Spaces** — a broader abstraction that can be a project, a knowledge base, a database (CRM-style records), or a simple task list. All tracked work is an **item** (task or record) in a single unified model — views (list, kanban, table) are presentation, not data model. **Odin** is the always-visible AI front door at the bottom of the screen (Haiku-powered), replacing the separate command bar.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -87,7 +87,7 @@ This means every OpenLoop agent is, at the infrastructure level, a Claude Code s
 - **Multi-agent identity** — Claude Code is one agent in one terminal. OpenLoop runs multiple agents simultaneously, each with a distinct system prompt, tool set, and permission boundary, organized by domain (recruiting, code, health, etc.).
 - **Structured context injection** — Claude Code gets CLAUDE.md files and whatever it reads during a conversation. OpenLoop assembles ~13,400 tokens of curated context before every first message: universal base instructions (core principles, anti-sycophancy, reasoning rules), agent identity and personality, behavioral rules, conversation summaries, scored facts, live board state, and working memory (calendar events, email inbox summary) — ranked by importance and ordered for maximum model attention.
 - **Persistent memory across conversations** — Claude Code's memory is per-project markdown files. OpenLoop has four-tier memory (semantic facts, episodic summaries, procedural rules, working state) with write-time dedup, temporal tracking, scored retrieval, and lifecycle management. An agent on conversation #30 knows decisions from conversation #2.
-- **Work tracking** — items (tasks, records), boards, spaces, CRM pipelines. Agents read and write structured data, not just files.
+- **Work tracking** — items (tasks, records), boards, spaces, database pipelines. Agents read and write structured data, not just files.
 - **Permission enforcement** — every tool call goes through a permission layer with per-agent, per-resource, per-operation grants. Claude Code has its own permission model, but OpenLoop adds domain-specific controls (e.g., "this agent can read Drive files but needs approval to edit them").
 - **Orchestration** — background delegation with managed turn loops, mid-task steering, progress tracking, automation scheduling. Claude Code runs one conversation at a time in a terminal. OpenLoop coordinates multiple concurrent agents working autonomously.
 - **Resilience** — stale session recovery (if an SDK session expires, retry with fresh context automatically), rate limit retry with exponential backoff, crash recovery, proactive context compression.
@@ -111,10 +111,12 @@ The web UI. Displays data, sends user actions, receives streamed responses.
 
 **Key UI surfaces:**
 - Home dashboard (cross-space)
-- Space view (widget-based layout: kanban, table, task list, conversations, charts, data feeds — configurable per space)
+- Space view (widget-based layout: kanban, table, task list, conversations, document panel, Google Sheet embed, calendar events, email feed, charts, data feeds — configurable per space)
+- Chat tab (`chat-tab.tsx`) — conversation-focused workspace within each space. Collapsible conversation list sidebar (left), browser-style conversation tabs in the center (unlimited, with overflow scroll), and an optional widget column (right). Uses `useReducer` for tab state management. Tab state persists to `localStorage` across sessions. ARIA roles on tab elements for accessibility.
 - Conversation panel (chat interface with streaming)
 - Agent monitoring (status indicators, expandable logs)
 - Settings (agents, permissions, spaces)
+- Space Settings panel (tabs: Layout, Stages, Fields, Memory, History, plus Danger Zone for delete)
 
 **State management:** Zustand for UI state (current space, selected item, panel state). React Query for server state (tasks, conversations, agents). SSE for real-time streaming.
 
@@ -126,7 +128,7 @@ The REST API and SSE endpoints. Thin layer — validates input, calls services, 
 
 ```
 # Spaces
-POST   /api/v1/spaces                      Create space (with template: project, crm, knowledge_base, simple)
+POST   /api/v1/spaces                      Create space (with template: project, database, knowledge_base, simple)
 GET    /api/v1/spaces                      List spaces
 GET    /api/v1/spaces/{id}                 Get space detail + config
 PATCH  /api/v1/spaces/{id}                 Update space config
@@ -156,6 +158,7 @@ POST   /api/v1/conversations               Start new conversation (with agent_id
 GET    /api/v1/conversations               List conversations (filters: space, status, cross-space)
 GET    /api/v1/conversations/{id}          Get conversation detail + message history
 POST   /api/v1/conversations/{id}/messages Send message (response streams via SSE)
+PATCH  /api/v1/conversations/{id}          Update conversation (name, model_override, agent_id). agent_id=None rejected with 422.
 POST   /api/v1/conversations/{id}/close    Close conversation (triggers summary generation)
 POST   /api/v1/conversations/{id}/reopen   Reopen closed conversation
 
@@ -255,12 +258,12 @@ Business logic. Stateless functions that operate on the database and coordinate 
 - **SpaceService** — CRUD, configuration, templates, linked data sources, board enable/disable
 - **ItemService** — unified item (task and record) CRUD, is_done toggle with bidirectional stage sync, stage transitions, lightweight creation (title + space_id minimum), custom fields for records, archive, cross-space task listing, default stage assignment for board-enabled spaces
 - **ItemLinkService** — create, delete, list associations between items (many-to-many via `item_links` table)
-- **ConversationService** — create, list, get history, close (trigger summary), reopen. Manages the mapping between conversations and SDK sessions.
+- **ConversationService** — create, list, get history, close (trigger summary), reopen. Manages the mapping between conversations and SDK sessions. When `agent_id` changes on a conversation update, `sdk_session_id` is force-cleared via `kwargs['sdk_session_id'] = None`. The next message starts a fresh session with the new agent's context assembly.
 - **OdinService** — system-level agent session management. Routes Odin messages to a persistent Haiku session. Handles routing instructions (open conversation, create task, navigate) and delegates complex requests.
 - **DataSourceService** — manage connected data sources per space (Drive folders, repos, API integrations). Config storage, status tracking, refresh scheduling.
 - **NotificationService** — create, list, mark read. Stores notifications for background task completion, permission requests, proactive alerts. Feeds the Home dashboard and SSE event stream.
 - **AgentRunner** — a thin wrapper around the Claude SDK's `query()` function. No in-memory session state — the DB is the single source of truth for `sdk_session_id`. Functions:
-  - `run_interactive(db, conversation_id, message)` → sends a message (handles both first message and continuation). First message assembles context and passes it as `system_prompt` in `ClaudeAgentOptions`; subsequent messages use `resume=sdk_session_id`. Returns an async stream of response chunks.
+  - `run_interactive(db, conversation_id, message)` → sends a message (handles both first message and continuation). First message assembles context and passes it as `system_prompt` in `ClaudeAgentOptions`; subsequent messages use `resume=sdk_session_id`. Returns an async stream of response chunks. On `is_first_message`, calls `_auto_title_conversation()` — heuristic: first sentence of user message, 60-char word-boundary truncation. Skips if the conversation name doesn't start with `'Chat '` (indicating user rename). Frontend picks up the new title via conversations query invalidation on `stream_end`.
   - `close_conversation(db, conversation_id)` → triggers summary generation, memory flush, consolidation check, and closes the conversation in the DB
   - `delegate_background(db, agent_id, instruction, ...)` → runs autonomous agent work in a managed turn loop
   - `steer(conversation_id, message)` → mid-task course correction for background tasks
@@ -757,6 +760,12 @@ Odin is a system-level agent that runs on Haiku. It is always visible at the bot
 │    agent config files                        │
 │  - Block: self-permission-escalation         │
 │  - Block: modifying other agents             │
+│                                              │
+│  System-agent bypass:                        │
+│  System agents (no `agent_spaces` rows) get  │
+│  auto-allowed after system guardrails.       │
+│  Returns 'allow_system_bypass', normalized   │
+│  to 'allow' in audit logs.                   │
 └──────────────────────────────────────────────┘
 ```
 
@@ -898,7 +907,7 @@ spaces
 ├── parent_space_id (FK → spaces, nullable — for future subspaces)
 ├── name (unique)
 ├── description
-├── template ("project" | "crm" | "knowledge_base" | "simple")
+├── template ("project" | "crm" | "knowledge_base" | "simple")  # enum: DATABASE = "crm" (wire value preserved)
 ├── board_enabled (boolean, default true)
 ├── default_view ("list" | "board" | "table" | null)
 ├── board_columns (JSON array, default: ["idea","scoping","todo","in_progress","done"])
@@ -908,13 +917,22 @@ spaces
 space_widgets (configurable layout — each row is one widget in a space's view)
 ├── id (UUID, PK)
 ├── space_id (FK → spaces, indexed)
-├── widget_type (string — "todo_panel" | "kanban_board" | "data_table" | "conversations" |
-│                          "chart" | "stat_card" | "markdown" | "data_feed")
+├── widget_type (string — core: "todo_panel" | "kanban_board" | "data_table" | "conversations" |
+│                          "document_panel" | "google_sheet" | "calendar_events" | "email_feed";
+│                          extended/placeholder: "chart" | "stat_card" | "markdown" | "data_feed")
 ├── position (integer — ordering within layout, 0-indexed)
 ├── size (string — "small" | "medium" | "large" | "full")
 ├── config (JSON — widget-specific: columns for kanban, data source ref for charts, field list for tables, etc.)
 ├── created_at
 └── updated_at
+
+Layout rendering: sidebar widgets (`todo_panel`, `conversations`) render in a flex row alongside the
+CSS grid of content widgets. Collapsing a sidebar widget gives its space to the `flex-1` center content area.
+
+Core views (Board, Table, Chat, Files) are rendered directly by `Space.tsx` via component imports, not through the widget grid. The widget system is used only for sidebars, the Sheet tab, and the Chat tab's widget column. All templates create the same core widget set (task panel, kanban board, data table, conversations). Templates differ only in default view and board column names.
+
+`google_sheet` widget: iframe embed of Google Sheets, restricted to `docs.google.com` hostname.
+Sheet URL stored in `widget.config.sheet_url`.
 
 items (unified — tasks and records)
 ├── id (UUID, PK)
@@ -1972,9 +1990,9 @@ Restore = replace the SQLite file with a backup copy and restart the backend. Co
 8. **Future remote access** — API-first design. Every operation is an API call. Discord/Slack/mobile clients plug in without rearchitecting.
 9. **Clean agent creation** — Agent Builder designs agents through conversation. Permission matrix set at creation time.
 10. **Automations** — cron-based scheduled agent runs with full run history. Same agents, permissions, and tools as manual conversations. Automation dashboard for visibility.
-11. **CRM and task views** — same data, different views. Board for tasks, table for records. Per-space defaults.
+11. **Database and task views** — same data, different views. Board for tasks, table for CRM-style records. Per-space defaults.
 12. **Tasks everywhere** — lightweight checklist (list view) in every space plus cross-space aggregation on Home.
-13. **Flexible spaces** — not everything is a "project." Knowledge bases, CRM systems, simple task lists. Template-based creation with widget-based layouts.
+13. **Flexible spaces** — not everything is a "project." Knowledge bases, database/CRM-style systems, simple task lists. Template-based creation with widget-based layouts.
 14. **Agent-designed layouts** — agents can read, modify, and fully redesign space layouts via MCP tools. "Redesign my health space with Garmin charts" is a tool call, not a feature request. Templates provide defaults; agents and users customize from there.
 15. **Autonomous goal pursuit** — agents work independently for hours with context compaction, self-directed task lists, and adaptive planning. Token and time budgets prevent runaway usage.
 16. **Permission inheritance** — sub-agents inherit the parent's full permissions by default. Permissions can never widen beyond the parent's scope. Enforced through a single codepath.

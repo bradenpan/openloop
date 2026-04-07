@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 from fnmatch import fnmatch
 
 from contract.enums import GrantLevel, NotificationType, Operation, PermissionRequestStatus
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.openloop.db.models import AgentPermission, PermissionRequest
@@ -272,6 +273,9 @@ _MCP_TOOL_MAP: dict[str, tuple[str, str]] = {
     "read_drive_file": ("google_drive", Operation.READ),
     "list_drive_files": ("google_drive", Operation.READ),
     "create_drive_file": ("google_drive", Operation.CREATE),
+    "update_drive_file": ("google_drive", Operation.EDIT),
+    "rename_drive_file": ("google_drive", Operation.EDIT),
+    "move_drive_file": ("google_drive", Operation.EDIT),
     # Layout tools
     "get_space_layout": ("openloop-spaces", Operation.READ),
     "add_widget": ("openloop-spaces", Operation.CREATE),
@@ -377,9 +381,10 @@ async def check_permission(
     """Check whether an agent can execute a tool call.
 
     Returns:
-        "allow"   - tool call is permitted
-        "deny"    - tool call is blocked
-        "pending" - approval was requested (then resolved); returns final status
+        "allow"               — tool call is permitted (matched permission)
+        "allow_system_bypass" — tool call is permitted (system agent, no space restrictions)
+        "deny"                — tool call is blocked
+        "pending"             — approval was requested (then resolved); returns final status
     """
     # 1. Map tool to (resource, operation)
     resource, operation = map_tool_to_resource(tool_name, tool_input)
@@ -394,23 +399,38 @@ async def check_permission(
         )
         return "deny"
 
-    # 3. Load agent permissions from DB
+    # 3. System-agent bypass: agents with no space restrictions (e.g. Odin)
+    #    have no agent_spaces rows and are granted unrestricted access.
+    #    Consistent with _get_agent_space_ids() in mcp_tools.py.
+    space_row = db.execute(
+        text("SELECT 1 FROM agent_spaces WHERE agent_id = :aid LIMIT 1"),
+        {"aid": agent_id},
+    ).fetchone()
+    if space_row is None:
+        logger.info(
+            "System agent bypass: allowing %s for agent %s (no space restrictions)",
+            tool_name,
+            agent_id,
+        )
+        return "allow_system_bypass"
+
+    # 4. Load agent permissions from DB
     permissions: list[AgentPermission] = (
         db.query(AgentPermission).filter(AgentPermission.agent_id == agent_id).all()
     )
 
-    # 4. Match against permission matrix
+    # 5. Match against permission matrix
     grant = match_permission(resource, permissions, operation)
 
-    # 5. "always" -> allow
+    # 6. "always" -> allow
     if grant == GrantLevel.ALWAYS:
         return "allow"
 
-    # 6. "never" -> deny
+    # 7. "never" -> deny
     if grant == GrantLevel.NEVER:
         return "deny"
 
-    # 7. "approval" -> create request, publish event, poll for resolution
+    # 8. "approval" -> create request, publish event, poll for resolution
     if grant == GrantLevel.APPROVAL:
         request = PermissionRequest(
             agent_id=agent_id,
@@ -488,23 +508,36 @@ async def _check_permission_autonomous(
         )
         return "deny"
 
-    # 3. Load agent permissions from DB
+    # 3. System-agent bypass (same as check_permission)
+    space_row = db.execute(
+        text("SELECT 1 FROM agent_spaces WHERE agent_id = :aid LIMIT 1"),
+        {"aid": agent_id},
+    ).fetchone()
+    if space_row is None:
+        logger.info(
+            "System agent bypass (autonomous): allowing %s for agent %s",
+            tool_name,
+            agent_id,
+        )
+        return "allow_system_bypass"
+
+    # 4. Load agent permissions from DB
     permissions: list[AgentPermission] = (
         db.query(AgentPermission).filter(AgentPermission.agent_id == agent_id).all()
     )
 
-    # 4. Match against permission matrix
+    # 5. Match against permission matrix
     grant = match_permission(resource, permissions, operation)
 
-    # 5. "always" -> allow
+    # 6. "always" -> allow
     if grant == GrantLevel.ALWAYS:
         return "allow"
 
-    # 6. "never" -> deny
+    # 7. "never" -> deny
     if grant == GrantLevel.NEVER:
         return "deny"
 
-    # 7. "approval" -> queue instead of blocking
+    # 8. "approval" -> queue instead of blocking
     if grant == GrantLevel.APPROVAL:
         if not background_task_id:
             logger.warning(
@@ -690,9 +723,9 @@ def build_permission_hook(
             finally:
                 db.close()
 
-        # Audit log the permission decision
+        # Audit log the permission decision (normalize system bypass to plain "allow")
         resource, operation = map_tool_to_resource(tool_name, tool_input)
-        audit_action = result  # "allow", "deny", "approval_queued"
+        audit_action = "allow" if result in ("allow", "allow_system_bypass") else result
         # Build a redacted summary of tool inputs (strip long values, mask secrets)
         input_summary = _redact_tool_input(tool_input)
 
@@ -715,7 +748,7 @@ def build_permission_hook(
         finally:
             audit_db.close()
 
-        if result == "allow":
+        if result in ("allow", "allow_system_bypass"):
             # Empty dict = allow the tool call to proceed
             return {}
         elif result == "approval_queued":

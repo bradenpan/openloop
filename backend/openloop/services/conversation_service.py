@@ -98,7 +98,13 @@ def reopen_conversation(db: Session, conversation_id: str) -> Conversation:
 def update_conversation(db: Session, conversation_id: str, **kwargs) -> Conversation:
     """Update conversation fields (name, model_override, sdk_session_id, status)."""
     conv = get_conversation(db, conversation_id)
-    updatable = {"name", "model_override", "sdk_session_id", "status"}
+    updatable = {"name", "model_override", "sdk_session_id", "status", "agent_id"}
+    if "agent_id" in kwargs and kwargs["agent_id"] is None:
+        raise HTTPException(status_code=422, detail="agent_id cannot be null")
+    if "agent_id" in kwargs:
+        agent = db.query(Agent).filter(Agent.id == kwargs["agent_id"]).first()
+        if not agent:
+            raise HTTPException(status_code=404, detail="Agent not found")
     if "status" in kwargs and kwargs["status"] is not None:
         valid = {s.value for s in ConversationStatus}
         if kwargs["status"] not in valid:
@@ -106,6 +112,11 @@ def update_conversation(db: Session, conversation_id: str, **kwargs) -> Conversa
                 status_code=422,
                 detail=f"Invalid status '{kwargs['status']}'. Valid: {sorted(valid)}",
             )
+    # If agent_id is changing, clear the SDK session so the next message
+    # starts fresh with the new agent's context (system prompt, tools, personality)
+    if "agent_id" in kwargs and kwargs["agent_id"] != conv.agent_id:
+        kwargs["sdk_session_id"] = None  # Force-clear; new agent needs fresh session
+
     for field, value in kwargs.items():
         if field in updatable:
             setattr(conv, field, value)

@@ -7,6 +7,7 @@ import { ConversationSidebar } from './conversation-sidebar';
 import { DocumentPanel } from './document-panel';
 import { CalendarEventsWidget } from './calendar-events-widget';
 import { EmailFeedWidget } from './email-feed-widget';
+import { GoogleSheetWidget } from './google-sheet-widget';
 
 // Standard widget props that every widget receives
 export interface WidgetProps {
@@ -18,7 +19,7 @@ export interface WidgetProps {
   onSelectDocument?: (documentId: string) => void;
 }
 
-const DEFAULT_COLUMNS = ['Idea', 'Scoping', 'To Do', 'In Progress', 'Done'];
+export const DEFAULT_COLUMNS = ['Idea', 'Scoping', 'To Do', 'In Progress', 'Done'];
 
 // --- Widget wrappers ---
 
@@ -93,6 +94,10 @@ function DocumentPanelWidget({ spaceId, onSelectDocument }: WidgetProps) {
   );
 }
 
+function GoogleSheetWidgetWrapper(props: WidgetProps) {
+  return <GoogleSheetWidget {...props} />;
+}
+
 function PlaceholderWidget({ widgetId, config }: WidgetProps) {
   const label = config?.label as string | undefined;
 
@@ -130,6 +135,7 @@ const registry: Record<string, ComponentType<WidgetProps>> = {
   document_panel: DocumentPanelWidget,
   calendar_events: CalendarEventsWidget,
   email_feed: EmailFeedWidget,
+  google_sheet: GoogleSheetWidgetWrapper,
   // Extended types render placeholders
   chart: PlaceholderWidget,
   stat_card: PlaceholderWidget,
